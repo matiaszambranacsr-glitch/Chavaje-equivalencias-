@@ -1866,6 +1866,42 @@ if pagina == PAGINAS[0]:
                             else:
                                 st.caption("Tampoco tenés cargado el código nuevo.")
 
+                        # EL CÓDIGO DE MANN O DE SKF QUE NO TENÉS: su ficha puede nombrar algo
+                        # tuyo (ver buscar_en_la_ficha_del_fabricante()). Con un botón, porque
+                        # sale a internet, y solo con sesión: un cliente que mira no dispara
+                        # pedidos a un sitio ajeno. Lo leído queda hasta cerrar la pestaña.
+                        _cat_fab = (catalogo_que_publica(codigo_individual)
+                                    if not solo_mirar() else None)
+                        if _cat_fab:
+                            _fichas_fab = st.session_state.setdefault(
+                                "_fichas_de_fabricante_leidas", {})
+                            if clean not in _fichas_fab and st.button(
+                                    f"🌐 Buscarlo en la ficha de {_cat_fab}",
+                                    key=f"ficha_fabricante_{clean}",
+                                    help=f"Abre la ficha de {codigo_individual} en el sitio de "
+                                         f"{_cat_fab} y te dice qué productos tuyos nombra: "
+                                         "sus números originales o la misma pieza de otra "
+                                         "marca. Revisalos antes de vender."):
+                                with st.spinner(f"Leyendo la ficha de {_cat_fab}…"):
+                                    _fichas_fab[clean] = buscar_en_la_ficha_del_fabricante(
+                                        codigo_individual)
+                            _fab = _fichas_fab.get(clean)
+                            if _fab and _fab["error"]:
+                                st.caption(f"🌐 {_cat_fab}: {_fab['error']}.")
+                            elif _fab and _fab["productos"]:
+                                st.success(f"🌐 **La ficha de {_cat_fab} nombra "
+                                           f"{len(_fab['productos'])} producto(s) tuyo(s).** "
+                                           "Revisá que sea la misma pieza antes de vender.")
+                                mostrar_lista_clickeable(_fab["productos"], f"fab_{clean}",
+                                                         limite=12)
+                            elif _fab:
+                                st.info(f"🌐 La ficha de {_cat_fab} no nombra ningún "
+                                        "producto tuyo.")
+                            if _fab and _fab["url"] and _fab["error"] != (
+                                    "el fabricante no tiene ficha de ese código"):
+                                st.link_button(f"Ver la ficha en {_cat_fab}", _fab["url"],
+                                               key=f"link_ficha_fabricante_{clean}")
+
                         # Antes de darse por vencido: ¿lo conoce algún catálogo de fabricante?
                         # Ahí figura qué pieza es y a qué autos le va, y con eso se puede
                         # ofrecer un equivalente en vez de perder la venta.

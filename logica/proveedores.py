@@ -967,6 +967,39 @@ def olvidar_pares_de_catalogo_de_otra_pieza():
     return len(sacar)
 
 
+def _sesion_de_catalogo_de_fabricante(cat):
+    base = requests.Session()
+    base.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+    return SesionSoloLectura(base, cat["url"]("X1"))
+
+
+def _leer_la_ficha_de_fabricante(sesion, url):
+    """(texto, error, foto) de una ficha de fabricante. El error es corto y nunca la dirección:
+    «sin ficha», «respondió 403» o el nombre del error. El PermissionError (un freno de
+    SesionSoloLectura) no se ataja: lo maneja quien llama."""
+    texto, err, foto = "", None, ""
+    try:
+        r = sesion.get(url, timeout=20)
+        if r.status_code == 404:
+            err = "sin ficha"
+        elif r.status_code >= 400:
+            err = f"respondió {r.status_code}"
+        elif "pdf" in (r.headers.get("Content-Type") or "").lower():
+            import io as _io
+            import pdfplumber
+            with pdfplumber.open(_io.BytesIO(r.content)) as _pdf:
+                texto = " ".join((pg.extract_text() or "") for pg in _pdf.pages[:5])
+        else:
+            texto = _texto_visible(r.text or "")
+            foto = foto_principal_de_la_pagina(r.text or "", url)
+    except PermissionError:
+        raise
+    except Exception as e:
+        anotar_error("leer_catalogo_de_fabricante", e)
+        err = type(e).__name__
+    return texto, err, foto
+
+
 def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_FICHAS_DE_CATALOGO,
                                 progreso=None, sesion=None):
     """Lee las fichas del fabricante para los códigos que tus descripciones citan y todavía no
@@ -996,34 +1029,16 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     if not faltan:
         return resumen
     if sesion is None:
-        base = requests.Session()
-        base.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
-        sesion = SesionSoloLectura(base, cat["url"]("X1"))
+        sesion = _sesion_de_catalogo_de_fabricante(cat)
     pares, leidas, fallas_seguidas, fallas_de_red = [], [], 0, []
     tanda = faltan[:int(cuantos)]
     for i, cod in enumerate(tanda):
         url = cat["url"](cod)
-        texto, err, foto = "", None, ""
         try:
-            r = sesion.get(url, timeout=20)
-            if r.status_code == 404:
-                err = "sin ficha"
-            elif r.status_code >= 400:
-                err = f"respondió {r.status_code}"
-            elif "pdf" in (r.headers.get("Content-Type") or "").lower():
-                import io as _io
-                import pdfplumber
-                with pdfplumber.open(_io.BytesIO(r.content)) as _pdf:
-                    texto = " ".join((pg.extract_text() or "") for pg in _pdf.pages[:5])
-            else:
-                texto = _texto_visible(r.text or "")
-                foto = foto_principal_de_la_pagina(r.text or "", url)
+            texto, err, foto = _leer_la_ficha_de_fabricante(sesion, url)
         except PermissionError as e:
             resumen["error"] = str(e)
             break
-        except Exception as e:
-            anotar_error("leer_catalogo_de_fabricante", e)
-            err = type(e).__name__
         if not err and sanitizar(cod) not in sanitizar(texto):
             err = "sin ficha"
         if err == "sin ficha":
@@ -1094,6 +1109,81 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
         resumen["nuevos"] = guardar_equivalencias_pendientes(
             [(a, b) for a, b, _o in pares], "catalogo_fabricante", resumen["lote"])
     return resumen
+
+
+# EL CÓDIGO QUE NO TENÉS, EN LA FICHA DE SU FABRICANTE. El 24/10 buscaron «W712/94» —un
+# filtro de MANN— y el buscador no tenía nada que ofrecer: ninguna lista lo tiene ni lo cita.
+# Pero la ficha de MANN lista los números originales del filtro, y alguno puede ser tuyo: un
+# número de fábrica que citan tus listas, o el filtro de otra marca. Es lo mismo que hace
+# leer_catalogo_de_fabricante() con los códigos que tus listas citan, para un código suelto.
+# Va con un botón y no solo: sale a internet, y lo decide el que está atendiendo.
+# Las formas de cada fabricante como se tipean: «W 712/94», «HU 719/7 X», «C 25 114/1», «VKMA
+# 01250». Tener la forma no lo hace de ese fabricante: la ficha tiene que mostrar el código
+# pedido, igual que en la lectura de siempre. NGK no está: para las bujías está «🕯️ ¿Qué
+# bujía le va?», que no necesita internet. La segunda parte es la pieza que tiene que ser lo
+# que la ficha nombra: en la de un filtro, una junta con el mismo número es otra cosa.
+_CODIGO_SUELTO_DE_CADA_CATALOGO = {
+    "MANN-FILTER": (re.compile(r"(?:W|WA|WD|WK|WP|H|HU|C|CU|CUK|CF|CP|P|PF|PU|LB) ?\d{2,5}"
+                               r"(?: \d{1,3})?(?:/\d{1,3})?(?: ?[A-Z]{1,2})?"),
+                    re.compile(r"\bFILTR|\bELEMENTO|\bCARTUCHO")),
+    "SKF": (re.compile(r"VK[A-Z]{1,4} ?\d{4,5}(?: ?[A-Z])?"), None),
+}
+
+
+def catalogo_que_publica(codigo):
+    """El catálogo de fabricante con la forma de este código, escrito como se tipeó, o None.
+    Ver _CODIGO_SUELTO_DE_CADA_CATALOGO."""
+    escrito = re.sub(r"\s+", " ", str(codigo or "").strip().upper())
+    for nombre, (forma, _pieza) in _CODIGO_SUELTO_DE_CADA_CATALOGO.items():
+        if forma.fullmatch(escrito):
+            return nombre
+    return None
+
+
+def buscar_en_la_ficha_del_fabricante(codigo, sesion=None):
+    """Lee la ficha del fabricante de un código que no tenés y dice qué productos tuyos nombra:
+    {"catalogo", "codigo", "url", "productos": [filas como las del buscador], "error"}. El error
+    es una frase corta, sin la dirección. Ver _CODIGO_SUELTO_DE_CADA_CATALOGO."""
+    escrito = re.sub(r"\s+", " ", str(codigo or "").strip().upper())
+    nombre = catalogo_que_publica(escrito)
+    res = {"catalogo": nombre, "codigo": escrito, "url": "", "productos": [], "error": ""}
+    if not nombre:
+        res["error"] = "no tiene la forma de un código de MANN-FILTER ni de SKF"
+        return res
+    cat = CATALOGOS_DE_FABRICANTE[nombre]
+    res["url"] = cat["url"](escrito)
+    try:
+        texto, err, _foto = _leer_la_ficha_de_fabricante(
+            sesion or _sesion_de_catalogo_de_fabricante(cat), res["url"])
+    except PermissionError:
+        texto, err = "", "se cortó por seguridad"
+    clean = sanitizar(escrito)
+    if not err and clean not in sanitizar(texto):
+        err = "sin ficha"
+    if err:
+        res["error"] = ("el fabricante no tiene ficha de ese código" if err == "sin ficha"
+                        else f"no se pudo abrir la ficha ({err})")
+        return res
+    nombrados = [pid for pid, _c in productos_nombrados_en_la_pagina(texto, clean)]
+    if len(nombrados) > MAXIMO_PRODUCTOS_POR_FICHA_DE_FABRICANTE:
+        res["error"] = "la página es un listado, no la ficha de una pieza"
+        return res
+    if not nombrados:
+        return res
+    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                         m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock",
+                         m.tipo AS "_tipo"
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.id IN ({','.join('?' * len(nombrados))})""", nombrados)
+    filas = [dict(r) for r in c.fetchall()]
+    _pieza = _CODIGO_SUELTO_DE_CADA_CATALOGO[nombre][1]
+    if _pieza:
+        filas = [f for f in filas if _pieza.search(normalizar_texto(f["Descripcion"]))]
+    # Primero lo que se vende —tus listas, con stock—, y al final los números de fábrica, que
+    # se abren para ver qué tuyo los cita.
+    res["productos"] = sorted(filas, key=lambda f: (f["_tipo"] == "OEM", -(f["Stock"] or 0),
+                                                    f["Marca"], f["Codigo"]))
+    return res
 
 
 def estado_de_los_catalogos_de_fabricante():

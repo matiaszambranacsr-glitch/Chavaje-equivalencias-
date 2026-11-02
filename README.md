@@ -6967,6 +6967,17 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🌐 El código de MANN o de SKF que no tenés, en la ficha del fabricante
+
+Mirando lo que se buscó de verdad y no se encontró (la tabla de búsquedas sin resultado), el 24/10 pidieron «W712/94», un filtro de aceite de MANN. Ninguna lista lo tiene ni lo cita, y el buscador no tenía nada que ofrecer: ni un código casi igual, ni una familia, ni un texto. Pero la ficha de MANN lista los números originales del filtro, y alguno puede ser tuyo (un número de fábrica que citan tus listas, el filtro de otra marca). La app ya lee esas fichas, en «🏭 Catálogos de fabricantes, solos», para los códigos que tus listas citan; ahora también para el que se tipeó:
+
+- **Cuándo aparece**: el código no está en ninguna lista y tiene la forma de un código de MANN-FILTER («W 712/94», «HU 719/7 X», «C 25 114/1», «WK 853/3 X») o de SKF («VKMA 01250», «VKPC 85304»). Entonces, debajo de «No hay ningún producto con ese código exacto», sale **«🌐 Buscarlo en la ficha de MANN-FILTER»**.
+- **Con un botón, y solo con sesión**: sale a internet, y lo decide el que atiende. Un cliente que mira sin sesión no dispara pedidos a un sitio ajeno. Lo que se manda es el código tipeado, nada de la base. Lo leído queda hasta cerrar la pestaña, y no se vuelve a pedir.
+- **Qué muestra**: los productos tuyos que la ficha nombra, como botones que abren sus equivalencias (primero los de tus listas, con stock, y al final los números de fábrica, que se abren para ver qué tuyo los cita), y un link a la ficha. En la de un filtro solo cuentan filtros: una junta con el mismo número es otra cosa. Revisalos antes de vender: es lo que el fabricante escribió, no una equivalencia aprobada.
+- **Lo que no**: tener la forma no lo hace de ese fabricante. Si la ficha no muestra el código pedido, o el sitio no la tiene, dice «el fabricante no tiene ficha de ese código»; si no se pudo abrir, lo dice sin la dirección. NGK no está: para las bujías está «🕯️ ¿Qué bujía le va?», que no necesita internet.
+
+`buscar_en_la_ficha_del_fabricante()` usa la misma lectura que el catálogo de siempre (`_leer_la_ficha_de_fabricante()`, que quedó aparte para las dos). `pruebas_de_las_fuentes.py` (13) lo controla con fichas de mentira (el filtro sí y la junta no, sin ficha, una portada, un freno sin dirección), y `pruebas_de_las_pantallas.py`, el botón: sin sesión no está, con sesión lee una vez y ofrece lo encontrado. Sin el filtro de la pieza, o con el botón para todos, fallan.
+
 ## 🚚 El Sprint de MWM no es el Chevrolet Sprint
 
 Revisando los pares de Sprint apareció uno que salía 🟠 sin ningún porqué en contra: la «Jta.Carter CHEVROLET SPRINT 4.07T» de TARANTO, vinculada por el barrido con la «Junta para Cárter CHEVROLET SPRINT SWIFT - 1,0 - 61 G10» de ILLINOIS. Sprint se llaman dos cosas que vendió Chevrolet: el motor diésel MWM Sprint de las camionetas (4.07 de 4 cilindros, 6.07 de 6) y el auto, el Sprint que es el Suzuki Swift 1.0. TARANTO anota el motor con la marca y el modelo del auto, así que las dos descripciones «coincidían» en CHEVROLET y SPRINT.

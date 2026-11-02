@@ -701,6 +701,50 @@ def probar(L):
                                                     (_buj12, _grasa12), (_kit12, _grasa12))},
             {tuple(sorted((_buj12, _ngk12)))})
     esperar("catálogo: y cuenta lo que dejó afuera", _res12["otra_pieza"], 3)
+
+    # 13. EL CÓDIGO QUE NO TENÉS, EN LA FICHA DE SU FABRICANTE (ver
+    # buscar_en_la_ficha_del_fabricante()): «W712/94» tiene la forma de MANN y su ficha nombra
+    # el filtro de FISPA (por su número de fábrica) y una junta con un número que también está:
+    # se ofrece el filtro, no la junta. Sin ficha, o si la página no muestra el código, se dice
+    # así; y un freno de la sesión no muestra la dirección.
+    esperar("ficha suelta: qué catálogo tiene la forma de cada código",
+            [ns["catalogo_que_publica"](x) for x in ("W 712/94", "hu 719/7 x", "VKMA 01250",
+                                                      "H80192-00", "BKR6E", "kit 22382")],
+            ["MANN-FILTER", "MANN-FILTER", "SKF", None, None, None])
+    _fil13 = _prod12("030115561AN", "FILTRO DE ACEITE VW GOL 1.6 REF ORIG 030115561AN", _m_f)
+    _prod12("1234567AB", "JUNTA TAPA DE VALVULAS VW GOL", _m_t)
+
+    class _Ficha13:
+        status_code, headers, content = 200, {}, b""
+
+        def __init__(self, texto, estado=200):
+            self.text, self.status_code = texto, estado
+
+    class _Sesion13:
+        def __init__(self, texto, estado=200, freno=False):
+            self.texto, self.estado, self.freno, self.pedidas = texto, estado, freno, []
+
+        def get(self, url, **k):
+            self.pedidas.append(url)
+            if self.freno:
+                raise PermissionError("Bloqueado: https://ejemplo.invalid/clave=1")
+            return _Ficha13(self.texto, self.estado)
+    _ses13 = _Sesion13("<html>MANN-FILTER W 712/94 Oil filter · OE 030115561AN · 1234567AB</html>")
+    _r13 = ns["buscar_en_la_ficha_del_fabricante"]("W 712/94", sesion=_ses13)
+    esperar("ficha suelta: se ofrece el filtro, no la junta",
+            ([f["ID"] for f in _r13["productos"]], _r13["error"],
+             _ses13.pedidas[0].endswith("/w712/94_mann-filter.html")), ([_fil13], "", True))
+    esperar("ficha suelta: sin ficha",
+            ns["buscar_en_la_ficha_del_fabricante"]("W712/94", sesion=_Sesion13("", 404))["error"],
+            "el fabricante no tiene ficha de ese código")
+    esperar("ficha suelta: la página no muestra el código",
+            ns["buscar_en_la_ficha_del_fabricante"](
+                "W712/94", sesion=_Sesion13("<html>MANN-FILTER portada</html>"))["error"],
+            "el fabricante no tiene ficha de ese código")
+    _err13 = ns["buscar_en_la_ficha_del_fabricante"]("W712/94",
+                                                     sesion=_Sesion13("", freno=True))["error"]
+    esperar("ficha suelta: el freno de la sesión, sin la dirección",
+            (bool(_err13), "http" in _err13 or "clave" in _err13), (True, False))
     return fallas
 
 

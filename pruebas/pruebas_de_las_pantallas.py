@@ -214,6 +214,12 @@ def probar():
     [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     if len(consultar()) != 1:
         fallas.append(f"sin sesión y sin resultados, consultar por WhatsApp: {consultar()}")
+    # Un código de MANN que no está: sin sesión no se ofrece salir a buscarlo a la ficha del
+    # fabricante (ver buscar_en_la_ficha_del_fabricante()). Con sesión, sí: más abajo.
+    at.text_input(key="busqueda_input").set_value("W712/94")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    if [b for b in at.button if (b.key or "").startswith("ficha_fabricante_")]:
+        fallas.append("sin sesión, el botón de la ficha del fabricante")
     # Un error de tipeo: el código que se escribe casi igual se ofrece como botón, y tocarlo
     # lo busca (ver codigos_por_tipeo()).
     at.text_input(key="busqueda_input").set_value("F101")
@@ -345,6 +351,39 @@ def probar():
         fallas.append("con sesión no hace falta «Consultar por WhatsApp»")
     if not del_proveedor():
         fallas.append("con sesión tienen que estar los links al proveedor")
+    # 🌐 El código de MANN que no tenés, en la ficha del fabricante: con un botón, y lo que la
+    # ficha nombra queda como botones para abrirlo. Sin salir a internet: la lectura se cambia
+    # por una de mentira que «encuentra» el F100.
+    _g_fab = ns["buscar_en_la_ficha_del_fabricante"].__globals__
+    _leer_fab = _g_fab["buscar_en_la_ficha_del_fabricante"]
+    _pedidas_fab = []
+
+    def _ficha_de_mentira(codigo, sesion=None):
+        _pedidas_fab.append(codigo)
+        return {"catalogo": "MANN-FILTER", "codigo": codigo, "url": "https://ejemplo.invalid/f",
+                "error": "", "productos": [dict(r) for r in c.execute(
+                    'SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS '
+                    '"Descripcion", m.nombre AS "Marca", p.precio AS "Precio", p.stock AS '
+                    '"Stock" FROM productos p JOIN marcas m ON m.id = p.marca_id '
+                    "WHERE p.codigo_clean = 'F100'")]}
+    _g_fab["buscar_en_la_ficha_del_fabricante"] = _ficha_de_mentira
+    try:
+        at.text_input(key="busqueda_input").set_value("W712/94")
+        [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+        _boton_fab = [b for b in at.button if (b.key or "").startswith("ficha_fabricante_")]
+        if not _boton_fab:
+            fallas.append("con sesión, un código de MANN que no está: falta el botón de la ficha")
+        else:
+            _boton_fab[0].click().run()
+            at.run()
+            if (_pedidas_fab != ["W712/94"]
+                    or not any("La ficha de MANN-FILTER nombra 1" in x.value for x in at.success)
+                    or not [b for b in at.button if (b.key or "").startswith("fab_W71294_")]
+                    or [b for b in at.button if (b.key or "").startswith("ficha_fabricante_")]):
+                fallas.append(f"la ficha del fabricante: {_pedidas_fab}, "
+                              f"{[x.value[:60] for x in at.success]}")
+    finally:
+        _g_fab["buscar_en_la_ficha_del_fabricante"] = _leer_fab
     # El presupuesto se manda derecho por WhatsApp, con lo que tiene y el total.
     _f100 = c.execute("SELECT id FROM productos WHERE codigo_clean = 'F100'").fetchone()[0]
     at.session_state["carrito"] = {_f100: {"codigo": "F100", "marca": "PRUEBA", "descripcion": "",
