@@ -2823,11 +2823,15 @@ def _trabajo_de_fondo():
     # LO CARGADO QUE ES SEGURO OTRA PIEZA, cortado solo si el administrador lo prendió (ver «LO
     # CARGADO QUE ES SEGURO OTRA PIEZA, CORTADO SOLO»). Después de importar o de cambiar las
     # reglas, que es cuando aparece algo nuevo para cortar.
-    if corte_automatico_prendido() and _hay_que_hacerlo("corte_automatico_pendiente"):
+    # LO QUE LA APP HARÍA SOLA, EN LA SALUD. Apagado, no corta nada: mide cuánto cortaría y lo
+    # deja anotado, y diagnostico_de_salud() se lo dice al administrador. Ahí se lee y no se
+    # mide —son 0,4 s con la base real, y la salud corre en todas las pantallas—. El que trabaja
+    # en la app es el que tiene que enterarse de que hay trabajo que la app haría sola.
+    if _hay_que_hacerlo("corte_automatico_pendiente"):
         try:
             ceder_al_mostrador()
-            if cortar_solos_los_que_son_seguro_otra_pieza():
-                invalidar_salud()
+            pasada_del_corte_automatico()
+            invalidar_salud()
             _quedo_hecho("corte_automatico_pendiente")
         except Exception as _err:
             anotar_error("_trabajo_de_fondo/corte_automatico", _err)

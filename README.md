@@ -6967,6 +6967,17 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🤖 La salud avisa lo que la app haría sola y está apagado
+
+El dueño pidió que la app haga más cosas sola. Las dos automatizaciones que borran algo vienen apagadas a propósito —las prende el administrador—: «🤖 Que la app descarte sola» lo 🔴 de la cola y «🤖 Que la app corte sola lo que es seguro otra pieza» de lo cargado. El problema era que nada fuera de su propia pantalla decía que estaban apagadas ni cuánto trabajo harían: en la copia de la base real, 72 vínculos cargados que son seguro otra pieza seguían saliendo en la búsqueda, y más de la mitad de la cola era 🔴.
+
+Ahora, en el panel de salud:
+
+- **«🤖 La app puede cortar sola 72 vínculo(s) que son seguro otra pieza»**, solo al administrador (es el único que puede prenderlo), con el camino hasta el interruptor. El número lo mide la tarea de fondo cada vez que entra una lista o cambian las reglas (`pasada_del_corte_automatico()`: prendido corta, apagado mide), y el panel solo lo lee —medirlo son 0,3 s, y el panel corre en todas las pantallas—. Prendido, el aviso se va.
+- **«7.827 vínculos esperando revisión»** suma, si el descarte está apagado, que lo 🔴 lo puede descartar la app sola y dónde se prende.
+
+Nada se prende solo: avisa, y decide el administrador. `pruebas_de_la_precision.py` (113) lo controla: apagado no corta, anota cuántos y el panel lo dice; prendido corta y el aviso se va. Sin el aviso, o sin anotar el número, falla.
+
 ## 🌀 La junta del turbo no es la junta del agua
 
 Mirando una muestra de los 2.737 vínculos que puso el barrido de descripciones (aprobados en grupo el 28/09), apareció la «Junta Entrada a Turbo Fiat Iveco» de TARANTO (500546) vinculada con la «JTA ENTRADA AGUA FIAT U-25» de IMPERIAL (1488AD3): dos juntas de lugares distintos, y salía 🟠 sin nada en contra. TURBO está entre las palabras de contexto —en «Jta.Tapa Cil. FORD CARGO TURBO» dice qué motor es, no qué pieza—, así que la del turbo quedaba como «junta» a secas.

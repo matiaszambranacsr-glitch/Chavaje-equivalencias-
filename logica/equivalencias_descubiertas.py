@@ -5837,6 +5837,18 @@ def devolver_lo_que_corto_sola():
     return len(pares)
 
 
+def pasada_del_corte_automatico():
+    """La pasada de la tarea de fondo. Prendido, corta lo que es seguro otra pieza; apagado,
+    solo mide cuánto cortaría y lo anota en «corte_automatico_cortaria», que es lo que lee el
+    aviso de diagnostico_de_salud(). Devuelve cuántos quedan por cortar (0 si cortó)."""
+    if corte_automatico_prendido():
+        cortar_solos_los_que_son_seguro_otra_pieza()
+        guardar_config("corte_automatico_cortaria", "0")
+        return 0
+    cuantos = len(vinculos_que_son_seguro_otra_pieza())
+    guardar_config("corte_automatico_cortaria", str(cuantos))
+    return cuantos
+
 def prender_el_corte_automatico(prendido):
     """El interruptor. Al prenderlo queda anotado desde cuándo (lo que una persona apruebe
     después, manda) y se pide la primera pasada a la tarea de fondo."""
@@ -5844,7 +5856,9 @@ def prender_el_corte_automatico(prendido):
     guardar_config(CORTE_AUTOMATICO, "1" if prendido else "0")
     if prendido:
         guardar_config(_CORTE_DESDE, c.execute("SELECT datetime('now', 'localtime')").fetchone()[0])
-        guardar_config("corte_automatico_pendiente", "1")
+    # Prendido, para la primera pasada; apagado, para volver a medir cuánto cortaría (ver
+    # «LO QUE LA APP HARÍA SOLA, EN LA SALUD» en _trabajo_de_fondo()).
+    guardar_config("corte_automatico_pendiente", "1")
 
 
 # ======================================================================

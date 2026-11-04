@@ -3038,6 +3038,30 @@ def probar(L):
             _sprint111("JTA SALIDA TURBO RENAULT M.K9K", "Junta Salida de Escape RENAULT CLIO "
                        "II KANGOO - 1,5/2,0 - K9K/F3R")[1].startswith(
                 ns["_MOTIVOS_QUE_CONTRADICEN"]), False)
+
+    # 113. LO QUE LA APP HARÍA SOLA, EN LA SALUD (ver pasada_del_corte_automatico()): apagado, la
+    # pasada de fondo no corta nada, anota cuántos cortaría y la salud se lo dice al
+    # administrador; prendido, corta (el papel con el filtro del 108) y el aviso se va.
+    def _avisos113():
+        return [(p["titulo"], p["solo_admin"]) for p in ns["diagnostico_de_salud"]()
+                if p["titulo"].startswith("🤖 La app puede cortar sola")]
+    _g113 = ns["pasada_del_corte_automatico"].__globals__
+    _exigir113 = _g113["exigir_nivel"]
+    _g113["exigir_nivel"] = lambda *a, **k: None
+    try:
+        ns["prender_el_corte_automatico"](False)
+        _cuantos113 = ns["pasada_del_corte_automatico"]()
+        _a113 = _avisos113()
+        esperar("apagado: no corta, anota cuántos cortaría y la salud se lo dice al administrador",
+                (_cuantos113 > 0, bool(_vinculo109(_p108, _f108)), len(_a113),
+                 [x[1] for x in _a113]), (True, True, 1, [True]))
+        ns["prender_el_corte_automatico"](True)
+        ns["pasada_del_corte_automatico"]()
+        esperar("prendido: corta y el aviso se va", (_vinculo109(_p108, _f108), _avisos113()),
+                (None, []))
+        ns["devolver_lo_que_corto_sola"]()
+    finally:
+        _g113["exigir_nivel"] = _exigir113
     return fallas
 
 

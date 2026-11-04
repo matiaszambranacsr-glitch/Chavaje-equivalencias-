@@ -489,6 +489,25 @@ def diagnostico_de_salud():
     except (TypeError, ValueError) as _err:
         anotar_error("diagnostico_de_salud/dudosos", _err)
 
+    # LO QUE LA APP HARÍA SOLA Y ESTÁ APAGADO: de los dudosos, los que son seguro otra pieza (un
+    # kit contra lo que trae, lo que juntó un catálogo y es otra pieza). En la copia de la base
+    # real eran 72, y el interruptor que los corta estaba apagado sin que la app lo dijera en
+    # ningún lado salvo adentro de su herramienta. El número lo mide la tarea de fondo (ver «LO
+    # QUE LA APP HARÍA SOLA, EN LA SALUD» en _trabajo_de_fondo()). Solo al administrador: es
+    # el único que lo puede prender.
+    try:
+        _cortaria = int(obtener_config("corte_automatico_cortaria", "0") or 0)
+        if _cortaria and not corte_automatico_prendido():
+            sumar_tecnico("medio", f"🤖 La app puede cortar sola {miles(_cortaria)} vínculo(s) "
+                                   "que son seguro otra pieza",
+                          "Son kits contra lo que traen y lo que juntó un catálogo de "
+                          "fabricante entre piezas distintas: la búsqueda los devuelve igual. "
+                          "Está apagado: con «🤖 Prenderlo» se cortan solos por atrás, ahora "
+                          "y con cada lista nueva, y se devuelven con un toque.",
+                          miga_hasta("Revisar los vínculos que YA están cargados"))
+    except (TypeError, ValueError) as _err:
+        anotar_error("diagnostico_de_salud/corte_automatico", _err)
+
     # LO VENDIDO COMO EQUIVALENTE QUE VOLVIÓ porque no era la pieza, en los últimos 30 días: la
     # métrica principal del tablero (ver tablero_de_calidad()), como alarma. Lo pidió una
     # revisión con ChatGPT («una alarma para humanos: ACCIÓN REQUERIDA, y qué revisar»).
@@ -772,8 +791,15 @@ def diagnostico_de_salud():
         c.execute("SELECT COUNT(*) FROM equivalencias_pendientes")
         pendientes = c.fetchone()[0]
         if pendientes > 500:
+            # Con el descarte automático apagado se dice que existe: más de la mitad de la cola
+            # suele ser 🔴 (en la copia de la base real, 4.394 de 7.542), y eso la app lo saca
+            # sola si se lo prende. Ver «LO QUE LA APP DESCARTA SOLA».
             sumar("medio", f"{miles(pendientes)} vínculos esperando revisión",
-                  "Mientras no se revisen no están cargados, así que el buscador no los usa.",
+                  "Mientras no se revisen no están cargados, así que el buscador no los usa."
+                  + ("" if descarte_automatico_prendido() else
+                     " Lo que el análisis da 🔴 casi seguro mal lo puede descartar la app sola: "
+                     "«🤖 Que la app descarte sola», en esa misma pantalla (está apagado; lo "
+                     "prende el administrador)."),
                   miga_hasta("Equivalencias sugeridas"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
