@@ -6967,6 +6967,14 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🌀 La junta del turbo no es la junta del agua
+
+Mirando una muestra de los 2.737 vínculos que puso el barrido de descripciones (aprobados en grupo el 28/09), apareció la «Junta Entrada a Turbo Fiat Iveco» de TARANTO (500546) vinculada con la «JTA ENTRADA AGUA FIAT U-25» de IMPERIAL (1488AD3): dos juntas de lugares distintos, y salía 🟠 sin nada en contra. TURBO está entre las palabras de contexto —en «Jta.Tapa Cil. FORD CARGO TURBO» dice qué motor es, no qué pieza—, así que la del turbo quedaba como «junta» a secas.
+
+Ahora, cuando el turbo está pegado a la junta o a la boca («Entrada a Turbo», «Salida del Turbo», «Jta.Turbo», «Juntas para Turbo»), es el lugar de la junta (`_RE_JUNTA_DEL_TURBO` en `logica/firmas.py`), y contra el agua, el aceite o el cárter es rojo: «piezas de lugares distintos: TURBO vs AGUA». Contra el escape, la admisión, el múltiple o el colector no choca: el turbo está en ese camino, y «JTA SALIDA TURBO RENAULT M.K9K» contra «Junta Salida de Escape … K9K» puede ser la misma junta o no; eso lo decide una persona (`_sin_el_camino_del_turbo()`). Por lo mismo, al comparar dos filas que citan el mismo número, el turbo no cuenta como lugar.
+
+En la copia de la base real son 203 descripciones con el turbo como lugar (casi todas los «Juego de juntas para Turbo Compresor» de ILLINOIS), y cambia **un solo vínculo**: el de arriba, que pasa a «🔤 Las descripciones dicen que es otra pieza» en «🔎 Analizar los vínculos cargados». La cola, las fichas y lo rechazado, sin cambios. Reglas versión 27. `pruebas_de_la_precision.py` (112) lo controla; sin el turbo como lugar, o con el turbo chocando contra el escape, falla.
+
 ## 🌐 El código de MANN o de SKF que no tenés, en la ficha del fabricante
 
 Si en el mostrador piden «W712/94», un filtro de aceite de MANN, ninguna lista lo tiene ni lo cita, y el buscador no tenía nada que ofrecer: ni un código casi igual, ni una familia, ni un texto. Pero la ficha de MANN lista los números originales del filtro, y alguno puede ser tuyo (un número de fábrica que citan tus listas, el filtro de otra marca). La app ya lee esas fichas, en «🏭 Catálogos de fabricantes, solos», para los códigos que tus listas citan; ahora también para el que se tipeó:

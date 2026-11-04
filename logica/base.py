@@ -769,7 +769,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "26"   # ver VERSIONES_DE_LAS_REGLAS
+VERSION_CONFIANZA = "27"   # ver VERSIONES_DE_LAS_REGLAS
 
 # LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
 # ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
@@ -778,6 +778,9 @@ VERSION_CONFIANZA = "26"   # ver VERSIONES_DE_LAS_REGLAS
 # nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
 # git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
 VERSIONES_DE_LAS_REGLAS = [
+    ("27", "2026-11-03", "el turbo es el lugar de la junta cuando lo dice («Junta Entrada a "
+                         "Turbo», «Juntas para Turbo»): contra la entrada de agua, rojo; "
+                         "contra el escape o la admisión, no. 1 vínculo cargado"),
     ("26", "2026-11-02", "el motor MWM Sprint (4.07/6.07, que TARANTO anota «CHEVROLET "
                          "SPRINT») no es el Chevrolet Sprint que es el Swift 1.0: 3 vínculos "
                          "cargados y 13 de la cola, en rojo"),

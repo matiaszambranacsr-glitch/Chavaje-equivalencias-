@@ -3024,6 +3024,20 @@ def probar(L):
             "Sprint de MWM" in _sprint111(_motor111, "JTA CARTER MWM SPRINT 4 CIL.")[1], False)
     esperar("el Falcon Sprint no es ninguno de los dos",
             ns["firma_de_producto"]("JUNTA CARTER FORD FALCON 221 SPRINT").get("sprint"), None)
+
+    # 112. LA JUNTA DEL TURBO (ver _RE_JUNTA_DEL_TURBO): «Entrada a Turbo» es el lugar de la
+    # junta, y contra la de la entrada de agua es rojo. El TURBO del motor («FORD CARGO TURBO»)
+    # sigue sin ser un lugar, y contra la salida de escape no choca: queda para una persona.
+    _ok112, _por112 = _sprint111("Junta Entrada a Turbo Fiat Iveco", "JTA ENTRADA AGUA FIAT U-25")
+    esperar("la junta de la entrada al turbo contra la de la entrada de agua, en rojo",
+            (_ok112, _por112.startswith(ns["_MOTIVOS_QUE_CONTRADICEN"]), "TURBO" in _por112),
+            (False, True, True))
+    esperar("el turbo del motor no es un lugar",
+            "TURBO" in ns["firma_de_producto"]("Jta.Tapa Cil. FORD CARGO TURBO")["pieza"], False)
+    esperar("la salida del turbo contra la salida de escape no es rojo",
+            _sprint111("JTA SALIDA TURBO RENAULT M.K9K", "Junta Salida de Escape RENAULT CLIO "
+                       "II KANGOO - 1,5/2,0 - K9K/F3R")[1].startswith(
+                ns["_MOTIVOS_QUE_CONTRADICEN"]), False)
     return fallas
 
 

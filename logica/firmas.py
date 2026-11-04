@@ -437,6 +437,28 @@ _RE_SPRINT_EL_AUTO = re.compile(r"\bSWIFT\b|\bCULTUS\b|\bSUZUKI\b|\bG1[03][A-Z]?
                                 r"|\b99\d ?CC\b|\b1\.[03]\b")
 
 
+# Ver «LA JUNTA DEL TURBO» en _firma_armada(): el turbo como lugar de la junta, pegado a la
+# junta o a la boca («ENTRADA A TURBO», «SALIDA DEL TURBO», «JTA.TURBO», «JUNTAS PARA TURBO»).
+_RE_JUNTA_DEL_TURBO = re.compile(
+    r"\b(?:ENTRADA|SALIDA|BRIDA|CODO|LUBRICACION|RETORNO)\s+(?:(?:A|AL|DE|DEL)\s+)?TURBO\b"
+    r"|\b(?:JUNTAS?|JTAS?)\.?\s*(?:(?:DE|DEL|P/|PARA)\s+(?:EL\s+)?)?TURBO\b")
+# El turbo está en el camino del escape y de la admisión, y cada lista nombra esas juntas a su
+# manera: «JTA SALIDA TURBO RENAULT M.K9K» (IMPERIAL) y «Junta Salida de Escape … K9K»
+# (ILLINOIS) pueden ser la misma o no. Contra esos lugares no choca —queda para una persona—;
+# contra el agua, el aceite o el cárter, sí.
+_LUGARES_DEL_CAMINO_DEL_TURBO = {"ESCAPE", "ADMISION", "MULTIPLE", "COLECTOR", "SALIDA"}
+
+
+def _sin_el_camino_del_turbo(lug_a, lug_b):
+    """Los lugares que cada una nombra y la otra no, sin el turbo contra su camino. Ver
+    _LUGARES_DEL_CAMINO_DEL_TURBO."""
+    for _x, _y in ((lug_a, lug_b), (lug_b, lug_a)):
+        if "TURBO" in _x and _y & _LUGARES_DEL_CAMINO_DEL_TURBO:
+            _x.discard("TURBO")
+            _y.difference_update(_LUGARES_DEL_CAMINO_DEL_TURBO)
+    return lug_a, lug_b
+
+
 def _cual_sprint(texto):
     """«motor» (el MWM Sprint), «auto» (el Chevrolet Sprint, Swift) o None si no dice SPRINT o
     no se sabe cuál. Ver _RE_SPRINT_EL_MOTOR."""
@@ -715,6 +737,14 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
                   limpio)
             or re.search(r"\bCAJA\s+(?:DE\s+)?(?:VEL\w*|CAMBIO\w*|TRANSM\w*)", limpio)):
         pieza.add("CAJAVELOCIDAD")
+    # LA JUNTA DEL TURBO. TURBO va con la aplicación (ver PALABRAS_DE_CONTEXTO): en «Jta.Tapa
+    # Cil. FORD CARGO TURBO» dice qué motor es. Pero en «Junta Entrada a Turbo Fiat Iveco»
+    # (TARANTO) o «Juego de juntas para Turbo CUMMINS ISBE» (ILLINOIS) dice de qué es la junta,
+    # y sin eso la de la entrada al turbo quedaba como junta a secas: el barrido la juntó con
+    # «JTA ENTRADA AGUA FIAT U-25» (IMPERIAL), y quedó aprobada en grupo con otras 2.700.
+    if (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")) and _RE_JUNTA_DEL_TURBO.search(
+            limpio):
+        pieza.add("TURBO")
     # JL escribe «JUNTAS FIAT TEMPRA WEBER» y «JUNTAS DODGE 1500 STROMBERG» sin decir
     # «carburador»: la marca del carburador lo dice. Sin esto se emparejaban con juntas de tapa
     # de cilindros del mismo auto. CARTER no cuenta acá: también es la junta de cárter.
@@ -1382,6 +1412,7 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     # abajo (ver «piezas de lugares distintos»), mirada antes.
     _lug_a = (set(a.get("pieza") or ()) - set(b.get("pieza") or ())) & _LUGARES_DE_LA_PIEZA
     _lug_b = (set(b.get("pieza") or ()) - set(a.get("pieza") or ())) & _LUGARES_DE_LA_PIEZA
+    _lug_a, _lug_b = _sin_el_camino_del_turbo(_lug_a, _lug_b)
     if _lug_a and _lug_b:
         return False, (f"piezas de lugares distintos: {'/'.join(sorted(_lug_a))} "
                        f"vs {'/'.join(sorted(_lug_b))}")
@@ -1549,6 +1580,7 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
             # quedaba limpia con 75 por el rubro y el precio.
             _lugar_a = (pieza_a - pieza_b) & _LUGARES_DE_LA_PIEZA
             _lugar_b = (pieza_b - pieza_a) & _LUGARES_DE_LA_PIEZA
+            _lugar_a, _lugar_b = _sin_el_camino_del_turbo(_lugar_a, _lugar_b)
             if _lugar_a and _lugar_b:
                 return False, (f"piezas de lugares distintos: {'/'.join(sorted(_lugar_a))} "
                                f"vs {'/'.join(sorted(_lugar_b))}")

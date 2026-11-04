@@ -3142,6 +3142,10 @@ def _lugares_para_el_numero(desc):
     # cárter del mismo Perkins.
     if len(lugares) > 1:
         lugares.discard("INYECCION")
+    # El turbo tampoco, acá: está en el camino del escape y de la admisión, y dos filas con el
+    # mismo número que dicen «salida turbo» y «salida de escape» no alcanzan para decir que el
+    # número une piezas distintas (ver _LUGARES_DEL_CAMINO_DEL_TURBO en firmas.py).
+    lugares.discard("TURBO")
     return lugares
 
 
