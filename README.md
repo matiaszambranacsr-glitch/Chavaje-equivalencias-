@@ -6967,6 +6967,14 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🔤 «C/TERMOST.» es el termostato
+
+En la cola, la «JTA.C/TERMOST. J. DEERE 4CIL.119mm.» de TARANTO (850042, la junta de la caja del termostato) esperaba emparejada con 16 juntas de J. DEERE de IMPERIAL —cárter, aceite, múltiple de escape—, todas 🟠. La firma corta las palabras en los espacios y deja la barra adentro (hace falta para 1/2, 4/6 y T-PRT04/B), así que «C/TERMOST.» era una palabra sola y la junta no decía de qué era.
+
+Ahora, en las juntas, la letra con barra delante de un lugar se separa (`_RE_LETRA_CON_BARRA_Y_LUGAR` en `logica/firmas.py`): «C/TERMOST.», «T/DISTRIBUCION», «B/AGUA», «T/CILINDRO», «A/LEVAS». Solo en juntas y solo delante de un lugar: «AFORADOR C/BOMBA» (con bomba), «Jgo.Jtas. C/RETENES» o «COMPRESOR S/ACEITE» (sin aceite) dicen cómo viene, no dónde va, y quedan como estaban —son cientos, y separarlos cambiaba miles de firmas—.
+
+En la copia de la base real son unas 10 descripciones, y cambian los 16 pares de la cola de esa junta, que pasan a rojo (3 por el lugar, 13 por el precio, que ahora pesa: 94 a 2.290 veces). Lo cargado, las fichas, las búsquedas y lo rechazado, sin cambios. Reglas versión 28. `pruebas_de_la_precision.py` (114) lo controla; sin separar la barra, falla.
+
 ## 🤖 La salud avisa lo que la app haría sola y está apagado
 
 El dueño pidió que la app haga más cosas sola. Las dos automatizaciones que borran algo vienen apagadas a propósito —las prende el administrador—: «🤖 Que la app descarte sola» lo 🔴 de la cola y «🤖 Que la app corte sola lo que es seguro otra pieza» de lo cargado. El problema era que nada fuera de su propia pantalla decía que estaban apagadas ni cuánto trabajo harían: en la copia de la base real, 72 vínculos cargados que son seguro otra pieza seguían saliendo en la búsqueda, y más de la mitad de la cola era 🔴.

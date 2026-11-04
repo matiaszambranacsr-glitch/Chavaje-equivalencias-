@@ -482,6 +482,12 @@ def _termostato_con_carcasa(texto):
     return None
 
 
+# Ver «LA LETRA CON BARRA DELANTE DEL LUGAR» en _firma_armada().
+_RE_ES_UNA_JUNTA = re.compile(r"\b(?:JUNTAS?|JTAS?)\b")
+_RE_LETRA_CON_BARRA_Y_LUGAR = re.compile(
+    r"(?<![A-Z0-9])([TBSCA])/(?=(?:TERMOST|VALVUL|DISTRIB|AGUA|ACEITE|ESCAPE|ADMIS|CILINDR|FILTRO"
+    r"|LEVAS|CARTER))")
+
 def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
 
@@ -510,6 +516,15 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # donde importa: 1.6 sigue siendo la cilindrada y 278.897 sigue siendo un código.
     limpio = _expandir_abreviaturas_con_punto(limpio)
     limpio = _RE_PUNTO_ENTRE_LETRAS.sub(r"\1 \2", limpio)
+    # LA LETRA CON BARRA DELANTE DEL LUGAR: «JTA.C/TERMOST. J. DEERE», «JUNTA T/DISTRIBUCION
+    # FORD D», «JTA. B/AGUA TRASERA PERKINS». La letra abrevia la parte (caja, tapa, bomba) y lo
+    # que sigue es el lugar, pero la barra queda adentro de la palabra —hace falta para 1/2, 4/6
+    # y T-PRT04/B— y «C/TERMOST.» no era el termostato: la junta de la caja del termostato de
+    # J. DEERE esperaba en la cola contra la de cárter, 🟠 en vez de rojo. Solo en juntas y solo
+    # delante de un lugar: «AFORADOR C/BOMBA» (con bomba) o «COMPRESOR S/ACEITE» (sin aceite)
+    # dicen cómo viene, no dónde va.
+    if _RE_ES_UNA_JUNTA.search(limpio):
+        limpio = _RE_LETRA_CON_BARRA_Y_LUGAR.sub(r"\1 ", limpio)
     # «JUNTAS JEEP IKA CARTER YF» y «JUNTAS RAMBLER TORINO CARTER RBS» (JL) son del carburador
     # Carter —YF y RBS son sus modelos—, no del cárter, y concordaban con la junta de cárter del
     # Jeep y del Torino.

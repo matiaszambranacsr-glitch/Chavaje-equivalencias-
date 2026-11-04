@@ -3062,6 +3062,18 @@ def probar(L):
         ns["devolver_lo_que_corto_sola"]()
     finally:
         _g113["exigir_nivel"] = _exigir113
+
+    # 114. LA LETRA CON BARRA DELANTE DEL LUGAR (ver _RE_LETRA_CON_BARRA_Y_LUGAR): «C/TERMOST.»
+    # es el termostato, y la junta de su caja contra la de cárter es rojo. «AFORADOR C/BOMBA» (con
+    # bomba) no se toca: no es una junta.
+    _ok114, _por114 = _sprint111("JTA.C/TERMOST. J. DEERE 4CIL.119mm.",
+                                 "JTA CARTER J. DEERE 3420/4220")
+    esperar("la junta de la caja del termostato contra la de cárter, en rojo",
+            (_ok114, _por114.startswith(ns["_MOTIVOS_QUE_CONTRADICEN"]), "TERMOSTATO" in _por114),
+            (False, True, True))
+    esperar("«C/BOMBA» fuera de una junta queda como está",
+            "BOMBA" in ns["firma_de_producto"]("AFORADOR C/BOMBA 22181 PEUGEOT 306")["pieza"],
+            False)
     return fallas
 
 
