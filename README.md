@@ -6967,6 +6967,16 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🧰 La salud avisa lo que falta cargar para vender
+
+Hay tres datos que se cargan una vez y, si faltan, algo deja de andar sin decir nada. En la copia de la base del 12/10 faltaban los tres, y solo se sabía entrando a cada pantalla:
+
+- **El WhatsApp del negocio.** Sin él, los clientes que miran la app sin entrar no ven «📲 Consultar por WhatsApp»: buscan, no tienen cómo preguntar y se van. Ahora la salud dice «Falta el WhatsApp del negocio», o que está mal escrito y por qué.
+- **Un alias para cobrar por transferencia.** Sin alias, el presupuesto y la venta salen sin cómo pagar. Avisa si no hay ninguno, y si el link de pago de alguno está mal (el QR no lo usa).
+- **La bonificación de cada lista.** Sin ella no hay costo, y la ganancia de cada venta y el margen del presupuesto quedan sin ese dato. Avisa cuántas listas están sin costo y cuáles (en la copia, las 7).
+
+Los tres son solo para el administrador, que es el que los carga, y llevan a «💬 Mensajería y cobros» o a «🏷️ Marcas». Se van solos cuando se cargan. Cuestan 0,02 s en el control de salud. `pruebas_de_la_plata_y_el_stock.py` (9) lo controla: sin los datos, los tres avisos; cargados, se van. Sin los avisos, falla.
+
 ## 🧭 Lugares de pieza que faltaban, sacados de la cola: el compresor y el arranque
 
 En vez de mirar pares de a uno, se contó en los 🟠 de la cola qué palabras de pieza tiene un solo lado y no están entre los lugares (`_LUGARES_DE_LA_PIEZA`). Casi todas son la misma pieza dicha distinto («sensor de presión colector MAP» contra «SENSOR MAP»), pero dos eran lugares:

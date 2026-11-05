@@ -272,6 +272,28 @@ def probar(L):
               (_otro, _otro))
     conn.commit()
     esperar("otra lista lo trae doble: vuelve", _en_la_lista(), sorted([_otro, _tercero]))
+
+    # 9. LO QUE FALTA CARGAR PARA VENDER (ver diagnostico_de_salud()): sin el WhatsApp del
+    # negocio, sin alias y con una lista sin costo, la salud se lo dice al administrador (y a
+    # nadie más); cargados el WhatsApp y la bonificación, esos avisos se van.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('SINCOSTO', 'PROVEEDOR')")
+    _msc = c.lastrowid
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+              "VALUES ('SC1', 'SC1', 'JUNTA', ?, 800)", (_msc,))
+    conn.commit()
+
+    def _config9():
+        _pr = ns["diagnostico_de_salud"]()
+        _wa = [p["solo_admin"] for p in _pr if "WhatsApp del negocio" in p["titulo"]]
+        _alias = [p["solo_admin"] for p in _pr if "alias para cobrar" in p["titulo"]]
+        _costo9 = any("sin costo" in p["titulo"] and "SINCOSTO" in p["detalle"] for p in _pr)
+        return _wa, _alias, _costo9
+    esperar("sin WhatsApp, sin alias y una lista sin costo: los tres avisos, al administrador",
+            _config9(), ([True], [True], True))
+    ns["guardar_config"]("whatsapp_del_negocio", "5491145678901")
+    ns["guardar_bonificacion_del_proveedor"](_msc, 25)
+    esperar("cargados el WhatsApp y la bonificación, esos dos se van", _config9(),
+            ([], [True], False))
     return fallas
 
 

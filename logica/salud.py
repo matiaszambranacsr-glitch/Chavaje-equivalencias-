@@ -508,6 +508,45 @@ def diagnostico_de_salud():
     except (TypeError, ValueError) as _err:
         anotar_error("diagnostico_de_salud/corte_automatico", _err)
 
+    # LO QUE FALTA CARGAR PARA VENDER. Tres datos que se cargan una vez y sin los cuales algo
+    # deja de andar sin avisar: sin el WhatsApp del negocio, el «📲 Consultar por WhatsApp» de
+    # los clientes que miran sin sesión no aparece (ver boton_para_consultar()); sin un alias,
+    # el presupuesto sale sin cómo pagarlo; sin la bonificación de cada lista, no hay costo y la
+    # ganancia no se calcula. En la copia de la base del 12/10 faltaban los tres, y solo se
+    # sabía mirando cada pantalla. Solo al administrador: es el que los carga.
+    try:
+        _wa = obtener_config("whatsapp_del_negocio", "")
+        _problema_wa = problema_del_whatsapp_del_negocio(_wa) if _wa else ""
+        if not _wa or _problema_wa:
+            sumar("medio", ("Falta el WhatsApp del negocio" if not _wa else
+                            f"El WhatsApp del negocio está mal: {_problema_wa}"),
+                  "Sin él, los clientes que miran la app sin entrar no ven «📲 Consultar por "
+                  "WhatsApp»: buscan, no tienen cómo preguntarte y se van.",
+                  miga_hasta("Mensajería y cobros"), solo_admin=True)
+        _alias = listar_alias_transferencia()
+        if not _alias:
+            sumar("bajo", "No hay un alias para cobrar por transferencia",
+                  "El presupuesto y la venta salen sin cómo pagar: con un alias (y el link de "
+                  "pago de la billetera, si tenés) llevan el QR para pagar.",
+                  miga_hasta("Mensajería y cobros"), solo_admin=True)
+        for _a in _alias:
+            _problema_link = problema_del_link_de_pago(_a.get("Link") or "")
+            if _problema_link:
+                sumar("medio", f"El link de pago de «{_a.get('Nombre') or _a.get('Alias')}» "
+                               f"{_problema_link}",
+                      "El QR del presupuesto no lo usa: el cliente no tiene cómo pagar desde ahí.",
+                      miga_hasta("Mensajería y cobros"), solo_admin=True)
+        _sin_costo = [m["Marca"] for m in costos_por_marca()
+                      if m["Bonificación"] == "—" and not m["A mano"] and m["Sin costo"]]
+        if _sin_costo:
+            sumar("bajo", f"{len(_sin_costo)} lista(s) sin costo: la ganancia no se calcula",
+                  f"{', '.join(_sin_costo[:6])}{'…' if len(_sin_costo) > 6 else ''}: sin la "
+                  "bonificación de cada proveedor no hay costo, y la ganancia de cada venta y el "
+                  "margen del presupuesto quedan sin ese dato.",
+                  miga_hasta("Marcas"), solo_admin=True)
+    except Exception as _err:      # noqa: BLE001 — un aviso que falla no tapa a los demás
+        anotar_error("diagnostico_de_salud/configuracion", _err)
+
     # LO VENDIDO COMO EQUIVALENTE QUE VOLVIÓ porque no era la pieza, en los últimos 30 días: la
     # métrica principal del tablero (ver tablero_de_calidad()), como alarma. Lo pidió una
     # revisión con ChatGPT («una alarma para humanos: ACCIÓN REQUERIDA, y qué revisar»).
