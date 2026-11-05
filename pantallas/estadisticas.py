@@ -1322,877 +1322,889 @@ a traer solas desde Administrar → Mantenimiento.
                                       shortcut=None if _sin_teclas else _tecla,
                                       on_click=cb_de_a_uno,
                                       args=(lote_info["lote"], _clave_cola, _decision))
-            # Y LOS QUE YA ESTÁN UNIDOS por otro camino. Ver cuantos_ya_estan_unidos().
-            try:
-                _ya_unidos = recordado_mientras_no_cambie(
-                    "_ya_unidos_del_lote", _clave_de_la_lista,
-                    lambda: cuantos_ya_estan_unidos(lote_info["lote"]), cuantos=4)
-            except sqlite3.Error as _err:
-                anotar_error("cuantos_ya_estan_unidos", _err)
-                _ya_unidos = 0
-            if _ya_unidos:
-                st.caption(f"🔁 {miles(_ya_unidos)} de esta lista unen dos productos que ya se "
-                           "encuentran por otro camino: aprobarlos suma un vínculo directo, no "
-                           "búsquedas nuevas.")
-
-            ca1, ca2 = st.columns([2, 1])
-            with ca1:
-                # Arranca en la opción que cubre la lista ENTERA. Estaba fijo en 1.000, y
-                # con 3.185 pendientes eso son tres vueltas para ver una lista que se analiza
-                # entera en 6,6 s — y dos tercios que, si nadie cambia de tanda, no se miran.
-                # En CADA lista, no solo en la primera: se fijaba con la que abría la pantalla
-                # —la más nueva, «todas» con 254, o sea 400— y al pasar al barrido (6.586) se
-                # analizaban 400 y había que recorrer 17 tandas.
-                _opciones_tanda = OPCIONES_DE_TANDA_DEL_LOTE
-                if st.session_state.get("_tanda_de_la_lista") != lote_info["lote"]:
-                    st.session_state["_tanda_de_la_lista"] = lote_info["lote"]
-                    st.session_state["cuantos_pendientes"] = tanda_que_cubre(total_lote)
-                cuantos = st.select_slider(
-                    "¿Cuántos analizar por vez?",
-                    options=_opciones_tanda,
-                    key="cuantos_pendientes",
-                    help="Analizar más tarda un poco más, pero te evita repetir la vuelta muchas veces."
-                )
-            paginas_lote = max((total_lote - 1) // int(cuantos) + 1, 1)
-            with ca2:
-                tanda_lote = st.number_input(
-                    f"Tanda (de {paginas_lote}):", min_value=1, max_value=paginas_lote,
-                    value=1, step=1, key=f"tanda_lote_{lote_info['lote']}"
-                ) if paginas_lote > 1 else 1
-
-            # EL ANÁLISIS SE GUARDA, y no es un lujo: tarda 5,2 s sobre los 3.185 pendientes
-            # reales y estaba corriendo en CADA dibujado de esta pantalla. Mover el slider de
-            # «cuántos analizar», cambiar de tanda o tildar un checkbox volvía a analizar todo
-            # de cero — 5 segundos de reloj de arena por tocar una casilla.
-            #
-            # La clave incluye el total de pendientes del lote, y eso es lo que lo invalida
-            # solo: aprobar o descartar cambia ese número, así que el análisis se rehace justo
-            # cuando dejó de valer y no antes. Lo que se hace en OTRO lote no lo toca, y está
-            # bien: el análisis de éste sigue siendo cierto.
-            # Y los pares vistos juntos en un portal: leer fichas no cambia este lote, pero
-            # le agrega pruebas a favor a pares que ya estaban acá.
-            _clave_analisis = clave_del_analisis_de_lote(
-                lote_info["lote"], cuantos, (int(tanda_lote) - 1) * int(cuantos), total_lote)
-            _guardado = esperar_el_analisis_en_preparacion()
-            _clave_vieja = (_guardado or {}).get("clave") or ()
-            if _guardado and _clave_vieja == _clave_analisis:
-                limpias, sospechosas, relacionadas = _guardado["resultado"]
-            elif (len(_clave_vieja) == len(_clave_analisis)
-                    and _clave_vieja[:3] == _clave_analisis[:3]
-                    and _clave_vieja[4:] == _clave_analisis[4:]
-                    and total_lote < _clave_vieja[3]
-                    # Solo si esa tanda cubría la lista entera: si no, al decidir entran pares
-                    # de la tanda siguiente que el recorte no analiza, y quedaban sin verse.
-                    and _clave_vieja[2] == 0 and _clave_vieja[3] <= _clave_vieja[1]
-                    and _guardado.get("recortes", 0) < RECORTES_ANTES_DE_REANALIZAR):
-                # SOLO SE SACAN LOS QUE YA SE DECIDIERON. Aprobar o descartar un par bajaba
-                # el total y rehacía el análisis entero: 3,7 s sobre la cola real por cada
-                # decisión, con el mismo resultado para todos los demás pares. Ahora se sacan
-                # los que ya no están pendientes y el resto queda como estaba (0,8 s). Cada
-                # RECORTES_ANTES_DE_REANALIZAR decisiones se rehace entero, por lo poco que lo
-                # decidido le cambia a lo aprendido de los demás.
-                _siguen = pares_pendientes_del_lote(lote_info["lote"])
-                limpias, sospechosas, relacionadas = (
-                    [x for x in _lista if (x["a"], x["b"]) in _siguen]
-                    for _lista in _guardado["resultado"])
-                guardar_analisis_de_lote({
-                    "clave": _clave_analisis,
-                    "resultado": (limpias, sospechosas, relacionadas),
-                    "recortes": _guardado.get("recortes", 0) + _clave_vieja[3] - total_lote,
-                })
+            # SOLO LA TARJETA, MIENTRAS SE REVISA DE A UNO. Lo de abajo —lo que ya está unido, los
+            # grupos para aprobar en bloque, lo aprendido de tus decisiones, los que más ensucian—
+            # se volvía a dibujar con cada decisión, y cada 200 se rehacía el análisis entero de
+            # la lista (3,7 s con el barrido): con la copia de la base del 12/10, «Son la misma
+            # pieza» tardaba 0,6 s y «No son» 0,55; sin esto, 0,2 y 0,09. La cola de a uno se
+            # arma una vez y no usa nada de abajo. Con ⚡ apagado, todo vuelve como estaba.
+            _solo_de_a_uno = (not solo_mirar()
+                              and bool(st.session_state.get(f"de_a_uno_{lote_info['lote']}")))
+            if _solo_de_a_uno:
+                st.caption("⚡ Mientras revisás de a uno, lo demás de esta lista —los grupos y "
+                           "aprobar en bloque— no se muestra: apagá ⚡ para verlo.")
             else:
-                with st.spinner("Analizando..."):
-                    limpias, sospechosas, relacionadas = analizar_lote_pendiente(
-                        lote_info["lote"], limite=int(cuantos),
-                        desde=(int(tanda_lote) - 1) * int(cuantos)
+                # Y LOS QUE YA ESTÁN UNIDOS por otro camino. Ver cuantos_ya_estan_unidos().
+                try:
+                    _ya_unidos = recordado_mientras_no_cambie(
+                        "_ya_unidos_del_lote", _clave_de_la_lista,
+                        lambda: cuantos_ya_estan_unidos(lote_info["lote"]), cuantos=4)
+                except sqlite3.Error as _err:
+                    anotar_error("cuantos_ya_estan_unidos", _err)
+                    _ya_unidos = 0
+                if _ya_unidos:
+                    st.caption(f"🔁 {miles(_ya_unidos)} de esta lista unen dos productos que ya se "
+                               "encuentran por otro camino: aprobarlos suma un vínculo directo, no "
+                               "búsquedas nuevas.")
+
+                ca1, ca2 = st.columns([2, 1])
+                with ca1:
+                    # Arranca en la opción que cubre la lista ENTERA. Estaba fijo en 1.000, y
+                    # con 3.185 pendientes eso son tres vueltas para ver una lista que se analiza
+                    # entera en 6,6 s — y dos tercios que, si nadie cambia de tanda, no se miran.
+                    # En CADA lista, no solo en la primera: se fijaba con la que abría la pantalla
+                    # —la más nueva, «todas» con 254, o sea 400— y al pasar al barrido (6.586) se
+                    # analizaban 400 y había que recorrer 17 tandas.
+                    _opciones_tanda = OPCIONES_DE_TANDA_DEL_LOTE
+                    if st.session_state.get("_tanda_de_la_lista") != lote_info["lote"]:
+                        st.session_state["_tanda_de_la_lista"] = lote_info["lote"]
+                        st.session_state["cuantos_pendientes"] = tanda_que_cubre(total_lote)
+                    cuantos = st.select_slider(
+                        "¿Cuántos analizar por vez?",
+                        options=_opciones_tanda,
+                        key="cuantos_pendientes",
+                        help="Analizar más tarda un poco más, pero te evita repetir la vuelta muchas veces."
                     )
-                guardar_analisis_de_lote({
-                    "clave": _clave_analisis,
-                    "resultado": (limpias, sospechosas, relacionadas),
-                })
-            # LO QUE SALE DEL ANÁLISIS SE RECUERDA CON ÉL. El análisis ya se guardaba, pero lo
-            # que la pantalla arma con él —el orden de los abanicos, los grupos por motivo, el
-            # plan— se volvía a armar en cada toque: con el barrido entero, 900 ms por tildar
-            # una casilla o pasar de página. Vale lo que vale el análisis guardado: su clave,
-            # la hora en que se hizo y los recortes; y los vínculos, por las ⭐ que salen de la
-            # red (ver pieza_sugerida_del_abanico()).
-            _ag = analisis_de_lote_guardado() or {}
-            _version_del_analisis = (
-                (_clave_analisis, _ag.get("_hecho"), _ag.get("recortes", 0),
-                 testigo_de_los_vinculos()) if _ag.get("clave") == _clave_analisis else None)
+                paginas_lote = max((total_lote - 1) // int(cuantos) + 1, 1)
+                with ca2:
+                    tanda_lote = st.number_input(
+                        f"Tanda (de {paginas_lote}):", min_value=1, max_value=paginas_lote,
+                        value=1, step=1, key=f"tanda_lote_{lote_info['lote']}"
+                    ) if paginas_lote > 1 else 1
 
-            def _del_analisis(nombre, calcular):
-                if _version_del_analisis is None:
-                    return calcular()
-                return recordado_mientras_no_cambie(nombre, _version_del_analisis, calcular,
-                                                    cuantos=2)
-            analizados = len(limpias) + len(sospechosas) + len(relacionadas)
-            st.caption(f"Analizados {miles(analizados)} de {miles(total_lote)} vínculo(s) de esta lista." +
-                       (f" Quedan {miles(total_lote - analizados)} — cambiá de tanda para verlos."
-                        if total_lote > analizados else ""))
+                # EL ANÁLISIS SE GUARDA, y no es un lujo: tarda 5,2 s sobre los 3.185 pendientes
+                # reales y estaba corriendo en CADA dibujado de esta pantalla. Mover el slider de
+                # «cuántos analizar», cambiar de tanda o tildar un checkbox volvía a analizar todo
+                # de cero — 5 segundos de reloj de arena por tocar una casilla.
+                #
+                # La clave incluye el total de pendientes del lote, y eso es lo que lo invalida
+                # solo: aprobar o descartar cambia ese número, así que el análisis se rehace justo
+                # cuando dejó de valer y no antes. Lo que se hace en OTRO lote no lo toca, y está
+                # bien: el análisis de éste sigue siendo cierto.
+                # Y los pares vistos juntos en un portal: leer fichas no cambia este lote, pero
+                # le agrega pruebas a favor a pares que ya estaban acá.
+                _clave_analisis = clave_del_analisis_de_lote(
+                    lote_info["lote"], cuantos, (int(tanda_lote) - 1) * int(cuantos), total_lote)
+                _guardado = esperar_el_analisis_en_preparacion()
+                _clave_vieja = (_guardado or {}).get("clave") or ()
+                if _guardado and _clave_vieja == _clave_analisis:
+                    limpias, sospechosas, relacionadas = _guardado["resultado"]
+                elif (len(_clave_vieja) == len(_clave_analisis)
+                        and _clave_vieja[:3] == _clave_analisis[:3]
+                        and _clave_vieja[4:] == _clave_analisis[4:]
+                        and total_lote < _clave_vieja[3]
+                        # Solo si esa tanda cubría la lista entera: si no, al decidir entran pares
+                        # de la tanda siguiente que el recorte no analiza, y quedaban sin verse.
+                        and _clave_vieja[2] == 0 and _clave_vieja[3] <= _clave_vieja[1]
+                        and _guardado.get("recortes", 0) < RECORTES_ANTES_DE_REANALIZAR):
+                    # SOLO SE SACAN LOS QUE YA SE DECIDIERON. Aprobar o descartar un par bajaba
+                    # el total y rehacía el análisis entero: 3,7 s sobre la cola real por cada
+                    # decisión, con el mismo resultado para todos los demás pares. Ahora se sacan
+                    # los que ya no están pendientes y el resto queda como estaba (0,8 s). Cada
+                    # RECORTES_ANTES_DE_REANALIZAR decisiones se rehace entero, por lo poco que lo
+                    # decidido le cambia a lo aprendido de los demás.
+                    _siguen = pares_pendientes_del_lote(lote_info["lote"])
+                    limpias, sospechosas, relacionadas = (
+                        [x for x in _lista if (x["a"], x["b"]) in _siguen]
+                        for _lista in _guardado["resultado"])
+                    guardar_analisis_de_lote({
+                        "clave": _clave_analisis,
+                        "resultado": (limpias, sospechosas, relacionadas),
+                        "recortes": _guardado.get("recortes", 0) + _clave_vieja[3] - total_lote,
+                    })
+                else:
+                    with st.spinner("Analizando..."):
+                        limpias, sospechosas, relacionadas = analizar_lote_pendiente(
+                            lote_info["lote"], limite=int(cuantos),
+                            desde=(int(tanda_lote) - 1) * int(cuantos)
+                        )
+                    guardar_analisis_de_lote({
+                        "clave": _clave_analisis,
+                        "resultado": (limpias, sospechosas, relacionadas),
+                    })
+                # LO QUE SALE DEL ANÁLISIS SE RECUERDA CON ÉL. El análisis ya se guardaba, pero lo
+                # que la pantalla arma con él —el orden de los abanicos, los grupos por motivo, el
+                # plan— se volvía a armar en cada toque: con el barrido entero, 900 ms por tildar
+                # una casilla o pasar de página. Vale lo que vale el análisis guardado: su clave,
+                # la hora en que se hizo y los recortes; y los vínculos, por las ⭐ que salen de la
+                # red (ver pieza_sugerida_del_abanico()).
+                _ag = analisis_de_lote_guardado() or {}
+                _version_del_analisis = (
+                    (_clave_analisis, _ag.get("_hecho"), _ag.get("recortes", 0),
+                     testigo_de_los_vinculos()) if _ag.get("clave") == _clave_analisis else None)
 
-            # El kit y la pieza que trae adentro no son una equivalencia, así que no se
-            # preguntan de a uno: van en una línea y se descartan juntos. El buscador igual
-            # ofrece el kit cuando alguien busca la pieza suelta.
-            if relacionadas:
-                st.info(
-                    f"📦 **{len(relacionadas)} par(es) son un kit y una pieza que viene "
-                    "adentro, o un accesorio y su pieza** (el capuchón y la bobina en la que "
-                    "monta). No son equivalentes —no se puede vender una en lugar de la "
-                    "otra— así que no te los pongo a decidir de a uno. El buscador te ofrece "
-                    "el kit igual cuando buscás la pieza suelta."
-                )
-                with st.expander(f"Ver los {len(relacionadas)}", key="exp_ver"):
-                    st.dataframe(
-                        [{"Código A": x.get("cod_a"), "Marca A": x.get("marca_a"),
-                          "Código B": x.get("cod_b"), "Marca B": x.get("marca_b"),
-                          "Relación": x.get("relacion", "")} for x in relacionadas],
-                        width="stretch", hide_index=True)
-                if st.button(f"🚫 Descartar esos {len(relacionadas)}",
-                              key=f"desc_rel_{lote_info['lote']}"):
-                    _pares_rel = [(x["a"], x["b"]) for x in relacionadas]
-                    _n = rechazar_pendientes(lote_info["lote"], _pares_rel)
-                    invalidar_salud()
-                    avisar("success", f"Se descartaron {_n} par(es) de kit o accesorio y pieza.")
-                    st.rerun()
+                def _del_analisis(nombre, calcular):
+                    if _version_del_analisis is None:
+                        return calcular()
+                    return recordado_mientras_no_cambie(nombre, _version_del_analisis, calcular,
+                                                        cuantos=2)
+                analizados = len(limpias) + len(sospechosas) + len(relacionadas)
+                st.caption(f"Analizados {miles(analizados)} de {miles(total_lote)} vínculo(s) de esta lista." +
+                           (f" Quedan {miles(total_lote - analizados)} — cambiá de tanda para verlos."
+                            if total_lote > analizados else ""))
 
-            # Se agrupa por confianza, no por "tiene alarma / no tiene". Con 397 alarmas planas
-            # había que mirarlas de a una; así se ve de una que la mayoría es descartable y solo
-            # un puñado merece atención.
-            patrones_ui = aprender_de_las_decisiones()
-            todos_evaluados = limpias + sospechosas
-            por_nivel = {"🟢": [], "🟡": [], "🟠": [], "🔴": []}
-            for x in todos_evaluados:
-                por_nivel[nivel_de_confianza(x.get("confianza", 50))[0][:1]].append(x)
-
-            mn1, mn2, mn3, mn4 = st.columns(4)
-            mn1.metric("🟢 Muy probables", miles(len(por_nivel["🟢"])))
-            mn2.metric("🟡 Probables", miles(len(por_nivel["🟡"])))
-            mn3.metric("🟠 Dudosas", miles(len(por_nivel["🟠"])))
-            mn4.metric("🔴 Casi seguro mal", miles(len(por_nivel["🔴"])))
-
-            # 🧭 EL PLAN. Ver plan_de_la_lista(): qué conviene hacer primero y cuánto trabajo
-            # lleva cada paso, para no tener que descubrirlo recorriendo la pantalla.
-            _plan = _del_analisis("_plan_de_la_lista",
-                                  lambda: plan_de_la_lista(limpias, sospechosas, relacionadas))
-            if _plan:
-                with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True, key="exp_como_resolver_esta_lista"):
-                    st.dataframe(_plan, width="stretch", hide_index=True)
-                    ayuda("De arriba hacia abajo: cada paso achica lo que queda para los "
-                          "siguientes. Los que dicen «1 toque» no necesitan mirar par por "
-                          "par; los de muestra, solo los que la app elige al azar.")
-
-            # Cuando el problema es UN producto que aparece en decenas de pendientes, se resuelve
-            # de una. Antes había que aprobar o descartar cada vínculo por separado, aunque los
-            # cincuenta dijeran exactamente lo mismo.
-            culpables = productos_que_mas_ensucian(lote_info["lote"])
-            if culpables:
-                total_culpa = sum(x["Pendientes que genera"] for x in culpables)
-                st.warning(
-                    f"🎯 **{len(culpables)} producto(s) con código dudoso generan {total_culpa} "
-                    "de estos pendientes.** Resolvelos de una en vez de vínculo por vínculo."
-                )
-                st.dataframe(quitar_id(culpables), width="stretch", hide_index=True)
-                etiquetas_culpa = {
-                    f"{x['Código']} ({x['Marca']}) — {x['Pendientes que genera']} pendientes": x["_id"]
-                    for x in culpables
-                }
-                elegido_culpa = st.selectbox("¿Cuál resolver?", list(etiquetas_culpa.keys()),
-                                              key=f"culpable_{lote_info['lote']}")
-                cc1, cc2 = st.columns(2)
-                if cc1.button("🚫 Descartar TODOS sus pendientes", key=f"desc_culpa_{lote_info['lote']}"):
-                    n = rechazar_pendientes_de_producto(etiquetas_culpa[elegido_culpa],
-                                                         lote_info["lote"])
-                    invalidar_salud()
-                    avisar("success", f"Se descartaron {n} vínculo(s) de una.")
-                    st.rerun()
-                if cc2.button("✅ El código está bien, no volver a marcarlo",
-                               key=f"ok_culpa_{lote_info['lote']}"):
-                    aprobar_puente(etiquetas_culpa[elegido_culpa], "código validado a mano")
-                    invalidar_salud()
-                    avisar("success", "Anotado: ese código deja de marcarse como problema.")
-                    st.rerun()
-
-            if por_nivel["🔴"]:
-                muestra_mal = por_nivel["🔴"][:8]
-                with st.expander(f"🔴 Ver por qué las {len(por_nivel['🔴'])} peores están mal", key="exp_ver_peores_estan_mal"):
-                    for x in muestra_mal:
-                        st.markdown(f"**{x['cod_a']}** ({x['marca_a']}) ↔ "
-                                     f"**{x['cod_b']}** ({x['marca_b']}) — {x['confianza']:.0f}/100")
-                        for tipo, texto in x.get("senales", []):
-                            st.caption(("❌ " if tipo == "mal" else "✅ ") + texto)
-                        for _ev in x.get("evidencia", []):
-                            st.caption("✅ " + _ev)
-
-            ml1, ml2 = st.columns(2)
-            ml1.metric("Sin nada raro", miles(len(limpias)))
-            ml2.metric("Con alguna alarma", miles(len(sospechosas)))
-
-            # Solo en una lista IMPORTADA: ahí sí que casi todo dispare alarmas dice que el mapeo
-            # de columnas salió mal. En las automáticas (el barrido de todo el catálogo, el cruce
-            # por auto) es lo esperable —se proponen muchos pares para que la revisión filtre— y
-            # el consejo de «descartá toda la lista» hacía tirar las 2.558 limpias con el resto.
-            if (analizados and len(sospechosas) / analizados > 0.7
-                    and lote_info.get("origen") == "lista_proveedor"):
-                st.error(
-                    "🔴 Más del 70% de esta lista dispara alarmas. Eso no es que tengas mala suerte: "
-                    "casi siempre significa que la importación quedó **mal mapeada** — la columna que "
-                    "se tomó como código en realidad traía cantidades, medidas o pedazos de la "
-                    "descripción. Antes de revisar de a uno, conviene descartar toda la lista y "
-                    "volver a importarla revisando bien el mapeo de columnas."
-                )
-
-            # APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL. Ver muestra_de_control(). Antes lo
-            # único que había era «Aprobar los N sin alarmas», a ciegas: nadie sabía cuántos de
-            # esos N estaban mal hasta que un cliente se llevaba la pieza equivocada.
-            _lote_m = lote_info["lote"]
-            _candidatas_m = limpias + sospechosas
-            _clave_parecidos = f"_parecidos_{_lote_m}"
-            # Los descartes con motivo de la revisión de a uno (ver aplicar_decisiones()): se
-            # buscan ahora, contra el análisis nuevo, que ya no tiene a los descartados.
-            _por_buscar = st.session_state.get("_buscar_parecidos", {}).pop(_lote_m, None)
-            if _por_buscar:
-                _hallados_rev = parecidos_de_varios(_por_buscar, _candidatas_m)
-                if _hallados_rev:
-                    st.session_state[_clave_parecidos] = _hallados_rev
-            if st.session_state.get(_clave_parecidos):
-                _par_info = st.session_state[_clave_parecidos]
-                _filas_par = [f for grupo_p in _par_info for f in grupo_p["filas"]]
-                st.info(f"🧠 **Aprendí de lo que descartaste:** hay {len(_filas_par)} par(es) más "
-                        "con el mismo problema. Miralos y, si coincidís, descartalos de una.")
-                for grupo_p in _par_info:
-                    st.caption(f"{grupo_p['motivo']} — como «{grupo_p['ejemplo']}»:")
-                    st.dataframe([{"Código A": f["cod_a"], "Marca A": f["marca_a"],
-                                   "Descripción A": (f.get("desc_a") or "")[:60],
-                                   "Código B": f["cod_b"], "Marca B": f["marca_b"],
-                                   "Descripción B": (f.get("desc_b") or "")[:60]}
-                                  for f in grupo_p["filas"]],
-                                 width="stretch", hide_index=True)
-                _pp1, _pp2 = st.columns(2)
-                if _pp1.button(f"🚫 Descartar esos {len(_filas_par)} también", type="primary",
-                               key=f"desc_parecidos_{_lote_m}"):
-                    _n_par = 0
-                    for grupo_p in _par_info:
-                        _n_par += rechazar_pendientes(
-                            _lote_m, [p for f in grupo_p["filas"]
-                                      for p in ((f["a"], f["b"]), (f["b"], f["a"]))],
-                            motivo=grupo_p["clave_motivo"])
-                    st.session_state.pop(_clave_parecidos, None)
-                    invalidar_salud()
-                    avisar("success", f"Se descartaron {_n_par} par(es) con el mismo problema.")
-                    st.rerun()
-                if _pp2.button("Dejarlos como están", key=f"dejar_parecidos_{_lote_m}"):
-                    st.session_state.pop(_clave_parecidos, None)
-                    st.rerun()
-
-            def _panel_de_muestra(lote, clave_g, filas, candidatas, clave_parecidos, nombre):
-                """La muestra de control de un grupo: el avance, los pares por mirar de a 10, y el veredicto
-                con aprobar o descartar el resto. La usan los grupos por par de listas y los grupos por
-                motivo de la revisión. Ver muestra_de_control()."""
-                _por_par_g = {(f["a"], f["b"]): f for f in filas}
-                clave_g = clave_vigente_de_la_muestra(clave_g, list(_por_par_g))
-                if "|vuelta " in clave_g:
-                    nombre = f"{nombre} ({clave_g.rsplit('|', 1)[1]})"
-                _muestra = muestra_de_control(clave_g, list(_por_par_g))
-                _estado_m = estado_de_la_muestra(_muestra)
-                _sin_mirar = [p for p in _muestra if _estado_m[p] == "pendiente"]
-                _bien_m = sum(1 for p in _muestra if _estado_m[p] == "bien")
-                _mal_m = sum(1 for p in _muestra if _estado_m[p] == "mal")
-                # Lo que se aprueba o descarta con esta muestra son los que estaban cuando se
-                # sorteó. Los que entraron después esperan su propia muestra: ver
-                # clave_vigente_de_la_muestra().
-                _al_sortear = pares_al_sortear(clave_g)
-                _resto = [p for p in _por_par_g if p not in set(_muestra) and p in _al_sortear]
-                _entraron_despues = [p for p in _por_par_g
-                                     if p not in _al_sortear and p not in set(_muestra)]
-                st.progress((_bien_m + _mal_m) / max(len(_muestra), 1),
-                            text=f"Muestra: {_bien_m + _mal_m} de {len(_muestra)} revisados · "
-                                 f"✅ {_bien_m} bien · 🚫 {_mal_m} mal")
-
-                # Los que quedan por mirar, de a 10 y en un formulario: marcar no recarga la
-                # pantalla, y todo se guarda junto con un botón.
-                _a_mirar = [p for p in _sin_mirar if p in _por_par_g][:10]
-                if _a_mirar:
-                    # La primera opción dice para qué es: el selector va sin rótulo, al lado
-                    # de la decisión, y con «—» solo no se entendía.
-                    _opciones_mot = (["Si está mal: ¿por qué? (opcional)"]
-                                     + list(MOTIVOS_DE_RECHAZO.values()))
-                    _clave_de_motivo = {v: k for k, v in MOTIVOS_DE_RECHAZO.items()}
-                    with st.form(key=f"form_muestra_{abs(hash(clave_g))}"):
-                        st.caption(f"Quedan {len(_sin_mirar)} de la muestra. Marcá estos "
-                                   f"{len(_a_mirar)} y guardá.")
-                        for _i_m, _par in enumerate(_a_mirar):
-                            _f = _por_par_g[_par]
-                            # Compacto: cada par eran cinco renglones y diez pares, dos
-                            # pantallas. La decisión y el motivo van en la misma fila.
-                            st.markdown(f"**{_i_m + 1}.** {_f['marca_a']} **{_f['cod_a']}** ↔ "
-                                        f"{_f['marca_b']} **{_f['cod_b']}**")
-                            # En negrita, los datos con números que el otro no dice.
-                            _da, _db = (_f.get('desc_a') or '')[:160], (_f.get('desc_b') or '')[:160]
-                            st.caption(f"A: {resaltar_lo_que_difiere(_da, _db)}  \n"
-                                       f"B: {resaltar_lo_que_difiere(_db, _da)}")
-                            _cd, _cm = st.columns([1, 1])
-                            _cd.radio("¿Son la misma pieza?", ["—", "✅ Bien", "🚫 Mal"],
-                                      key=f"m_dec_{_par[0]}_{_par[1]}", horizontal=True,
-                                      label_visibility="collapsed")
-                            _cm.selectbox("Si está mal, ¿por qué?", _opciones_mot,
-                                          key=f"m_mot_{_par[0]}_{_par[1]}",
-                                          label_visibility="collapsed",
-                                          help="Solo si está mal: el motivo enseña a la revisión.")
-                        _guardar_m = st.form_submit_button("💾 Guardar lo marcado",
-                                                           type="primary")
-                    if _guardar_m:
-                        _bien_ahora, _mal_ahora = [], {}
-                        for _par in _a_mirar:
-                            _dec = st.session_state.get(f"m_dec_{_par[0]}_{_par[1]}")
-                            if _dec == "✅ Bien":
-                                _bien_ahora.append(_par)
-                            elif _dec == "🚫 Mal":
-                                _mot = _clave_de_motivo.get(
-                                    st.session_state.get(f"m_mot_{_par[0]}_{_par[1]}"))
-                                _mal_ahora.setdefault(_mot, []).append(_par)
-                        if _bien_ahora:
-                            aprobar_pendientes(lote, [p for a, b in _bien_ahora
-                                                         for p in ((a, b), (b, a))])
-                        _rechazados_m = []
-                        for _mot, _pares_mot in _mal_ahora.items():
-                            rechazar_pendientes(lote, [p for a, b in _pares_mot
-                                                          for p in ((a, b), (b, a))],
-                                                motivo=_mot)
-                            if _mot:
-                                _rechazados_m.extend((_mot, _por_par_g[_par])
-                                                     for _par in _pares_mot)
-                        _muestra_set = set(_muestra)
-                        _parecidos_nuevos = parecidos_de_varios(
-                            _rechazados_m, [f for f in candidatas
-                                            if (f["a"], f["b"]) not in _muestra_set])
-                        if _parecidos_nuevos:
-                            st.session_state[clave_parecidos] = _parecidos_nuevos
-                        invalidar_salud()
-                        _n_mal = sum(len(v) for v in _mal_ahora.values())
-                        avisar("success", f"Guardado: ✅ {len(_bien_ahora)} bien · 🚫 {_n_mal} mal.")
-                        st.rerun()
-                elif _sin_mirar:
-                    st.caption("Los que faltan de la muestra ya no están en esta tanda: los "
-                               "resolvió otra persona o cambió el análisis.")
-
-                if _entraron_despues:
+                # El kit y la pieza que trae adentro no son una equivalencia, así que no se
+                # preguntan de a uno: van en una línea y se descartan juntos. El buscador igual
+                # ofrece el kit cuando alguien busca la pieza suelta.
+                if relacionadas:
                     st.info(
-                        f"➕ **{miles(len(_entraron_despues))} par(es) entraron a este grupo después "
-                        "de sortear la muestra** —una prueba nueva los subió, o llegaron con "
-                        "otra tanda—. Esta muestra no habla de ellos, así que no se aprueban con "
-                        "ella: cuando termines con los de esta muestra, van a tener la suya.")
-
-                # EL VEREDICTO, cuando la muestra está completa.
-                _revisados_m = _bien_m + _mal_m
-                if not _a_mirar and _revisados_m:
-                    _p_m, _tope_m, _n_tope_m = estimacion_de_errores(_mal_m, _revisados_m,
-                                                                     len(_resto))
-                    _pares_resto = [p for a, b in _resto for p in ((a, b), (b, a))]
-                    if not _resto:
-                        st.success(f"✅ El grupo entero ya está revisado ({_revisados_m} pares).")
-                    elif se_puede_aprobar_el_resto(_mal_m, _revisados_m):
-                        (st.success if _mal_m == 0 else st.warning)(
-                            (f"✅ **Ningún error en {_revisados_m}.** " if _mal_m == 0 else
-                             f"🟡 **{_mal_m} error(es) en {_revisados_m}.** ")
-                            + f"Del resto del grupo se puede esperar como mucho {_tope_m:.0%} "
-                            f"mal —unos {_n_tope_m} de {miles(len(_resto))}—. Alcanza para aprobarlo.")
-                    elif _mal_m * 2 < _revisados_m and _tope_m <= 0.25:
-                        st.warning(
-                            f"🟡 **{_mal_m} error(es) en {_revisados_m}.** Todavía no alcanza: "
-                            f"en el resto podría haber hasta {_tope_m:.0%} mal (unos "
-                            f"{_n_tope_m} de {miles(len(_resto))}). Mirá "
-                            f"{TAMANO_DE_LA_MUESTRA} más: si no aparecen errores nuevos, se "
-                            "habilita la aprobación.")
-                    else:
-                        st.error(
-                            f"🔴 **{_mal_m} errores en {_revisados_m}.** Aprobar el resto a "
-                            f"ciegas metería alrededor de {miles(_p_m * len(_resto), 0)} vínculos "
-                            "malos. Mejor revisarlos uno por uno abajo, o mirar 30 más para "
-                            "ver si los errores se concentran en algo que se pueda descartar "
-                            "de una.")
-                    if _resto:
-                        _v1, _v2 = st.columns(2)
-                        if se_puede_aprobar_el_resto(_mal_m, _revisados_m) and _v1.button(
-                                f"✅ Aprobar los {miles(len(_resto))} que quedan del grupo",
-                                type="primary" if _mal_m == 0 else "secondary",
-                                key=f"apr_resto_{abs(hash(clave_g))}"):
-                            _n_seg = len({(min(a, b), max(a, b)) for a, b in
-                                          pares_de_piezas_de_seguridad(_pares_resto)})
-                            _n_pte = len({(min(a, b), max(a, b)) for a, b in
-                                          pares_que_unen_redes(_pares_resto)})
-                            _n_ap = aprobar_pendientes(lote, _pares_resto, en_bloque=True)
-                            invalidar_salud()
-                            avisar("success", f"Se aprobaron {miles(_n_ap)} vínculo(s) del grupo "
-                                              f"{nombre}."
-                                   + (f" {_n_seg} de piezas de seguridad quedaron en la cola, "
-                                      "para mirarlas de a una." if _n_seg else "")
-                                   + (f" {_n_pte} que unen redes grandes quedaron en la cola "
-                                      "(🔥, arriba)." if _n_pte else ""))
-                            st.rerun()
-                        if _v2.button(f"➕ Mirar {TAMANO_DE_LA_MUESTRA} más",
-                                      key=f"ampliar_{abs(hash(clave_g))}"):
-                            muestra_de_control(clave_g, list(_por_par_g), ampliar=True)
-                            st.rerun()
-                        if _mal_m >= 2 and _mal_m * 2 >= _revisados_m:
-                            if st.button(f"🚫 Descartar los {miles(len(_resto))} que quedan del grupo",
-                                         key=f"rec_resto_{abs(hash(clave_g))}"):
-                                rechazar_pendientes(lote, _pares_resto)
-                                invalidar_salud()
-                                avisar("success", f"Se descartó el resto del grupo {nombre}.")
-                                st.rerun()
-
-            _grupos_m = grupos_de_limpias(limpias)
-            if _grupos_m:
-                st.markdown("**🎯 Aprobar las limpias por grupos, con una muestra de control**")
-                explicar(
-                    "Revisás 30 pares al azar de un grupo y, según cuántos estén mal, aprobás "
-                    "el resto de una.",
-                    "«Sin alarmas» no quiere decir «bien»: quiere decir que el análisis no "
-                    "encontró nada en contra. Cuántos están mal de verdad solo se sabe "
-                    "mirando.\n\n"
-                    "Cada grupo son las limpias entre dos listas. La app elige unas cuantas al "
-                    "azar —30, 50 u 80 según el tamaño del grupo; siempre las mismas, aunque "
-                    "recargues o "
-                    "las mire otra persona— y vos marcás cada una. Con lo que salga, la app "
-                    "te dice cuántos errores se pueden esperar en el resto y te deja aprobarlo "
-                    "entero de un toque.\n\n"
-                    "Cuando marcás uno como malo y decís por qué, la app busca en la lista los "
-                    "que tienen el mismo problema y te los ofrece para descartar juntos."
-                )
-                # Se elige por el PAR DE LISTAS y no por el rótulo: el rótulo lleva la cantidad,
-                # y al guardar la muestra la cantidad cambia. Elegido por el rótulo, el
-                # selector dejaba de encontrar lo elegido y saltaba al grupo más grande, con la
-                # persona a mitad de la muestra de otro.
-                _por_grupo = {(ma, mb, fr): filas_g for ma, mb, filas_g, fr in _grupos_m}
-                _clave_sel_g = f"grupo_muestra_{_lote_m}"
-                if st.session_state.get(_clave_sel_g) not in _por_grupo:
-                    st.session_state.pop(_clave_sel_g, None)
-                _elegido_g = st.selectbox(
-                    "Grupo:", list(_por_grupo), key=_clave_sel_g,
-                    format_func=lambda g: (f"{g[0]} ↔ {g[1]}"
-                                           + {"alta": " · confianza alta",
-                                              "media": " · confianza media"}.get(g[2], "")
-                                           + f" — {miles(len(_por_grupo[g]))} limpias"))
-                _ma_g, _mb_g, _fr_g = _elegido_g
-                _filas_g = _por_grupo[_elegido_g]
-                _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g, _fr_g)
-                if _fr_g:
-                    st.caption(
-                        "Este par de listas es grande y se partió en dos: las de confianza "
-                        f"alta ({CONFIANZA_ALTA} o más) y las de confianza media. Cada una tiene "
-                        "su muestra, así los errores de las de confianza media no se esconden "
-                        "entre miles de las otras.")
-                _panel_de_muestra(_lote_m, _clave_g, _filas_g, _candidatas_m, _clave_parecidos,
-                                  f"{_ma_g} ↔ {_mb_g}"
-                                  + (f" (confianza {_fr_g})" if _fr_g else ""))
-                st.markdown("---")
-
-            # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se
-            # eligen a mano, de a un producto: ver abanicos_para_elegir().
-            # Primero los fáciles: los que ya tienen una sugerida (ver pieza_sugerida_del_abanico())
-            # y, entre esos, los de menos opciones. Antes iban primero los de más candidatos, que
-            # son justo los más difíciles, y el avance se sentía nulo.
-            _abanicos = _del_analisis("_abanicos_ordenados", lambda: sorted(
-                abanicos_para_elegir(limpias, sospechosas),
-                key=lambda a: (pieza_sugerida_del_abanico(a) is None,
-                               len(candidatos_por_pieza(a)))))
-            if _abanicos:
-                st.markdown(f"**🪭 Elegí cuál es la equivalente** — {len(_abanicos)} producto(s)")
-                explicar(
-                    "Productos que coinciden con varios productos distintos de otra lista. "
-                    "Como mucho uno es el mismo: elegilo.",
-                    "Pasa cuando una descripción es vaga —«Jta.Tapa Cil. TOYOTA HILUX», sin "
-                    "motor— o nombra muchos autos, y encaja con varias piezas de la otra lista. "
-                    "Ninguna regla puede elegir entre ellas; una persona sí.\n\n"
-                    "Cada opción es una pieza con todas sus variantes (la misma junta en otro "
-                    "material o espesor); si el producto dice su espesor, se aprueban solo las "
-                    "de ese espesor. Marcá la que es la misma pieza y tildá «Ya lo miré» para "
-                    "descartar las demás. Si no tildás, solo se aprueba la marcada y el resto "
-                    "queda para después.\n\n"
-                    "La marcada con ⭐ viene ya elegida: es la que mejor coincide —más modelo, "
-                    "motor y cilindrada en común— y le gana a todas las demás, o la que ya es "
-                    "su equivalente por vínculos aprobados (🔗 en la tabla: ya se encuentran al "
-                    "buscar). Si no es, sacala."
-                )
-                _por_pag_ab = 5
-                _pags_ab = (len(_abanicos) - 1) // _por_pag_ab + 1
-                _pag_ab = (st.number_input(f"Página (de {_pags_ab}):", min_value=1,
-                                           max_value=_pags_ab, value=1, step=1,
-                                           key=f"pag_abanicos_{_lote_m}")
-                           if _pags_ab > 1 else 1)
-                _estos_ab = _abanicos[(int(_pag_ab) - 1) * _por_pag_ab:int(_pag_ab) * _por_pag_ab]
-                with st.form(key=f"form_abanicos_{_lote_m}_{_pag_ab}"):
-                    for _i_ab, _ab in enumerate(_estos_ab):
-                        _prod = _ab["producto"]
-                        st.markdown(f"**{_prod['marca']} {_prod['cod']}** — "
-                                    f"{len(_ab['candidatos'])} candidatos en {_ab['marca_otra']}")
-                        st.caption((_prod.get("desc") or "")[:160])
-                        # Lo que distingue a cada opción, a la vista: ver tabla_del_abanico().
-                        st.dataframe(tabla_del_abanico(_ab), width="stretch", hide_index=True)
-                        _opciones_ab = {}
-                        for _base, _filas_b in candidatos_por_pieza(_ab):
-                            _f = _filas_b[0]
-                            _lado_o = "b" if _f["a"] == _prod["id"] else "a"
-                            _opciones_ab[_base] = (
-                                f"{_f[f'cod_{_lado_o}']}"
-                                + (f" (+{len(_filas_b) - 1} variantes)" if len(_filas_b) > 1 else "")
-                                + f" — {(_f.get(f'desc_{_lado_o}') or '')[:80]}")
-                        _sugerida_ab = pieza_sugerida_del_abanico(_ab)
-                        if _sugerida_ab in _opciones_ab:
-                            _opciones_ab[_sugerida_ab] = "⭐ " + _opciones_ab[_sugerida_ab]
-                        st.multiselect("Las que son la misma pieza:", list(_opciones_ab),
-                                       placeholder="Elegí la o las que son la misma pieza…",
-                                       default=[_sugerida_ab] if _sugerida_ab in _opciones_ab
-                                       else [],
-                                       format_func=lambda k, o=_opciones_ab: o[k],
-                                       key=f"ab_sel_{_prod['id']}_{_ab['marca_otra']}")
-                        st.checkbox("Ya lo miré: las que no marqué no son",
-                                    key=f"ab_listo_{_prod['id']}_{_ab['marca_otra']}")
-                        st.markdown("")
-                    _guardar_ab = st.form_submit_button("💾 Guardar estos", type="primary")
-                if _guardar_ab:
-                    _n_ap_ab = _n_rec_ab = 0
-                    for _ab in _estos_ab:
-                        _k = f"{_ab['producto']['id']}_{_ab['marca_otra']}"
-                        _bases_sel = set(st.session_state.get(f"ab_sel_{_k}") or [])
-                        _sel = {(f["a"], f["b"]) for _base, _filas_b in candidatos_por_pieza(_ab)
-                                if _base in _bases_sel for f in _filas_b}
-                        _listo = st.session_state.get(f"ab_listo_{_k}")
-                        if _sel:
-                            _n_ap_ab += aprobar_pendientes(_lote_m, [p for a, b in _sel
-                                                                     for p in ((a, b), (b, a))])
-                        if _listo:
-                            _resto_ab = [(f["a"], f["b"]) for f in _ab["candidatos"]
-                                         if (f["a"], f["b"]) not in _sel]
-                            if _resto_ab:
-                                _n_rec_ab += rechazar_pendientes(
-                                    _lote_m, [p for a, b in _resto_ab for p in ((a, b), (b, a))],
-                                    motivo="otra_pieza")
-                    invalidar_salud()
-                    avisar("success", f"Guardado: ✅ {_n_ap_ab} aprobado(s) · 🚫 {_n_rec_ab} "
-                                      "descartado(s).")
-                    st.rerun()
-                st.markdown("---")
-
-            pares_limpios = []
-            for x in limpias:
-                pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
-            with st.expander("Otras acciones sobre toda la lista", key="exp_otras_acciones_sobre_toda"):
-                st.caption("Aprobar sin muestra es aprobar a ciegas: nadie sabe cuántos están "
-                           "mal. Conviene usar la muestra de arriba.")
-                bl1, bl2 = st.columns(2)
-                # A CIEGAS, SOLO ADMINISTRADOR: aprobar o descartar la lista entera sin mirar
-                # una muestra. Lo podía hacer cualquier operador de un toque (ver
-                # rechazar_pendientes()).
-                if candado("aprobar una lista entera sin muestra",
-                           bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas, sin muestra",
-                                      key=f"apr_limpias_{lote_info['lote']}",
-                                      disabled=not limpias,
-                                      help="Las piezas de seguridad y lo que une redes grandes no "
-                                           "entran: quedan para mirarlos de a uno. Pide la "
-                                           "contraseña de administrador."),
-                           f"aprobar_sin_muestra_{lote_info['lote']}"):
-                    _n_sin = aprobar_pendientes(lote_info["lote"], pares_limpios, en_bloque=True)
-                    invalidar_salud()
-                    avisar("success", f"Se aprobaron {miles(_n_sin)} vínculo(s) sin muestra.")
-                    st.rerun()
-                if candado("descartar una lista entera",
-                           bl2.button("🚫 Descartar toda esta lista",
-                                      key=f"rec_lote_{lote_info['lote']}",
-                                      help="Los productos y precios quedan; solo se descartan "
-                                           "los vínculos. Pide la contraseña de administrador."),
-                           f"descartar_lista_{lote_info['lote']}"):
-                    _n_desc = rechazar_pendientes(lote_info["lote"], None)
-                    invalidar_salud()
-                    avisar("success", f"Se descartaron {miles(_n_desc)} vínculo(s).")
-                    st.rerun()
-
-            # Descartar en bloque los que el análisis ya dio por perdidos. Sin esto, la app
-            # marcaba cientos como «casi seguro mal» y después te los hacía resolver de a uno,
-            # que es exactamente lo que el análisis venía a evitar.
-            if por_nivel["🔴"]:
-                pares_rojos = []
-                for x in por_nivel["🔴"]:
-                    pares_rojos.extend([(x["a"], x["b"]), (x["b"], x["a"])])
-                st.error(
-                    f"🔴 Hay **{len(por_nivel['🔴'])} vínculos «casi seguro mal»** en esta tanda. "
-                    "No hace falta mirarlos de a uno: el análisis ya tiene evidencia en contra de "
-                    "todos (rubros distintos, medidas que no dan, o tu propio historial)."
-                )
-                if st.button(f"🚫 Descartar los {len(por_nivel['🔴'])} marcados 🔴",
-                              key=f"rec_rojos_{lote_info['lote']}", type="primary"):
-                    rechazar_pendientes(lote_info["lote"], pares_rojos)
-                    invalidar_salud()
-                    avisar("success", f"Se descartaron {len(por_nivel['🔴'])} vínculo(s) de una.")
-                    st.rerun()
-
-            # Y cuando tu propio historial es contundente sobre una combinación de marcas,
-            # ofrecer resolver TODA esa combinación de una vez.
-            combinaciones = {}
-            for x in limpias + sospechosas:
-                clave = tuple(sorted((x.get("marca_a", ""), x.get("marca_b", ""))))
-                combinaciones.setdefault(clave, []).append(x)
-            for (ma, mb), items in sorted(combinaciones.items(), key=lambda t: -len(t[1])):
-                dato = patrones_ui["marcas"].get((ma, mb)) if patrones_ui else None
-                if not dato or dato["tasa_ok"] > 0.05 or dato["decisiones"] < 50:
-                    continue
-                pares_comb = []
-                for x in items:
-                    pares_comb.extend([(x["a"], x["b"]), (x["b"], x["a"])])
-                st.warning(
-                    f"📚 **De {miles(dato['decisiones'])} vínculos {ma}↔{mb} que revisaste, descartaste "
-                    f"el {(1-dato['tasa_ok'])*100:.0f}%.** En esta tanda hay {len(items)} más de "
-                    "esa misma combinación. Si van a terminar igual, resolvelos de una."
-                )
-                if st.button(f"🚫 Descartar los {len(items)} de {ma}↔{mb}",
-                              key=f"rec_comb_{lote_info['lote']}_{ma}_{mb}"):
-                    rechazar_pendientes(lote_info["lote"], pares_comb)
-                    invalidar_salud()
-                    avisar("success", f"Se descartaron {len(items)} vínculo(s) de {ma}↔{mb}.")
-                    st.rerun()
-                break   # de a una combinación por vez, para no llenar la pantalla
-
-            if limpias:
-                with st.expander(f"Ver los {len(limpias)} sin alarmas", key="exp_ver_sin_alarmas"):
-                    st.dataframe(
-                        [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
-                           "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:500]],
-                        width="stretch", hide_index=True
+                        f"📦 **{len(relacionadas)} par(es) son un kit y una pieza que viene "
+                        "adentro, o un accesorio y su pieza** (el capuchón y la bobina en la que "
+                        "monta). No son equivalentes —no se puede vender una en lugar de la "
+                        "otra— así que no te los pongo a decidir de a uno. El buscador te ofrece "
+                        "el kit igual cuando buscás la pieza suelta."
                     )
-                    if len(limpias) > 500:
-                        st.caption(f"Se muestran 500 de {len(limpias)}; el botón de aprobar los toma a todos.")
-
-            # Los que están en revisión SOLO por el abanico se eligen arriba, en «Elegí cuál es
-            # la equivalente»: acá serían cientos de pares sueltos con el mismo motivo.
-            sospechosas = [x for x in sospechosas
-                           if not (x.get("alarmas") and all(a.startswith("🪭")
-                                                            for a in x["alarmas"]))]
-            # 📋 PARA REVISAR, POR MOTIVO. Ver grupos_por_motivo(). Antes la única forma era la
-            # lista de abajo, de a 10 por página: con 8.000 pares en revisión, eso no se termina.
-            _grupos_mot = _del_analisis("_grupos_por_motivo", lambda: grupos_por_motivo(sospechosas))
-            if _grupos_mot:
-                st.markdown("---")
-                st.markdown(f"**📋 Para revisar, por motivo** — {miles(len(sospechosas))} par(es) "
-                            f"en {len(_grupos_mot)} motivo(s)")
-                explicar(
-                    "Los pares en revisión agrupados por el motivo. Los que el texto contradice "
-                    "se descartan de una; los dudosos, con una muestra.",
-                    "**🚫 Se descartan**: los dos textos dicen que son piezas distintas —otro "
-                    "auto, otro motor, otra cantidad de cilindros, junta de cárter contra junta "
-                    "de tapa—, o las medidas no dan. Mirá los ejemplos y descartá el grupo "
-                    "entero.\n\n"
-                    "**🎯 Con muestra**: la app no pudo decidir —«nada dice que sean la misma "
-                    "pieza», el precio, un código que apunta a dos productos—. Se resuelven igual "
-                    "que las limpias: mirás una muestra y, según lo que salga, aprobás o "
-                    "descartás el resto.\n\n"
-                    "Abajo sigue la lista de a uno, para el que quiera ir par por par."
-                )
-                _etiqueta_rec = {"descartar": "🚫 Descartar el grupo", "muestra": "🎯 Con muestra"}
-                st.dataframe([{"Motivo": m, "Pares": len(fs), "Qué conviene": _etiqueta_rec[r]}
-                              for m, r, fs in _grupos_mot],
-                             width="stretch", hide_index=True)
-                _por_motivo_g = {m: (r, fs) for m, r, fs in _grupos_mot}
-                _clave_sel_mot = f"motivo_elegido_{_lote_m}"
-                if st.session_state.get(_clave_sel_mot) not in _por_motivo_g:
-                    st.session_state.pop(_clave_sel_mot, None)
-                _motivo_g = st.selectbox(
-                    "Motivo:", list(_por_motivo_g), key=_clave_sel_mot,
-                    format_func=lambda m: f"{m} — {miles(len(_por_motivo_g[m][1]))} "
-                                          f"({_etiqueta_rec[_por_motivo_g[m][0]]})")
-                _rec_g, _filas_mot = _por_motivo_g[_motivo_g]
-                if _rec_g == "descartar":
-                    import random as _random
-                    _ejemplos = _random.Random(_motivo_g).sample(_filas_mot, min(8, len(_filas_mot)))
-                    st.caption("Ejemplos al azar del grupo:")
-                    st.dataframe([{"A": f"{f['marca_a']} {f['cod_a']} — {(f.get('desc_a') or '')[:60]}",
-                                   "B": f"{f['marca_b']} {f['cod_b']} — {(f.get('desc_b') or '')[:60]}",
-                                   "Por qué": (f["alarmas"][0] if f.get("alarmas") else "")[:80]}
-                                  for f in _ejemplos], width="stretch", hide_index=True)
-                    _dm1, _dm2 = st.columns(2)
-                    if _dm1.button(f"🚫 Descartar los {miles(len(_filas_mot))}", type="primary",
-                                   key=f"desc_motivo_{_lote_m}_{abs(hash(_motivo_g))}"):
-                        _n_dm = rechazar_pendientes(
-                            _lote_m, [p for f in _filas_mot for p in ((f["a"], f["b"]), (f["b"], f["a"]))],
-                            motivo=motivo_de_rechazo_del_grupo(_motivo_g))
+                    with st.expander(f"Ver los {len(relacionadas)}", key="exp_ver"):
+                        st.dataframe(
+                            [{"Código A": x.get("cod_a"), "Marca A": x.get("marca_a"),
+                              "Código B": x.get("cod_b"), "Marca B": x.get("marca_b"),
+                              "Relación": x.get("relacion", "")} for x in relacionadas],
+                            width="stretch", hide_index=True)
+                    if st.button(f"🚫 Descartar esos {len(relacionadas)}",
+                                  key=f"desc_rel_{lote_info['lote']}"):
+                        _pares_rel = [(x["a"], x["b"]) for x in relacionadas]
+                        _n = rechazar_pendientes(lote_info["lote"], _pares_rel)
                         invalidar_salud()
-                        avisar("success", f"Se descartaron {miles(_n_dm)} par(es) de «{_motivo_g}».")
+                        avisar("success", f"Se descartaron {_n} par(es) de kit o accesorio y pieza.")
                         st.rerun()
-                    _mirar_antes = _dm2.checkbox("Prefiero mirar una muestra antes",
-                                                 key=f"muestra_motivo_{_lote_m}_{abs(hash(_motivo_g))}")
-                else:
-                    _mirar_antes = True
-                if _mirar_antes:
-                    _panel_de_muestra(_lote_m, f"{_lote_m}|motivo|{_motivo_g}", _filas_mot,
-                                      _candidatas_m, _clave_parecidos, f"«{_motivo_g}»")
 
-            if sospechosas:
-                st.markdown("---")
-                st.markdown("**🔎 De a uno**")
-                # «Con algo raro» no es cierto para todos: el corte lo decide el PUNTAJE, y un
-                # vínculo puede quedar abajo de 55 sin ninguna alarma, solo porque no encontró
-                # evidencia a favor. Sobre la lista de Illinois son 285 de 595. Llamarlos a
-                # todos «raros» manda a buscar un problema que en la mitad no existe: lo que
-                # les falta es respaldo, que es otra cosa y se revisa distinto.
-                _con_alarma = [x for x in sospechosas if x.get("alarmas")]
-                _sin_respaldo = len(sospechosas) - len(_con_alarma)
-                st.warning(
-                    f"⚠️ **{len(sospechosas)} vínculo(s) para revisar.** "
-                    + (f"{len(_con_alarma)} tienen alguna alarma concreta"
-                       + (f" y {_sin_respaldo} no tienen ninguna: simplemente no se encontró "
-                          "evidencia a favor (ni medidas, ni catálogo, ni parecido de "
-                          "descripción), así que quedaron con poco puntaje."
-                          if _sin_respaldo else ".")
-                       if _con_alarma else
-                       "Ninguno tiene una alarma concreta: lo que les falta es evidencia a "
-                       "favor, así que quedaron con poco puntaje.")
-                )
-                # De a tandas por pantalla: con cientos, la página se vuelve imposible de usar
-                por_pagina = st.radio("Mostrar de a:", [10, 25, 50], horizontal=True,
-                                       key="sosp_por_pagina")
-                paginas = (len(sospechosas) - 1) // por_pagina + 1
-                if paginas > 1:
-                    if "_ir_a_pagina_sospechosas" in st.session_state:
-                        st.session_state["pagina_sospechosas"] = min(
-                            st.session_state.pop("_ir_a_pagina_sospechosas"), paginas)
-                    pagina_sosp = st.number_input(
-                        f"Página (de {paginas}) — cada una trae {por_pagina}:",
-                        min_value=1, max_value=paginas, value=1, step=1, key="pagina_sospechosas"
+                # Se agrupa por confianza, no por "tiene alarma / no tiene". Con 397 alarmas planas
+                # había que mirarlas de a una; así se ve de una que la mayoría es descartable y solo
+                # un puñado merece atención.
+                patrones_ui = aprender_de_las_decisiones()
+                todos_evaluados = limpias + sospechosas
+                por_nivel = {"🟢": [], "🟡": [], "🟠": [], "🔴": []}
+                for x in todos_evaluados:
+                    por_nivel[nivel_de_confianza(x.get("confianza", 50))[0][:1]].append(x)
+
+                mn1, mn2, mn3, mn4 = st.columns(4)
+                mn1.metric("🟢 Muy probables", miles(len(por_nivel["🟢"])))
+                mn2.metric("🟡 Probables", miles(len(por_nivel["🟡"])))
+                mn3.metric("🟠 Dudosas", miles(len(por_nivel["🟠"])))
+                mn4.metric("🔴 Casi seguro mal", miles(len(por_nivel["🔴"])))
+
+                # 🧭 EL PLAN. Ver plan_de_la_lista(): qué conviene hacer primero y cuánto trabajo
+                # lleva cada paso, para no tener que descubrirlo recorriendo la pantalla.
+                _plan = _del_analisis("_plan_de_la_lista",
+                                      lambda: plan_de_la_lista(limpias, sospechosas, relacionadas))
+                if _plan:
+                    with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True, key="exp_como_resolver_esta_lista"):
+                        st.dataframe(_plan, width="stretch", hide_index=True)
+                        ayuda("De arriba hacia abajo: cada paso achica lo que queda para los "
+                              "siguientes. Los que dicen «1 toque» no necesitan mirar par por "
+                              "par; los de muestra, solo los que la app elige al azar.")
+
+                # Cuando el problema es UN producto que aparece en decenas de pendientes, se resuelve
+                # de una. Antes había que aprobar o descartar cada vínculo por separado, aunque los
+                # cincuenta dijeran exactamente lo mismo.
+                culpables = productos_que_mas_ensucian(lote_info["lote"])
+                if culpables:
+                    total_culpa = sum(x["Pendientes que genera"] for x in culpables)
+                    st.warning(
+                        f"🎯 **{len(culpables)} producto(s) con código dudoso generan {total_culpa} "
+                        "de estos pendientes.** Resolvelos de una en vez de vínculo por vínculo."
                     )
-                else:
-                    pagina_sosp = 1
-                desde = (int(pagina_sosp) - 1) * por_pagina
+                    st.dataframe(quitar_id(culpables), width="stretch", hide_index=True)
+                    etiquetas_culpa = {
+                        f"{x['Código']} ({x['Marca']}) — {x['Pendientes que genera']} pendientes": x["_id"]
+                        for x in culpables
+                    }
+                    elegido_culpa = st.selectbox("¿Cuál resolver?", list(etiquetas_culpa.keys()),
+                                                  key=f"culpable_{lote_info['lote']}")
+                    cc1, cc2 = st.columns(2)
+                    if cc1.button("🚫 Descartar TODOS sus pendientes", key=f"desc_culpa_{lote_info['lote']}"):
+                        n = rechazar_pendientes_de_producto(etiquetas_culpa[elegido_culpa],
+                                                             lote_info["lote"])
+                        invalidar_salud()
+                        avisar("success", f"Se descartaron {n} vínculo(s) de una.")
+                        st.rerun()
+                    if cc2.button("✅ El código está bien, no volver a marcarlo",
+                                   key=f"ok_culpa_{lote_info['lote']}"):
+                        aprobar_puente(etiquetas_culpa[elegido_culpa], "código validado a mano")
+                        invalidar_salud()
+                        avisar("success", "Anotado: ese código deja de marcarse como problema.")
+                        st.rerun()
 
-                # Agrupados por MOTIVO, no uno debajo del otro. Cuando 40 vínculos fallan por lo
-                # mismo —"«1S» es demasiado corto"— repetir la explicación 40 veces obliga a
-                # scrollear y a decidir 40 veces algo que es una sola decisión. Agrupados, se lee
-                # el motivo una vez y se resuelve el grupo entero.
-                # Y ordenados por motivo ANTES de cortar en páginas: si no, cada página de 10
-                # traía de todo un poco y agrupar dentro de ella no juntaba casi nada. Primero
-                # el motivo con el peor vínculo, como antes iba primero el peor vínculo. Con los
-                # datos reales, de a 10: ILLINOIS pasa de 315 decisiones a 45, BARRIDO de 205
-                # a 52. El tamaño de la página sigue siendo el que eligió el que revisa.
-                def _tipo(x):
-                    return tipo_de_alarma(x["alarmas"][0] if x["alarmas"] else "")
+                if por_nivel["🔴"]:
+                    muestra_mal = por_nivel["🔴"][:8]
+                    with st.expander(f"🔴 Ver por qué las {len(por_nivel['🔴'])} peores están mal", key="exp_ver_peores_estan_mal"):
+                        for x in muestra_mal:
+                            st.markdown(f"**{x['cod_a']}** ({x['marca_a']}) ↔ "
+                                         f"**{x['cod_b']}** ({x['marca_b']}) — {x['confianza']:.0f}/100")
+                            for tipo, texto in x.get("senales", []):
+                                st.caption(("❌ " if tipo == "mal" else "✅ ") + texto)
+                            for _ev in x.get("evidencia", []):
+                                st.caption("✅ " + _ev)
 
-                def _ordenadas_por_tipo():
-                    tipos = {id(x): _tipo(x) for x in sospechosas}
-                    peor, total = {}, {}
-                    for x in sospechosas:
-                        peor[tipos[id(x)]] = min(peor.get(tipos[id(x)], 100), x["confianza"])
-                        total[tipos[id(x)]] = total.get(tipos[id(x)], 0) + 1
-                    return sorted(sospechosas, key=lambda x: (peor[tipos[id(x)]], tipos[id(x)],
-                                                              x["confianza"])), total
-                _por_tipo, _total_del_tipo = _del_analisis("_por_tipo_de_alarma",
-                                                           _ordenadas_por_tipo)
-                pagina_actual = _por_tipo[desde:desde + por_pagina]
+                ml1, ml2 = st.columns(2)
+                ml1.metric("Sin nada raro", miles(len(limpias)))
+                ml2.metric("Con alguna alarma", miles(len(sospechosas)))
 
-                por_motivo = {}
-                for s in pagina_actual:
-                    por_motivo.setdefault(_tipo(s), []).append(s)
+                # Solo en una lista IMPORTADA: ahí sí que casi todo dispare alarmas dice que el mapeo
+                # de columnas salió mal. En las automáticas (el barrido de todo el catálogo, el cruce
+                # por auto) es lo esperable —se proponen muchos pares para que la revisión filtre— y
+                # el consejo de «descartá toda la lista» hacía tirar las 2.558 limpias con el resto.
+                if (analizados and len(sospechosas) / analizados > 0.7
+                        and lote_info.get("origen") == "lista_proveedor"):
+                    st.error(
+                        "🔴 Más del 70% de esta lista dispara alarmas. Eso no es que tengas mala suerte: "
+                        "casi siempre significa que la importación quedó **mal mapeada** — la columna que "
+                        "se tomó como código en realidad traía cantidades, medidas o pedazos de la "
+                        "descripción. Antes de revisar de a uno, conviene descartar toda la lista y "
+                        "volver a importarla revisando bien el mapeo de columnas."
+                    )
 
-                _lote_rev = lote_info["lote"]
-                _decididas = decisiones_del_lote(_lote_rev)
+                # APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL. Ver muestra_de_control(). Antes lo
+                # único que había era «Aprobar los N sin alarmas», a ciegas: nadie sabía cuántos de
+                # esos N estaban mal hasta que un cliente se llevaba la pieza equivocada.
+                _lote_m = lote_info["lote"]
+                _candidatas_m = limpias + sospechosas
+                _clave_parecidos = f"_parecidos_{_lote_m}"
+                # Los descartes con motivo de la revisión de a uno (ver aplicar_decisiones()): se
+                # buscan ahora, contra el análisis nuevo, que ya no tiene a los descartados.
+                _por_buscar = st.session_state.get("_buscar_parecidos", {}).pop(_lote_m, None)
+                if _por_buscar:
+                    _hallados_rev = parecidos_de_varios(_por_buscar, _candidatas_m)
+                    if _hallados_rev:
+                        st.session_state[_clave_parecidos] = _hallados_rev
+                if st.session_state.get(_clave_parecidos):
+                    _par_info = st.session_state[_clave_parecidos]
+                    _filas_par = [f for grupo_p in _par_info for f in grupo_p["filas"]]
+                    st.info(f"🧠 **Aprendí de lo que descartaste:** hay {len(_filas_par)} par(es) más "
+                            "con el mismo problema. Miralos y, si coincidís, descartalos de una.")
+                    for grupo_p in _par_info:
+                        st.caption(f"{grupo_p['motivo']} — como «{grupo_p['ejemplo']}»:")
+                        st.dataframe([{"Código A": f["cod_a"], "Marca A": f["marca_a"],
+                                       "Descripción A": (f.get("desc_a") or "")[:60],
+                                       "Código B": f["cod_b"], "Marca B": f["marca_b"],
+                                       "Descripción B": (f.get("desc_b") or "")[:60]}
+                                      for f in grupo_p["filas"]],
+                                     width="stretch", hide_index=True)
+                    _pp1, _pp2 = st.columns(2)
+                    if _pp1.button(f"🚫 Descartar esos {len(_filas_par)} también", type="primary",
+                                   key=f"desc_parecidos_{_lote_m}"):
+                        _n_par = 0
+                        for grupo_p in _par_info:
+                            _n_par += rechazar_pendientes(
+                                _lote_m, [p for f in grupo_p["filas"]
+                                          for p in ((f["a"], f["b"]), (f["b"], f["a"]))],
+                                motivo=grupo_p["clave_motivo"])
+                        st.session_state.pop(_clave_parecidos, None)
+                        invalidar_salud()
+                        avisar("success", f"Se descartaron {_n_par} par(es) con el mismo problema.")
+                        st.rerun()
+                    if _pp2.button("Dejarlos como están", key=f"dejar_parecidos_{_lote_m}"):
+                        st.session_state.pop(_clave_parecidos, None)
+                        st.rerun()
 
-                def _boton_aplicar(donde):
-                    """El botón de aplicar lo marcado. Arriba y abajo de los grupos: en el
-                    celular, después de marcar el último, el de arriba queda pantallas atrás."""
-                    _b = sum(1 for q in _decididas.values() if q == "bien")
-                    _m = len(_decididas) - _b
-                    if not _decididas:
-                        if donde == "arriba":
-                            st.caption("Marcá cada grupo (o cada vínculo) y aplicá todo junto con "
-                                       "un solo botón: una espera en vez de una por grupo.")
-                        return
-                    st.button(f"💾 Aplicar lo marcado: ✅ {_b} bien · 🚫 {_m} a descartar",
-                              type="primary", key=f"aplicar_decisiones_{donde}",
-                              on_click=aplicar_decisiones, args=(_lote_rev,))
-                    if donde == "arriba":
-                        st.caption("Nada se guarda hasta tocar «Aplicar». Lo marcado se mantiene "
-                                   "aunque cambies de página.")
+                def _panel_de_muestra(lote, clave_g, filas, candidatas, clave_parecidos, nombre):
+                    """La muestra de control de un grupo: el avance, los pares por mirar de a 10, y el veredicto
+                    con aprobar o descartar el resto. La usan los grupos por par de listas y los grupos por
+                    motivo de la revisión. Ver muestra_de_control()."""
+                    _por_par_g = {(f["a"], f["b"]): f for f in filas}
+                    clave_g = clave_vigente_de_la_muestra(clave_g, list(_por_par_g))
+                    if "|vuelta " in clave_g:
+                        nombre = f"{nombre} ({clave_g.rsplit('|', 1)[1]})"
+                    _muestra = muestra_de_control(clave_g, list(_por_par_g))
+                    _estado_m = estado_de_la_muestra(_muestra)
+                    _sin_mirar = [p for p in _muestra if _estado_m[p] == "pendiente"]
+                    _bien_m = sum(1 for p in _muestra if _estado_m[p] == "bien")
+                    _mal_m = sum(1 for p in _muestra if _estado_m[p] == "mal")
+                    # Lo que se aprueba o descarta con esta muestra son los que estaban cuando se
+                    # sorteó. Los que entraron después esperan su propia muestra: ver
+                    # clave_vigente_de_la_muestra().
+                    _al_sortear = pares_al_sortear(clave_g)
+                    _resto = [p for p in _por_par_g if p not in set(_muestra) and p in _al_sortear]
+                    _entraron_despues = [p for p in _por_par_g
+                                         if p not in _al_sortear and p not in set(_muestra)]
+                    st.progress((_bien_m + _mal_m) / max(len(_muestra), 1),
+                                text=f"Muestra: {_bien_m + _mal_m} de {len(_muestra)} revisados · "
+                                     f"✅ {_bien_m} bien · 🚫 {_mal_m} mal")
 
-                _boton_aplicar("arriba")
-                _lo_decidido = lo_decidido_con_cada_aviso()
-                for motivo, items in por_motivo.items():
-                    peor_grupo = min(x["confianza"] for x in items)
-                    icono = "🔴" if peor_grupo < 30 else "🟠" if peor_grupo < 55 else "🟡"
-                    _de_cuantos = (f" (de {_total_del_tipo[motivo]} con este motivo)"
-                                   if _total_del_tipo[motivo] > len(items) else "")
-                    # Lo que decidiste antes con este mismo motivo (ver «LO QUE DECIDISTE CON
-                    # CADA AVISO»).
-                    _antes_g = _lo_decidido.get(motivo)
-                    _antes_g = (f" · 📒 antes {texto_de_lo_decidido(_antes_g[0], sum(_antes_g))}"
-                                if _antes_g else "")
-                    st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s){_de_cuantos}"
-                                f"{_antes_g}")
+                    # Los que quedan por mirar, de a 10 y en un formulario: marcar no recarga la
+                    # pantalla, y todo se guarda junto con un botón.
+                    _a_mirar = [p for p in _sin_mirar if p in _por_par_g][:10]
+                    if _a_mirar:
+                        # La primera opción dice para qué es: el selector va sin rótulo, al lado
+                        # de la decisión, y con «—» solo no se entendía.
+                        _opciones_mot = (["Si está mal: ¿por qué? (opcional)"]
+                                         + list(MOTIVOS_DE_RECHAZO.values()))
+                        _clave_de_motivo = {v: k for k, v in MOTIVOS_DE_RECHAZO.items()}
+                        with st.form(key=f"form_muestra_{abs(hash(clave_g))}"):
+                            st.caption(f"Quedan {len(_sin_mirar)} de la muestra. Marcá estos "
+                                       f"{len(_a_mirar)} y guardá.")
+                            for _i_m, _par in enumerate(_a_mirar):
+                                _f = _por_par_g[_par]
+                                # Compacto: cada par eran cinco renglones y diez pares, dos
+                                # pantallas. La decisión y el motivo van en la misma fila.
+                                st.markdown(f"**{_i_m + 1}.** {_f['marca_a']} **{_f['cod_a']}** ↔ "
+                                            f"{_f['marca_b']} **{_f['cod_b']}**")
+                                # En negrita, los datos con números que el otro no dice.
+                                _da, _db = (_f.get('desc_a') or '')[:160], (_f.get('desc_b') or '')[:160]
+                                st.caption(f"A: {resaltar_lo_que_difiere(_da, _db)}  \n"
+                                           f"B: {resaltar_lo_que_difiere(_db, _da)}")
+                                _cd, _cm = st.columns([1, 1])
+                                _cd.radio("¿Son la misma pieza?", ["—", "✅ Bien", "🚫 Mal"],
+                                          key=f"m_dec_{_par[0]}_{_par[1]}", horizontal=True,
+                                          label_visibility="collapsed")
+                                _cm.selectbox("Si está mal, ¿por qué?", _opciones_mot,
+                                              key=f"m_mot_{_par[0]}_{_par[1]}",
+                                              label_visibility="collapsed",
+                                              help="Solo si está mal: el motivo enseña a la revisión.")
+                            _guardar_m = st.form_submit_button("💾 Guardar lo marcado",
+                                                               type="primary")
+                        if _guardar_m:
+                            _bien_ahora, _mal_ahora = [], {}
+                            for _par in _a_mirar:
+                                _dec = st.session_state.get(f"m_dec_{_par[0]}_{_par[1]}")
+                                if _dec == "✅ Bien":
+                                    _bien_ahora.append(_par)
+                                elif _dec == "🚫 Mal":
+                                    _mot = _clave_de_motivo.get(
+                                        st.session_state.get(f"m_mot_{_par[0]}_{_par[1]}"))
+                                    _mal_ahora.setdefault(_mot, []).append(_par)
+                            if _bien_ahora:
+                                aprobar_pendientes(lote, [p for a, b in _bien_ahora
+                                                             for p in ((a, b), (b, a))])
+                            _rechazados_m = []
+                            for _mot, _pares_mot in _mal_ahora.items():
+                                rechazar_pendientes(lote, [p for a, b in _pares_mot
+                                                              for p in ((a, b), (b, a))],
+                                                    motivo=_mot)
+                                if _mot:
+                                    _rechazados_m.extend((_mot, _por_par_g[_par])
+                                                         for _par in _pares_mot)
+                            _muestra_set = set(_muestra)
+                            _parecidos_nuevos = parecidos_de_varios(
+                                _rechazados_m, [f for f in candidatas
+                                                if (f["a"], f["b"]) not in _muestra_set])
+                            if _parecidos_nuevos:
+                                st.session_state[clave_parecidos] = _parecidos_nuevos
+                            invalidar_salud()
+                            _n_mal = sum(len(v) for v in _mal_ahora.values())
+                            avisar("success", f"Guardado: ✅ {len(_bien_ahora)} bien · 🚫 {_n_mal} mal.")
+                            st.rerun()
+                    elif _sin_mirar:
+                        st.caption("Los que faltan de la muestra ya no están en esta tanda: los "
+                                   "resolvió otra persona o cambió el análisis.")
 
-                    _pares_grupo = [(x["a"], x["b"]) for x in items]
-                    # El selector del grupo muestra lo que tienen sus pares: si todos tienen lo
-                    # mismo, eso; si no, «—» y abajo cuántos se decidieron de a uno.
-                    _clave_g = f"dec_grupo_{_lote_rev}_{desde}_{por_pagina}_{abs(hash(motivo))}"
-                    _hay = {_decididas.get(par) for par in _pares_grupo}
-                    st.session_state[_clave_g] = (_ROTULO_DE_LA_DECISION[_hay.pop()]
-                                                  if len(_hay) == 1 else "—")
-                    st.radio(f"¿Qué hacés con {'estos ' + str(len(items)) if len(items) > 1 else 'este'}?",
-                             list(DECISIONES_DE_REVISION), key=_clave_g, horizontal=True,
-                             on_change=anotar_decision, args=(_lote_rev, _clave_g, _pares_grupo))
-                    # El «¿por qué?» del descarte: con él, la app busca los parecidos (ver
-                    # aplicar_decisiones()). Opcional: descartar sin decirlo sigue andando.
-                    if st.session_state[_clave_g] == "🚫 Descartar":
-                        _clave_mg = f"mot_{_clave_g}"
-                        _motivos_rev = motivos_del_lote(_lote_rev)
-                        _ya_mot = {(_motivos_rev.get(par) or (None,))[0] for par in _pares_grupo}
-                        st.session_state[_clave_mg] = (MOTIVOS_DE_RECHAZO.get(_ya_mot.pop(), "—")
-                                                       if len(_ya_mot) == 1 else "—")
-                        st.selectbox("¿Por qué? (opcional: sirve para encontrar los parecidos)",
-                                     ["—"] + list(MOTIVOS_DE_RECHAZO.values()), key=_clave_mg,
-                                     on_change=anotar_motivo, args=(_lote_rev, _clave_mg, items))
-                    if len(_hay) > 1 or (len(_hay) == 1 and st.session_state[_clave_g] == "—"
-                                         and any(_decididas.get(par) for par in _pares_grupo)):
-                        _b_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "bien")
-                        _m_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "mal")
-                        st.caption(f"Decididos de a uno: ✅ {_b_g} · 🚫 {_m_g} · "
-                                   f"sin decidir {len(items) - _b_g - _m_g}")
+                    if _entraron_despues:
+                        st.info(
+                            f"➕ **{miles(len(_entraron_despues))} par(es) entraron a este grupo después "
+                            "de sortear la muestra** —una prueba nueva los subió, o llegaron con "
+                            "otra tanda—. Esta muestra no habla de ellos, así que no se aprueban con "
+                            "ella: cuando termines con los de esta muestra, van a tener la suya.")
 
-                    with st.expander(f"Ver los {len(items)} uno por uno" if len(items) > 1
-                                     else "Ver el detalle", key=f"exp_{_clave_g}"):
-                        for s in items:
-                            st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ "
-                                         f"{s['marca_b']} {s['cod_b']}** · {s['confianza']:.0f}/100")
-                            # La del título ya se leyó arriba; si el título es el motivo sin
-                            # el detalle («espesor» y no «espesor: 3 vs 5»), el detalle va acá.
-                            for i_al, alarma in enumerate(s["alarmas"]):
-                                if i_al or alarma != motivo:
-                                    st.caption(f"   {alarma}")
-                            if len(items) > 1:
-                                _clave_p = f"dec_{_lote_rev}_{s['a']}_{s['b']}"
-                                st.session_state[_clave_p] = _ROTULO_DE_LA_DECISION[
-                                    _decididas.get((s["a"], s["b"]))]
-                                st.radio("Este:", list(DECISIONES_DE_REVISION), key=_clave_p,
-                                         horizontal=True, label_visibility="collapsed",
-                                         on_change=anotar_decision,
-                                         args=(_lote_rev, _clave_p, [(s["a"], s["b"])]))
-                                if st.session_state[_clave_p] == "🚫 Descartar":
-                                    _clave_mp = f"mot_{_clave_p}"
-                                    st.session_state[_clave_mp] = MOTIVOS_DE_RECHAZO.get(
-                                        (motivos_del_lote(_lote_rev).get((s["a"], s["b"]))
-                                         or (None,))[0], "—")
-                                    st.selectbox("¿Por qué?", ["—"] + list(MOTIVOS_DE_RECHAZO.values()),
-                                                 key=_clave_mp, on_change=anotar_motivo,
-                                                 args=(_lote_rev, _clave_mp, [s]))
+                    # EL VEREDICTO, cuando la muestra está completa.
+                    _revisados_m = _bien_m + _mal_m
+                    if not _a_mirar and _revisados_m:
+                        _p_m, _tope_m, _n_tope_m = estimacion_de_errores(_mal_m, _revisados_m,
+                                                                         len(_resto))
+                        _pares_resto = [p for a, b in _resto for p in ((a, b), (b, a))]
+                        if not _resto:
+                            st.success(f"✅ El grupo entero ya está revisado ({_revisados_m} pares).")
+                        elif se_puede_aprobar_el_resto(_mal_m, _revisados_m):
+                            (st.success if _mal_m == 0 else st.warning)(
+                                (f"✅ **Ningún error en {_revisados_m}.** " if _mal_m == 0 else
+                                 f"🟡 **{_mal_m} error(es) en {_revisados_m}.** ")
+                                + f"Del resto del grupo se puede esperar como mucho {_tope_m:.0%} "
+                                f"mal —unos {_n_tope_m} de {miles(len(_resto))}—. Alcanza para aprobarlo.")
+                        elif _mal_m * 2 < _revisados_m and _tope_m <= 0.25:
+                            st.warning(
+                                f"🟡 **{_mal_m} error(es) en {_revisados_m}.** Todavía no alcanza: "
+                                f"en el resto podría haber hasta {_tope_m:.0%} mal (unos "
+                                f"{_n_tope_m} de {miles(len(_resto))}). Mirá "
+                                f"{TAMANO_DE_LA_MUESTRA} más: si no aparecen errores nuevos, se "
+                                "habilita la aprobación.")
+                        else:
+                            st.error(
+                                f"🔴 **{_mal_m} errores en {_revisados_m}.** Aprobar el resto a "
+                                f"ciegas metería alrededor de {miles(_p_m * len(_resto), 0)} vínculos "
+                                "malos. Mejor revisarlos uno por uno abajo, o mirar 30 más para "
+                                "ver si los errores se concentran en algo que se pueda descartar "
+                                "de una.")
+                        if _resto:
+                            _v1, _v2 = st.columns(2)
+                            if se_puede_aprobar_el_resto(_mal_m, _revisados_m) and _v1.button(
+                                    f"✅ Aprobar los {miles(len(_resto))} que quedan del grupo",
+                                    type="primary" if _mal_m == 0 else "secondary",
+                                    key=f"apr_resto_{abs(hash(clave_g))}"):
+                                _n_seg = len({(min(a, b), max(a, b)) for a, b in
+                                              pares_de_piezas_de_seguridad(_pares_resto)})
+                                _n_pte = len({(min(a, b), max(a, b)) for a, b in
+                                              pares_que_unen_redes(_pares_resto)})
+                                _n_ap = aprobar_pendientes(lote, _pares_resto, en_bloque=True)
+                                invalidar_salud()
+                                avisar("success", f"Se aprobaron {miles(_n_ap)} vínculo(s) del grupo "
+                                                  f"{nombre}."
+                                       + (f" {_n_seg} de piezas de seguridad quedaron en la cola, "
+                                          "para mirarlas de a una." if _n_seg else "")
+                                       + (f" {_n_pte} que unen redes grandes quedaron en la cola "
+                                          "(🔥, arriba)." if _n_pte else ""))
+                                st.rerun()
+                            if _v2.button(f"➕ Mirar {TAMANO_DE_LA_MUESTRA} más",
+                                          key=f"ampliar_{abs(hash(clave_g))}"):
+                                muestra_de_control(clave_g, list(_por_par_g), ampliar=True)
+                                st.rerun()
+                            if _mal_m >= 2 and _mal_m * 2 >= _revisados_m:
+                                if st.button(f"🚫 Descartar los {miles(len(_resto))} que quedan del grupo",
+                                             key=f"rec_resto_{abs(hash(clave_g))}"):
+                                    rechazar_pendientes(lote, _pares_resto)
+                                    invalidar_salud()
+                                    avisar("success", f"Se descartó el resto del grupo {nombre}.")
+                                    st.rerun()
+
+                _grupos_m = grupos_de_limpias(limpias)
+                if _grupos_m:
+                    st.markdown("**🎯 Aprobar las limpias por grupos, con una muestra de control**")
+                    explicar(
+                        "Revisás 30 pares al azar de un grupo y, según cuántos estén mal, aprobás "
+                        "el resto de una.",
+                        "«Sin alarmas» no quiere decir «bien»: quiere decir que el análisis no "
+                        "encontró nada en contra. Cuántos están mal de verdad solo se sabe "
+                        "mirando.\n\n"
+                        "Cada grupo son las limpias entre dos listas. La app elige unas cuantas al "
+                        "azar —30, 50 u 80 según el tamaño del grupo; siempre las mismas, aunque "
+                        "recargues o "
+                        "las mire otra persona— y vos marcás cada una. Con lo que salga, la app "
+                        "te dice cuántos errores se pueden esperar en el resto y te deja aprobarlo "
+                        "entero de un toque.\n\n"
+                        "Cuando marcás uno como malo y decís por qué, la app busca en la lista los "
+                        "que tienen el mismo problema y te los ofrece para descartar juntos."
+                    )
+                    # Se elige por el PAR DE LISTAS y no por el rótulo: el rótulo lleva la cantidad,
+                    # y al guardar la muestra la cantidad cambia. Elegido por el rótulo, el
+                    # selector dejaba de encontrar lo elegido y saltaba al grupo más grande, con la
+                    # persona a mitad de la muestra de otro.
+                    _por_grupo = {(ma, mb, fr): filas_g for ma, mb, filas_g, fr in _grupos_m}
+                    _clave_sel_g = f"grupo_muestra_{_lote_m}"
+                    if st.session_state.get(_clave_sel_g) not in _por_grupo:
+                        st.session_state.pop(_clave_sel_g, None)
+                    _elegido_g = st.selectbox(
+                        "Grupo:", list(_por_grupo), key=_clave_sel_g,
+                        format_func=lambda g: (f"{g[0]} ↔ {g[1]}"
+                                               + {"alta": " · confianza alta",
+                                                  "media": " · confianza media"}.get(g[2], "")
+                                               + f" — {miles(len(_por_grupo[g]))} limpias"))
+                    _ma_g, _mb_g, _fr_g = _elegido_g
+                    _filas_g = _por_grupo[_elegido_g]
+                    _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g, _fr_g)
+                    if _fr_g:
+                        st.caption(
+                            "Este par de listas es grande y se partió en dos: las de confianza "
+                            f"alta ({CONFIANZA_ALTA} o más) y las de confianza media. Cada una tiene "
+                            "su muestra, así los errores de las de confianza media no se esconden "
+                            "entre miles de las otras.")
+                    _panel_de_muestra(_lote_m, _clave_g, _filas_g, _candidatas_m, _clave_parecidos,
+                                      f"{_ma_g} ↔ {_mb_g}"
+                                      + (f" (confianza {_fr_g})" if _fr_g else ""))
+                    st.markdown("---")
+
+                # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se
+                # eligen a mano, de a un producto: ver abanicos_para_elegir().
+                # Primero los fáciles: los que ya tienen una sugerida (ver pieza_sugerida_del_abanico())
+                # y, entre esos, los de menos opciones. Antes iban primero los de más candidatos, que
+                # son justo los más difíciles, y el avance se sentía nulo.
+                _abanicos = _del_analisis("_abanicos_ordenados", lambda: sorted(
+                    abanicos_para_elegir(limpias, sospechosas),
+                    key=lambda a: (pieza_sugerida_del_abanico(a) is None,
+                                   len(candidatos_por_pieza(a)))))
+                if _abanicos:
+                    st.markdown(f"**🪭 Elegí cuál es la equivalente** — {len(_abanicos)} producto(s)")
+                    explicar(
+                        "Productos que coinciden con varios productos distintos de otra lista. "
+                        "Como mucho uno es el mismo: elegilo.",
+                        "Pasa cuando una descripción es vaga —«Jta.Tapa Cil. TOYOTA HILUX», sin "
+                        "motor— o nombra muchos autos, y encaja con varias piezas de la otra lista. "
+                        "Ninguna regla puede elegir entre ellas; una persona sí.\n\n"
+                        "Cada opción es una pieza con todas sus variantes (la misma junta en otro "
+                        "material o espesor); si el producto dice su espesor, se aprueban solo las "
+                        "de ese espesor. Marcá la que es la misma pieza y tildá «Ya lo miré» para "
+                        "descartar las demás. Si no tildás, solo se aprueba la marcada y el resto "
+                        "queda para después.\n\n"
+                        "La marcada con ⭐ viene ya elegida: es la que mejor coincide —más modelo, "
+                        "motor y cilindrada en común— y le gana a todas las demás, o la que ya es "
+                        "su equivalente por vínculos aprobados (🔗 en la tabla: ya se encuentran al "
+                        "buscar). Si no es, sacala."
+                    )
+                    _por_pag_ab = 5
+                    _pags_ab = (len(_abanicos) - 1) // _por_pag_ab + 1
+                    _pag_ab = (st.number_input(f"Página (de {_pags_ab}):", min_value=1,
+                                               max_value=_pags_ab, value=1, step=1,
+                                               key=f"pag_abanicos_{_lote_m}")
+                               if _pags_ab > 1 else 1)
+                    _estos_ab = _abanicos[(int(_pag_ab) - 1) * _por_pag_ab:int(_pag_ab) * _por_pag_ab]
+                    with st.form(key=f"form_abanicos_{_lote_m}_{_pag_ab}"):
+                        for _i_ab, _ab in enumerate(_estos_ab):
+                            _prod = _ab["producto"]
+                            st.markdown(f"**{_prod['marca']} {_prod['cod']}** — "
+                                        f"{len(_ab['candidatos'])} candidatos en {_ab['marca_otra']}")
+                            st.caption((_prod.get("desc") or "")[:160])
+                            # Lo que distingue a cada opción, a la vista: ver tabla_del_abanico().
+                            st.dataframe(tabla_del_abanico(_ab), width="stretch", hide_index=True)
+                            _opciones_ab = {}
+                            for _base, _filas_b in candidatos_por_pieza(_ab):
+                                _f = _filas_b[0]
+                                _lado_o = "b" if _f["a"] == _prod["id"] else "a"
+                                _opciones_ab[_base] = (
+                                    f"{_f[f'cod_{_lado_o}']}"
+                                    + (f" (+{len(_filas_b) - 1} variantes)" if len(_filas_b) > 1 else "")
+                                    + f" — {(_f.get(f'desc_{_lado_o}') or '')[:80]}")
+                            _sugerida_ab = pieza_sugerida_del_abanico(_ab)
+                            if _sugerida_ab in _opciones_ab:
+                                _opciones_ab[_sugerida_ab] = "⭐ " + _opciones_ab[_sugerida_ab]
+                            st.multiselect("Las que son la misma pieza:", list(_opciones_ab),
+                                           placeholder="Elegí la o las que son la misma pieza…",
+                                           default=[_sugerida_ab] if _sugerida_ab in _opciones_ab
+                                           else [],
+                                           format_func=lambda k, o=_opciones_ab: o[k],
+                                           key=f"ab_sel_{_prod['id']}_{_ab['marca_otra']}")
+                            st.checkbox("Ya lo miré: las que no marqué no son",
+                                        key=f"ab_listo_{_prod['id']}_{_ab['marca_otra']}")
                             st.markdown("")
-                    st.markdown("")
-                _boton_aplicar("abajo")
-                # Marcar y pasar a la página siguiente es el ritmo de la revisión, y en el celular
-                # el «+» del número de página es chico y quedó varias pantallas más arriba.
-                if paginas > 1 and int(pagina_sosp) < paginas:
-                    def _a_la_pagina_siguiente():
-                        # A otra clave: la del número de página ya se dibujó en esta pasada. Se
-                        # vuelca antes de dibujarlo, en la próxima (ver arriba).
-                        st.session_state["_ir_a_pagina_sospechosas"] = int(pagina_sosp) + 1
-                    st.button(f"➡️ Página siguiente ({int(pagina_sosp) + 1} de {paginas})",
-                              key="pagina_sospechosas_siguiente", on_click=_a_la_pagina_siguiente)
-            st.markdown("---")
+                        _guardar_ab = st.form_submit_button("💾 Guardar estos", type="primary")
+                    if _guardar_ab:
+                        _n_ap_ab = _n_rec_ab = 0
+                        for _ab in _estos_ab:
+                            _k = f"{_ab['producto']['id']}_{_ab['marca_otra']}"
+                            _bases_sel = set(st.session_state.get(f"ab_sel_{_k}") or [])
+                            _sel = {(f["a"], f["b"]) for _base, _filas_b in candidatos_por_pieza(_ab)
+                                    if _base in _bases_sel for f in _filas_b}
+                            _listo = st.session_state.get(f"ab_listo_{_k}")
+                            if _sel:
+                                _n_ap_ab += aprobar_pendientes(_lote_m, [p for a, b in _sel
+                                                                         for p in ((a, b), (b, a))])
+                            if _listo:
+                                _resto_ab = [(f["a"], f["b"]) for f in _ab["candidatos"]
+                                             if (f["a"], f["b"]) not in _sel]
+                                if _resto_ab:
+                                    _n_rec_ab += rechazar_pendientes(
+                                        _lote_m, [p for a, b in _resto_ab for p in ((a, b), (b, a))],
+                                        motivo="otra_pieza")
+                        invalidar_salud()
+                        avisar("success", f"Guardado: ✅ {_n_ap_ab} aprobado(s) · 🚫 {_n_rec_ab} "
+                                          "descartado(s).")
+                        st.rerun()
+                    st.markdown("---")
+
+                pares_limpios = []
+                for x in limpias:
+                    pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
+                with st.expander("Otras acciones sobre toda la lista", key="exp_otras_acciones_sobre_toda"):
+                    st.caption("Aprobar sin muestra es aprobar a ciegas: nadie sabe cuántos están "
+                               "mal. Conviene usar la muestra de arriba.")
+                    bl1, bl2 = st.columns(2)
+                    # A CIEGAS, SOLO ADMINISTRADOR: aprobar o descartar la lista entera sin mirar
+                    # una muestra. Lo podía hacer cualquier operador de un toque (ver
+                    # rechazar_pendientes()).
+                    if candado("aprobar una lista entera sin muestra",
+                               bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas, sin muestra",
+                                          key=f"apr_limpias_{lote_info['lote']}",
+                                          disabled=not limpias,
+                                          help="Las piezas de seguridad y lo que une redes grandes no "
+                                               "entran: quedan para mirarlos de a uno. Pide la "
+                                               "contraseña de administrador."),
+                               f"aprobar_sin_muestra_{lote_info['lote']}"):
+                        _n_sin = aprobar_pendientes(lote_info["lote"], pares_limpios, en_bloque=True)
+                        invalidar_salud()
+                        avisar("success", f"Se aprobaron {miles(_n_sin)} vínculo(s) sin muestra.")
+                        st.rerun()
+                    if candado("descartar una lista entera",
+                               bl2.button("🚫 Descartar toda esta lista",
+                                          key=f"rec_lote_{lote_info['lote']}",
+                                          help="Los productos y precios quedan; solo se descartan "
+                                               "los vínculos. Pide la contraseña de administrador."),
+                               f"descartar_lista_{lote_info['lote']}"):
+                        _n_desc = rechazar_pendientes(lote_info["lote"], None)
+                        invalidar_salud()
+                        avisar("success", f"Se descartaron {miles(_n_desc)} vínculo(s).")
+                        st.rerun()
+
+                # Descartar en bloque los que el análisis ya dio por perdidos. Sin esto, la app
+                # marcaba cientos como «casi seguro mal» y después te los hacía resolver de a uno,
+                # que es exactamente lo que el análisis venía a evitar.
+                if por_nivel["🔴"]:
+                    pares_rojos = []
+                    for x in por_nivel["🔴"]:
+                        pares_rojos.extend([(x["a"], x["b"]), (x["b"], x["a"])])
+                    st.error(
+                        f"🔴 Hay **{len(por_nivel['🔴'])} vínculos «casi seguro mal»** en esta tanda. "
+                        "No hace falta mirarlos de a uno: el análisis ya tiene evidencia en contra de "
+                        "todos (rubros distintos, medidas que no dan, o tu propio historial)."
+                    )
+                    if st.button(f"🚫 Descartar los {len(por_nivel['🔴'])} marcados 🔴",
+                                  key=f"rec_rojos_{lote_info['lote']}", type="primary"):
+                        rechazar_pendientes(lote_info["lote"], pares_rojos)
+                        invalidar_salud()
+                        avisar("success", f"Se descartaron {len(por_nivel['🔴'])} vínculo(s) de una.")
+                        st.rerun()
+
+                # Y cuando tu propio historial es contundente sobre una combinación de marcas,
+                # ofrecer resolver TODA esa combinación de una vez.
+                combinaciones = {}
+                for x in limpias + sospechosas:
+                    clave = tuple(sorted((x.get("marca_a", ""), x.get("marca_b", ""))))
+                    combinaciones.setdefault(clave, []).append(x)
+                for (ma, mb), items in sorted(combinaciones.items(), key=lambda t: -len(t[1])):
+                    dato = patrones_ui["marcas"].get((ma, mb)) if patrones_ui else None
+                    if not dato or dato["tasa_ok"] > 0.05 or dato["decisiones"] < 50:
+                        continue
+                    pares_comb = []
+                    for x in items:
+                        pares_comb.extend([(x["a"], x["b"]), (x["b"], x["a"])])
+                    st.warning(
+                        f"📚 **De {miles(dato['decisiones'])} vínculos {ma}↔{mb} que revisaste, descartaste "
+                        f"el {(1-dato['tasa_ok'])*100:.0f}%.** En esta tanda hay {len(items)} más de "
+                        "esa misma combinación. Si van a terminar igual, resolvelos de una."
+                    )
+                    if st.button(f"🚫 Descartar los {len(items)} de {ma}↔{mb}",
+                                  key=f"rec_comb_{lote_info['lote']}_{ma}_{mb}"):
+                        rechazar_pendientes(lote_info["lote"], pares_comb)
+                        invalidar_salud()
+                        avisar("success", f"Se descartaron {len(items)} vínculo(s) de {ma}↔{mb}.")
+                        st.rerun()
+                    break   # de a una combinación por vez, para no llenar la pantalla
+
+                if limpias:
+                    with st.expander(f"Ver los {len(limpias)} sin alarmas", key="exp_ver_sin_alarmas"):
+                        st.dataframe(
+                            [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
+                               "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:500]],
+                            width="stretch", hide_index=True
+                        )
+                        if len(limpias) > 500:
+                            st.caption(f"Se muestran 500 de {len(limpias)}; el botón de aprobar los toma a todos.")
+
+                # Los que están en revisión SOLO por el abanico se eligen arriba, en «Elegí cuál es
+                # la equivalente»: acá serían cientos de pares sueltos con el mismo motivo.
+                sospechosas = [x for x in sospechosas
+                               if not (x.get("alarmas") and all(a.startswith("🪭")
+                                                                for a in x["alarmas"]))]
+                # 📋 PARA REVISAR, POR MOTIVO. Ver grupos_por_motivo(). Antes la única forma era la
+                # lista de abajo, de a 10 por página: con 8.000 pares en revisión, eso no se termina.
+                _grupos_mot = _del_analisis("_grupos_por_motivo", lambda: grupos_por_motivo(sospechosas))
+                if _grupos_mot:
+                    st.markdown("---")
+                    st.markdown(f"**📋 Para revisar, por motivo** — {miles(len(sospechosas))} par(es) "
+                                f"en {len(_grupos_mot)} motivo(s)")
+                    explicar(
+                        "Los pares en revisión agrupados por el motivo. Los que el texto contradice "
+                        "se descartan de una; los dudosos, con una muestra.",
+                        "**🚫 Se descartan**: los dos textos dicen que son piezas distintas —otro "
+                        "auto, otro motor, otra cantidad de cilindros, junta de cárter contra junta "
+                        "de tapa—, o las medidas no dan. Mirá los ejemplos y descartá el grupo "
+                        "entero.\n\n"
+                        "**🎯 Con muestra**: la app no pudo decidir —«nada dice que sean la misma "
+                        "pieza», el precio, un código que apunta a dos productos—. Se resuelven igual "
+                        "que las limpias: mirás una muestra y, según lo que salga, aprobás o "
+                        "descartás el resto.\n\n"
+                        "Abajo sigue la lista de a uno, para el que quiera ir par por par."
+                    )
+                    _etiqueta_rec = {"descartar": "🚫 Descartar el grupo", "muestra": "🎯 Con muestra"}
+                    st.dataframe([{"Motivo": m, "Pares": len(fs), "Qué conviene": _etiqueta_rec[r]}
+                                  for m, r, fs in _grupos_mot],
+                                 width="stretch", hide_index=True)
+                    _por_motivo_g = {m: (r, fs) for m, r, fs in _grupos_mot}
+                    _clave_sel_mot = f"motivo_elegido_{_lote_m}"
+                    if st.session_state.get(_clave_sel_mot) not in _por_motivo_g:
+                        st.session_state.pop(_clave_sel_mot, None)
+                    _motivo_g = st.selectbox(
+                        "Motivo:", list(_por_motivo_g), key=_clave_sel_mot,
+                        format_func=lambda m: f"{m} — {miles(len(_por_motivo_g[m][1]))} "
+                                              f"({_etiqueta_rec[_por_motivo_g[m][0]]})")
+                    _rec_g, _filas_mot = _por_motivo_g[_motivo_g]
+                    if _rec_g == "descartar":
+                        import random as _random
+                        _ejemplos = _random.Random(_motivo_g).sample(_filas_mot, min(8, len(_filas_mot)))
+                        st.caption("Ejemplos al azar del grupo:")
+                        st.dataframe([{"A": f"{f['marca_a']} {f['cod_a']} — {(f.get('desc_a') or '')[:60]}",
+                                       "B": f"{f['marca_b']} {f['cod_b']} — {(f.get('desc_b') or '')[:60]}",
+                                       "Por qué": (f["alarmas"][0] if f.get("alarmas") else "")[:80]}
+                                      for f in _ejemplos], width="stretch", hide_index=True)
+                        _dm1, _dm2 = st.columns(2)
+                        if _dm1.button(f"🚫 Descartar los {miles(len(_filas_mot))}", type="primary",
+                                       key=f"desc_motivo_{_lote_m}_{abs(hash(_motivo_g))}"):
+                            _n_dm = rechazar_pendientes(
+                                _lote_m, [p for f in _filas_mot for p in ((f["a"], f["b"]), (f["b"], f["a"]))],
+                                motivo=motivo_de_rechazo_del_grupo(_motivo_g))
+                            invalidar_salud()
+                            avisar("success", f"Se descartaron {miles(_n_dm)} par(es) de «{_motivo_g}».")
+                            st.rerun()
+                        _mirar_antes = _dm2.checkbox("Prefiero mirar una muestra antes",
+                                                     key=f"muestra_motivo_{_lote_m}_{abs(hash(_motivo_g))}")
+                    else:
+                        _mirar_antes = True
+                    if _mirar_antes:
+                        _panel_de_muestra(_lote_m, f"{_lote_m}|motivo|{_motivo_g}", _filas_mot,
+                                          _candidatas_m, _clave_parecidos, f"«{_motivo_g}»")
+
+                if sospechosas:
+                    st.markdown("---")
+                    st.markdown("**🔎 De a uno**")
+                    # «Con algo raro» no es cierto para todos: el corte lo decide el PUNTAJE, y un
+                    # vínculo puede quedar abajo de 55 sin ninguna alarma, solo porque no encontró
+                    # evidencia a favor. Sobre la lista de Illinois son 285 de 595. Llamarlos a
+                    # todos «raros» manda a buscar un problema que en la mitad no existe: lo que
+                    # les falta es respaldo, que es otra cosa y se revisa distinto.
+                    _con_alarma = [x for x in sospechosas if x.get("alarmas")]
+                    _sin_respaldo = len(sospechosas) - len(_con_alarma)
+                    st.warning(
+                        f"⚠️ **{len(sospechosas)} vínculo(s) para revisar.** "
+                        + (f"{len(_con_alarma)} tienen alguna alarma concreta"
+                           + (f" y {_sin_respaldo} no tienen ninguna: simplemente no se encontró "
+                              "evidencia a favor (ni medidas, ni catálogo, ni parecido de "
+                              "descripción), así que quedaron con poco puntaje."
+                              if _sin_respaldo else ".")
+                           if _con_alarma else
+                           "Ninguno tiene una alarma concreta: lo que les falta es evidencia a "
+                           "favor, así que quedaron con poco puntaje.")
+                    )
+                    # De a tandas por pantalla: con cientos, la página se vuelve imposible de usar
+                    por_pagina = st.radio("Mostrar de a:", [10, 25, 50], horizontal=True,
+                                           key="sosp_por_pagina")
+                    paginas = (len(sospechosas) - 1) // por_pagina + 1
+                    if paginas > 1:
+                        if "_ir_a_pagina_sospechosas" in st.session_state:
+                            st.session_state["pagina_sospechosas"] = min(
+                                st.session_state.pop("_ir_a_pagina_sospechosas"), paginas)
+                        pagina_sosp = st.number_input(
+                            f"Página (de {paginas}) — cada una trae {por_pagina}:",
+                            min_value=1, max_value=paginas, value=1, step=1, key="pagina_sospechosas"
+                        )
+                    else:
+                        pagina_sosp = 1
+                    desde = (int(pagina_sosp) - 1) * por_pagina
+
+                    # Agrupados por MOTIVO, no uno debajo del otro. Cuando 40 vínculos fallan por lo
+                    # mismo —"«1S» es demasiado corto"— repetir la explicación 40 veces obliga a
+                    # scrollear y a decidir 40 veces algo que es una sola decisión. Agrupados, se lee
+                    # el motivo una vez y se resuelve el grupo entero.
+                    # Y ordenados por motivo ANTES de cortar en páginas: si no, cada página de 10
+                    # traía de todo un poco y agrupar dentro de ella no juntaba casi nada. Primero
+                    # el motivo con el peor vínculo, como antes iba primero el peor vínculo. Con los
+                    # datos reales, de a 10: ILLINOIS pasa de 315 decisiones a 45, BARRIDO de 205
+                    # a 52. El tamaño de la página sigue siendo el que eligió el que revisa.
+                    def _tipo(x):
+                        return tipo_de_alarma(x["alarmas"][0] if x["alarmas"] else "")
+
+                    def _ordenadas_por_tipo():
+                        tipos = {id(x): _tipo(x) for x in sospechosas}
+                        peor, total = {}, {}
+                        for x in sospechosas:
+                            peor[tipos[id(x)]] = min(peor.get(tipos[id(x)], 100), x["confianza"])
+                            total[tipos[id(x)]] = total.get(tipos[id(x)], 0) + 1
+                        return sorted(sospechosas, key=lambda x: (peor[tipos[id(x)]], tipos[id(x)],
+                                                                  x["confianza"])), total
+                    _por_tipo, _total_del_tipo = _del_analisis("_por_tipo_de_alarma",
+                                                               _ordenadas_por_tipo)
+                    pagina_actual = _por_tipo[desde:desde + por_pagina]
+
+                    por_motivo = {}
+                    for s in pagina_actual:
+                        por_motivo.setdefault(_tipo(s), []).append(s)
+
+                    _lote_rev = lote_info["lote"]
+                    _decididas = decisiones_del_lote(_lote_rev)
+
+                    def _boton_aplicar(donde):
+                        """El botón de aplicar lo marcado. Arriba y abajo de los grupos: en el
+                        celular, después de marcar el último, el de arriba queda pantallas atrás."""
+                        _b = sum(1 for q in _decididas.values() if q == "bien")
+                        _m = len(_decididas) - _b
+                        if not _decididas:
+                            if donde == "arriba":
+                                st.caption("Marcá cada grupo (o cada vínculo) y aplicá todo junto con "
+                                           "un solo botón: una espera en vez de una por grupo.")
+                            return
+                        st.button(f"💾 Aplicar lo marcado: ✅ {_b} bien · 🚫 {_m} a descartar",
+                                  type="primary", key=f"aplicar_decisiones_{donde}",
+                                  on_click=aplicar_decisiones, args=(_lote_rev,))
+                        if donde == "arriba":
+                            st.caption("Nada se guarda hasta tocar «Aplicar». Lo marcado se mantiene "
+                                       "aunque cambies de página.")
+
+                    _boton_aplicar("arriba")
+                    _lo_decidido = lo_decidido_con_cada_aviso()
+                    for motivo, items in por_motivo.items():
+                        peor_grupo = min(x["confianza"] for x in items)
+                        icono = "🔴" if peor_grupo < 30 else "🟠" if peor_grupo < 55 else "🟡"
+                        _de_cuantos = (f" (de {_total_del_tipo[motivo]} con este motivo)"
+                                       if _total_del_tipo[motivo] > len(items) else "")
+                        # Lo que decidiste antes con este mismo motivo (ver «LO QUE DECIDISTE CON
+                        # CADA AVISO»).
+                        _antes_g = _lo_decidido.get(motivo)
+                        _antes_g = (f" · 📒 antes {texto_de_lo_decidido(_antes_g[0], sum(_antes_g))}"
+                                    if _antes_g else "")
+                        st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s){_de_cuantos}"
+                                    f"{_antes_g}")
+
+                        _pares_grupo = [(x["a"], x["b"]) for x in items]
+                        # El selector del grupo muestra lo que tienen sus pares: si todos tienen lo
+                        # mismo, eso; si no, «—» y abajo cuántos se decidieron de a uno.
+                        _clave_g = f"dec_grupo_{_lote_rev}_{desde}_{por_pagina}_{abs(hash(motivo))}"
+                        _hay = {_decididas.get(par) for par in _pares_grupo}
+                        st.session_state[_clave_g] = (_ROTULO_DE_LA_DECISION[_hay.pop()]
+                                                      if len(_hay) == 1 else "—")
+                        st.radio(f"¿Qué hacés con {'estos ' + str(len(items)) if len(items) > 1 else 'este'}?",
+                                 list(DECISIONES_DE_REVISION), key=_clave_g, horizontal=True,
+                                 on_change=anotar_decision, args=(_lote_rev, _clave_g, _pares_grupo))
+                        # El «¿por qué?» del descarte: con él, la app busca los parecidos (ver
+                        # aplicar_decisiones()). Opcional: descartar sin decirlo sigue andando.
+                        if st.session_state[_clave_g] == "🚫 Descartar":
+                            _clave_mg = f"mot_{_clave_g}"
+                            _motivos_rev = motivos_del_lote(_lote_rev)
+                            _ya_mot = {(_motivos_rev.get(par) or (None,))[0] for par in _pares_grupo}
+                            st.session_state[_clave_mg] = (MOTIVOS_DE_RECHAZO.get(_ya_mot.pop(), "—")
+                                                           if len(_ya_mot) == 1 else "—")
+                            st.selectbox("¿Por qué? (opcional: sirve para encontrar los parecidos)",
+                                         ["—"] + list(MOTIVOS_DE_RECHAZO.values()), key=_clave_mg,
+                                         on_change=anotar_motivo, args=(_lote_rev, _clave_mg, items))
+                        if len(_hay) > 1 or (len(_hay) == 1 and st.session_state[_clave_g] == "—"
+                                             and any(_decididas.get(par) for par in _pares_grupo)):
+                            _b_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "bien")
+                            _m_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "mal")
+                            st.caption(f"Decididos de a uno: ✅ {_b_g} · 🚫 {_m_g} · "
+                                       f"sin decidir {len(items) - _b_g - _m_g}")
+
+                        with st.expander(f"Ver los {len(items)} uno por uno" if len(items) > 1
+                                         else "Ver el detalle", key=f"exp_{_clave_g}"):
+                            for s in items:
+                                st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ "
+                                             f"{s['marca_b']} {s['cod_b']}** · {s['confianza']:.0f}/100")
+                                # La del título ya se leyó arriba; si el título es el motivo sin
+                                # el detalle («espesor» y no «espesor: 3 vs 5»), el detalle va acá.
+                                for i_al, alarma in enumerate(s["alarmas"]):
+                                    if i_al or alarma != motivo:
+                                        st.caption(f"   {alarma}")
+                                if len(items) > 1:
+                                    _clave_p = f"dec_{_lote_rev}_{s['a']}_{s['b']}"
+                                    st.session_state[_clave_p] = _ROTULO_DE_LA_DECISION[
+                                        _decididas.get((s["a"], s["b"]))]
+                                    st.radio("Este:", list(DECISIONES_DE_REVISION), key=_clave_p,
+                                             horizontal=True, label_visibility="collapsed",
+                                             on_change=anotar_decision,
+                                             args=(_lote_rev, _clave_p, [(s["a"], s["b"])]))
+                                    if st.session_state[_clave_p] == "🚫 Descartar":
+                                        _clave_mp = f"mot_{_clave_p}"
+                                        st.session_state[_clave_mp] = MOTIVOS_DE_RECHAZO.get(
+                                            (motivos_del_lote(_lote_rev).get((s["a"], s["b"]))
+                                             or (None,))[0], "—")
+                                        st.selectbox("¿Por qué?", ["—"] + list(MOTIVOS_DE_RECHAZO.values()),
+                                                     key=_clave_mp, on_change=anotar_motivo,
+                                                     args=(_lote_rev, _clave_mp, [s]))
+                                st.markdown("")
+                        st.markdown("")
+                    _boton_aplicar("abajo")
+                    # Marcar y pasar a la página siguiente es el ritmo de la revisión, y en el celular
+                    # el «+» del número de página es chico y quedó varias pantallas más arriba.
+                    if paginas > 1 and int(pagina_sosp) < paginas:
+                        def _a_la_pagina_siguiente():
+                            # A otra clave: la del número de página ya se dibujó en esta pasada. Se
+                            # vuelca antes de dibujarlo, en la próxima (ver arriba).
+                            st.session_state["_ir_a_pagina_sospechosas"] = int(pagina_sosp) + 1
+                        st.button(f"➡️ Página siguiente ({int(pagina_sosp) + 1} de {paginas})",
+                                  key="pagina_sospechosas_siguiente", on_click=_a_la_pagina_siguiente)
+                st.markdown("---")
 
         # QUÉ TAN BIEN ACIERTA LA APP, con tus decisiones. Plegado: se mira de vez en cuando,
         # y lo que se viene a hacer acá es revisar. Ver aciertos_de_la_revision().

@@ -6967,6 +6967,20 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## ⚡ Revisar de a uno, tres veces más rápido
+
+La cola tiene 7.827 pares, y la forma de revisarlos con cuidado es «⚡ Revisar de a uno, con el teclado». Medido con la app de verdad y la copia de la base del 12/10, sobre la lista del barrido (6.586 pares), cada «✅ Son la misma pieza» tardaba 0,6 s y cada «❌ No son» 0,55. No era la decisión: era todo lo demás de la lista —lo que ya está unido, los grupos para aprobar en bloque, lo aprendido de tus decisiones, los que más ensucian— que se volvía a dibujar debajo de la tarjeta con cada toque, y cada 200 decisiones se rehacía el análisis entero de la lista (3,7 s).
+
+Ahora, mientras «⚡ Revisar de a uno» está prendido, se dibuja solo la tarjeta, con un aviso: «lo demás de esta lista —los grupos y aprobar en bloque— no se muestra: apagá ⚡ para verlo». La cola de a uno se arma una vez y no usa nada de lo de abajo. Con ⚡ apagado, la pantalla es la de siempre.
+
+| Toque | Antes | Ahora |
+|---|---|---|
+| ✅ Son la misma pieza | 0,6 s | 0,2 s |
+| ❌ No son | 0,55 s | 0,10 s |
+| ⏭️ Pasar | 0,17 s | 0,07 s |
+
+Para la cola entera son unas horas menos de esperar. `pruebas_de_las_pantallas.py` lo controla: prendido no está lo de abajo y está el aviso; apagado, al revés.
+
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
 Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.

@@ -456,6 +456,16 @@ def probar():
                         or not any("quedan 2 en la cola" in x.value for x in at.markdown)
                         or not any("Deshecho" in x.value for x in at.info)):
                     fallas.append("de a uno: «↩️ Deshacer» no vuelve el par a la cola")
+        # Mientras se revisa de a uno, lo demás de la lista no se dibuja (ver «SOLO LA TARJETA,
+        # MIENTRAS SE REVISA DE A UNO»): era lo que hacía tardar cada decisión. Apagado, vuelve.
+        def _resto_de_la_lista():
+            return (any("Muy probables" in m.label for m in at.metric),
+                    any("Mientras revisás de a uno" in x.value for x in at.caption))
+        _con_u = _resto_de_la_lista()
+        at.toggle(key="de_a_uno_DE A UNO EN PANTALLA").set_value(False).run()
+        if (_con_u, _resto_de_la_lista()) != ((False, True), (True, False)):
+            fallas.append(f"de a uno: lo demás de la lista, prendido y apagado: "
+                          f"{_con_u} / {_resto_de_la_lista()}")
     # 💲 Los códigos que vinieron dos veces con dos precios: la tarjeta con un botón por precio
     # (ver elegir_el_precio_doble()). «Cambiar a» guarda ese precio y el código sale de la
     # lista. Con la base real hay otros antes, y no se toca nada: solo que esté la tarjeta.
