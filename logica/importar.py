@@ -740,10 +740,19 @@ def aplicar_precios_frenados(frenados):
 
 
 def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
-    c.execute(
-        "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",
-        (raw, clean, desc, marca_id)
-    )
+    # Un producto nuevo de una familia a la que ya se le puso nombre entra con la pieza: ver «QUÉ
+    # PIEZA ES CADA FAMILIA DE CÓDIGOS». Los que ya estaban no se tocan (la descripción no se
+    # pisa al volver a importar).
+    _desc_original = desc
+    desc = con_la_pieza_de_su_familia(raw, desc, marca_id)
+    with transaccion():      # el producto y su descripción de antes: los dos o ninguno
+        c.execute(
+            "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",
+            (raw, clean, desc, marca_id)
+        )
+        if desc != _desc_original and c.rowcount:
+            c.execute("INSERT OR IGNORE INTO descripciones_antes_de_la_familia (producto_id, "
+                      "descripcion) VALUES (?, ?)", (c.lastrowid, _desc_original))
     if desc:
         c.execute(
             "UPDATE productos SET descripcion = ?, codigo_raw = ? "
@@ -757,3 +766,161 @@ def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
         )
     c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ?", (clean, marca_id))
     return c.fetchone()[0]
+
+
+# ============================================================================================
+# QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS
+# ============================================================================================
+# IMPERIAL escribe la descripción por el auto y la corta en 30 letras: «SUZUKI HATCH ST80
+# M.Y64» (10-580/3A), «FIAT Motor FIRE 1,3 L» (CAM-A2090), «Chevrolet CORSA 1.0 L. VHC SO»
+# (PP0720). La lista no trae rubro —se miró el Excel del 18/08: código, precio y descripción,
+# nada más— y en esas familias casi ningún producto dice qué pieza es (en «CAM», 0 de 471), así
+# que no hay de dónde deducirlo. En la copia de la base del 12/10 son unos 12.800 productos así
+# (casi todos de IMPERIAL): no se encuentran escribiendo «camisas fire» y no se comparan con
+# nada. Lo sabe el que trabaja con la lista: le pone nombre a la familia una vez («CAM» son
+# camisas) y la app se lo suma a las descripciones de esa familia que no dicen qué pieza son,
+# ahora y en las listas que entren después. Se deshace con un toque.
+# Solo a las que no tienen rubro, no nombran una pieza y sí un auto o un motor: «WABCO COJINETE
+# LISO», «Compresor de Aire KNORR» o una llave de la misma familia quedan como estaban.
+
+_RE_FAMILIA_CON_LETRAS = re.compile(r"[A-Z]+")
+_RE_FAMILIA_CON_NUMEROS = re.compile(r"(\d+)[-/]")
+# Desde cuántos productos sin pieza se propone una familia, y qué parte de ella tienen que ser.
+FAMILIA_MINIMA_PARA_PROPONER = 20
+PARTE_SIN_PIEZA_PARA_PROPONER = 0.6
+LARGO_MAXIMO_DE_LA_PIEZA = 30
+# Para proponer va rápido (sin la firma: 43.000 firmas son 9 s); para cambiar descripciones se
+# usa no_dice_que_pieza_es(), solo sobre la familia elegida.
+_RE_PUNTOS_DE_SIGLA = re.compile(r"\b([A-Z])\.(?=[A-Z]\b)")
+
+
+def familia_del_codigo(codigo):
+    """La familia de un código: las letras del principio («CAM» de CAM-A2090, «PP» de PP0720) o
+    el número antes del primer guion o barra («10-» de 10-580/3A). '' si no tiene."""
+    cod = str(codigo or "").strip().upper()
+    m = _RE_FAMILIA_CON_LETRAS.match(cod)
+    if m:
+        return m.group(0)
+    m = _RE_FAMILIA_CON_NUMEROS.match(cod)
+    return f"{m.group(1)}-" if m else ""
+
+
+def no_dice_que_pieza_es(descripcion):
+    """Sin rubro, sin ninguna palabra de pieza y nombrando un auto o un motor: «FIAT Motor FIRE
+    1,3 L» sí; «WABCO COJINETE LISO» (tiene rubro) o «LLAVE T HEXAGONAL» (no nombra un auto),
+    no."""
+    f = firma_de_producto(descripcion or "")
+    return bool(f) and f.get("familia") == "Sin clasificar" and not f.get("pieza") \
+        and nombra_algun_auto(f)
+
+
+def _parece_que_no_dice_que_pieza_es(descripcion, marcas_de_autos):
+    texto = _RE_PUNTOS_DE_SIGLA.sub(r"\1", normalizar_texto(descripcion))
+    palabras = set(re.split(r"[^A-Z0-9]+", texto))
+    return (bool(palabras & marcas_de_autos)
+            and clasificar_repuesto(descripcion or "") == "Sin clasificar")
+
+
+def familias_sin_nombre(marca_id):
+    """Las familias de códigos de una lista cuyos productos, casi todos, no dicen qué pieza son:
+    [{"familia", "productos", "sin_pieza", "ejemplos", "pieza"}], la más grande primero.
+    «pieza» es el nombre que ya se le puso, si se le puso. Ver FAMILIA_MINIMA_PARA_PROPONER."""
+    _marcas = {m.replace(".", "") for mv in MARCAS_VEHICULO for m in mv.split()} | set(
+        _MARCAS_DE_MOTORES) | {"VW", "MWM", "IKA", "INDENOR", "MAXION", "DEERE", "BENZ"}
+    nombradas = dict(c.execute("SELECT familia, pieza FROM piezas_de_las_familias "
+                               "WHERE marca_id = ?", (marca_id,)).fetchall())
+    por_familia = {}
+    for cod, desc in c.execute("SELECT codigo_raw, descripcion FROM productos WHERE marca_id = ?",
+                               (marca_id,)).fetchall():
+        fam = familia_del_codigo(cod)
+        if not fam:
+            continue
+        f = por_familia.setdefault(fam, {"familia": fam, "productos": 0, "sin_pieza": 0,
+                                         "ejemplos": [], "pieza": nombradas.get(fam, "")})
+        f["productos"] += 1
+        if _parece_que_no_dice_que_pieza_es(desc, _marcas):
+            f["sin_pieza"] += 1
+            if len(f["ejemplos"]) < 3:
+                f["ejemplos"].append(f"{cod} «{(desc or '')[:40]}»")
+    salida = [f for f in por_familia.values()
+              if f["pieza"] or (
+                  f["sin_pieza"] >= FAMILIA_MINIMA_PARA_PROPONER
+                  and f["sin_pieza"] >= f["productos"] * PARTE_SIN_PIEZA_PARA_PROPONER)]
+    return sorted(salida, key=lambda f: (not f["pieza"], -f["sin_pieza"], f["familia"]))
+
+
+def _pieza_escrita(pieza):
+    texto = re.sub(r"\s+", " ", normalizar_texto(pieza)).strip()
+    if not texto or not re.fullmatch(r"[A-Z0-9 ./-]+", texto) or not re.search(r"[A-Z]{3}", texto):
+        raise ValueError("Escribí qué pieza es, con letras: por ejemplo «CAMISA» o «AROS».")
+    return texto[:LARGO_MAXIMO_DE_LA_PIEZA]
+
+
+def _productos_de_la_familia(marca_id, familia):
+    c.execute("SELECT id, codigo_raw, descripcion FROM productos WHERE marca_id = ? "
+              "AND UPPER(codigo_raw) LIKE ?", (marca_id, familia.rstrip("-") + "%"))
+    return [r for r in c.fetchall() if familia_del_codigo(r["codigo_raw"]) == familia]
+
+
+def nombrar_familia(marca_id, familia, pieza):
+    """Le pone nombre a una familia de códigos y se lo suma, adelante, a las descripciones de esa
+    familia que no dicen qué pieza son (ver no_dice_que_pieza_es()). Si ya tenía otro nombre, lo
+    cambia. Devuelve cuántas descripciones cambió. Solo administrador: reescribe descripciones."""
+    exigir_nivel("admin", "ponerle nombre a una familia de códigos")
+    pieza = _pieza_escrita(pieza)
+    familia = str(familia or "").strip().upper()
+    if not familia:
+        raise ValueError("Falta la familia.")
+    sacar_nombre_de_familia(marca_id, familia, anotar=False)
+    cambios = []
+    for r in _productos_de_la_familia(marca_id, familia):
+        if no_dice_que_pieza_es(r["descripcion"]):
+            cambios.append((r["id"], r["descripcion"], f"{pieza} {r['descripcion'] or ''}".strip()))
+    with db_lock, transaccion():
+        c.executemany("INSERT OR IGNORE INTO descripciones_antes_de_la_familia (producto_id, "
+                      "descripcion) VALUES (?, ?)", [(i, antes) for i, antes, _ in cambios])
+        c.executemany("UPDATE productos SET descripcion = ? WHERE id = ?",
+                      [(nueva, i) for i, _, nueva in cambios])
+        c.execute("INSERT OR REPLACE INTO piezas_de_las_familias (marca_id, familia, pieza, quien) "
+                  "VALUES (?, ?, ?, ?)", (marca_id, familia, pieza, obtener_usuario_actual()))
+        anotar_cambio("nombró una familia de códigos", "marca", marca_id,
+                      detalle=f"{familia} → {pieza}: {len(cambios)} descripción(es)")
+    return len(cambios)
+
+
+def sacar_nombre_de_familia(marca_id, familia, anotar=True):
+    """Deshace nombrar_familia(): cada descripción vuelve a la de antes y la familia queda sin
+    nombre. Devuelve cuántas volvieron."""
+    exigir_nivel("admin", "sacarle el nombre a una familia de códigos")
+    ids = [r["id"] for r in _productos_de_la_familia(marca_id, familia)]
+    with db_lock, transaccion():
+        vueltas = 0
+        for i in ids:
+            fila = c.execute("SELECT descripcion FROM descripciones_antes_de_la_familia "
+                             "WHERE producto_id = ?", (i,)).fetchone()
+            if fila is None:
+                continue
+            c.execute("UPDATE productos SET descripcion = ? WHERE id = ?", (fila[0], i))
+            c.execute("DELETE FROM descripciones_antes_de_la_familia WHERE producto_id = ?", (i,))
+            vueltas += 1
+        c.execute("DELETE FROM piezas_de_las_familias WHERE marca_id = ? AND familia = ?",
+                  (marca_id, familia))
+        if anotar:
+            anotar_cambio("le sacó el nombre a una familia de códigos", "marca", marca_id,
+                          detalle=f"{familia}: {vueltas} descripción(es) como estaban")
+    return vueltas
+
+
+def con_la_pieza_de_su_familia(codigo, descripcion, marca_id):
+    """La descripción con el nombre de su familia adelante, si la familia lo tiene y la
+    descripción no dice qué pieza es. Para lo que entra al importar (ver
+    get_or_create_producto())."""
+    familia = familia_del_codigo(codigo)
+    if not familia or not marca_id:
+        return descripcion
+    fila = c.execute("SELECT pieza FROM piezas_de_las_familias WHERE marca_id = ? AND familia = ?",
+                     (marca_id, familia)).fetchone()
+    if not fila or not no_dice_que_pieza_es(descripcion):
+        return descripcion
+    return f"{fila[0]} {descripcion or ''}".strip()
+

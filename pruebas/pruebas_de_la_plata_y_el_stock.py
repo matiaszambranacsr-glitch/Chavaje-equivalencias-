@@ -317,6 +317,43 @@ def probar(L):
             ("CHICA10" in _res10["listas_aisladas"] + _res10["listas_esperando"],
              "AISLADA10" in _res10["listas_aisladas"], "ESPERA10" in _res10["listas_esperando"]),
             (False, True, True))
+
+    # 11. QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS (ver nombrar_familia()): 22 camisas de la familia
+    # CAM que solo dicen el auto, una llave y un cojinete de la misma familia. Se propone CAM;
+    # al nombrarla «camisa» cambian las 22 y no la llave ni el cojinete; lo nuevo de la familia
+    # entra con el nombre, y sacarlo deja todo como estaba (lo nuevo también).
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('FAMILIAS11', 'PROVEEDOR')")
+    _m11 = c.lastrowid
+    _fam11 = [(f"CAM-A20{i:02d}", f"FIAT Motor FIRE 1,{i % 9} L") for i in range(22)]
+    _fam11 += [("CAM-LLAVE", "LLAVE T HEXAGONAL 19MM"), ("CAM-W1", "WABCO COJINETE LISO M.BENZ")]
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", [(x, ns["sanitizar"](x), d, _m11) for x, d in _fam11])
+    conn.commit()
+
+    def _desc11(cod):
+        return c.execute("SELECT descripcion FROM productos WHERE codigo_raw = ? AND marca_id = ?",
+                         (cod, _m11)).fetchone()[0]
+    _prop11 = {f["familia"]: f["sin_pieza"] for f in ns["familias_sin_nombre"](_m11)}
+    esperar("se propone la familia CAM, con sus 22 que no dicen qué pieza son", _prop11,
+            {"CAM": 22})
+    esperar("nombrarla «camisa»: cambian las 22",
+            ns["nombrar_familia"](_m11, "CAM", " camisa "), 22)
+    esperar("la camisa dice que es una camisa; la llave y el cojinete, como estaban",
+            (_desc11("CAM-A2003"), _desc11("CAM-LLAVE"), _desc11("CAM-W1")),
+            ("CAMISA FIAT Motor FIRE 1,3 L", "LLAVE T HEXAGONAL 19MM",
+             "WABCO COJINETE LISO M.BENZ"))
+    ns["get_or_create_producto"]("CAM-NUEVA", "CAMNUEVA", "FIAT Motor FIRE 1,4 L", _m11)
+    esperar("lo nuevo de la familia entra con el nombre", _desc11("CAM-NUEVA"),
+            "CAMISA FIAT Motor FIRE 1,4 L")
+    esperar("sacarle el nombre deja todo como estaba, lo nuevo también",
+            (ns["sacar_nombre_de_familia"](_m11, "CAM"), _desc11("CAM-A2003"),
+             _desc11("CAM-NUEVA")),
+            (23, "FIAT Motor FIRE 1,3 L", "FIAT Motor FIRE 1,4 L"))
+    try:
+        ns["nombrar_familia"](_m11, "CAM", "  ")
+        esperar("un nombre vacío no se acepta", "lo aceptó", "ValueError")
+    except ValueError:
+        pass
     return fallas
 
 

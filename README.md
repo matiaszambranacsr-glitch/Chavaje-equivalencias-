@@ -6967,6 +6967,19 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🏷️ Qué pieza es cada familia de códigos
+
+IMPERIAL escribe la descripción por el auto y la corta en 30 letras: «SUZUKI HATCH ST80 M.Y64» (10-580/3A), «FIAT Motor FIRE 1,3 L» (CAM-A2090), «Chevrolet CORSA 1.0 L. VHC SO» (PP0720). No dice si es un aro, una camisa o un pistón. Se miró el Excel del 18/08 por si traía el rubro: tiene tres columnas —código, precio y descripción—, sin encabezado, ordenado por precio, y nada más. Tampoco se puede deducir: en esas familias casi ningún producto dice qué pieza es (en «CAM», 0 de 471). En la copia de la base del 12/10 son unos 12.800 productos así, casi todos de IMPERIAL. No se encuentran escribiendo «camisas fire» y no se comparan con nada.
+
+Lo sabe el que trabaja con la lista. En **🗂️ Administrar → 🏷️ Marcas → «🏷️ Qué pieza es cada familia de códigos»**:
+
+- **La app propone las familias**: las letras o el número con que empiezan los códigos («CAM», «PP», «10-»), con cuántos productos no dicen qué pieza son y tres ejemplos. Con IMPERIAL son 66 familias; la lista se arma en medio segundo.
+- **Se elige una, se escribe qué pieza es y «🏷️ Ponerle el nombre»**: la app lo suma adelante —«CAMISA FIAT Motor FIRE 1,3 L»—, solo en las descripciones de esa familia que no tienen rubro, no nombran ninguna pieza y sí un auto o un motor. Una llave o un cojinete de la misma familia quedan como estaban.
+- **Lo que entre después** de esa familia, en la próxima lista, entra con el nombre.
+- **«↩️ Sacar el nombre»** deja cada descripción como era (se guarda la de antes, también la de lo que entró después).
+
+Con la copia real, nombrar «CAM» como camisa cambia 442 descripciones en 0,3 s, y buscar «camisa fire» pasa de 129 resultados cualesquiera a las 6 camisas del Fire. La búsqueda y su índice se ponen al día solos (los disparadores de la base anotan cada descripción que cambia), y la firma pasa a leerlas como «Motor - interno». `pruebas_de_la_plata_y_el_stock.py` (11) lo controla: se propone la familia, cambian solo las que no dicen qué pieza son, lo nuevo entra con el nombre y sacarlo deja todo como estaba. Lo pide administrador.
+
 ## ⚡ Revisar de a uno, tres veces más rápido
 
 La cola tiene 7.827 pares, y la forma de revisarlos con cuidado es «⚡ Revisar de a uno, con el teclado». Medido con la app de verdad y la copia de la base del 12/10, sobre la lista del barrido (6.586 pares), cada «✅ Son la misma pieza» tardaba 0,6 s y cada «❌ No son» 0,55. No era la decisión: era todo lo demás de la lista —lo que ya está unido, los grupos para aprobar en bloque, lo aprendido de tus decisiones, los que más ensucian— que se volvía a dibujar debajo de la tarjeta con cada toque, y cada 200 decisiones se rehacía el análisis entero de la lista (3,7 s).

@@ -449,6 +449,80 @@ if pagina == PAGINAS[3]:
                     avisar("success", f"'{nombre_cat}' agregado.")
                     st.rerun()
 
+        # 🏷️ QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS (ver nombrar_familia()). Perezoso: la lista
+        # de una marca recorre todos sus productos (0,5 s con IMPERIAL), y se recuerda mientras
+        # no cambien las descripciones.
+        if marcas_info:
+            st.markdown("---")
+            _exp_fam = st.expander("🏷️ Qué pieza es cada familia de códigos",
+                                   key="exp_familias_de_codigos", on_change="rerun")
+            if _exp_fam.open:
+                with _exp_fam:
+                    explicar(
+                        "Cuando una lista no dice qué pieza es («FIAT Motor FIRE 1,3 L»), se lo "
+                        "ponés a toda la familia de códigos de una vez.",
+                        "IMPERIAL escribe la descripción por el auto, la corta en 30 letras y no "
+                        "trae rubro: «CAM-A2090 FIAT Motor FIRE 1,3 L» no dice que es una camisa. "
+                        "Así no se encuentra escribiendo «camisas fire» y no se compara con nada. "
+                        "Elegís la familia (las letras o el número con que empiezan sus códigos), "
+                        "escribís qué pieza es y la app se lo suma adelante a las descripciones "
+                        "de esa familia que no nombran ninguna pieza y sí un auto o un motor. "
+                        "Lo que ya dice qué es —una llave, un cojinete— queda como estaba. "
+                        "También a lo que entre de esa familia en las listas siguientes. "
+                        "«↩️ Sacar el nombre» deja cada descripción como era.",
+                        en_expander=True)
+                    _nombres_fam = [m["nombre"] for m in marcas_info if m["tipo"] != "OEM"]
+                    _marca_fam = st.selectbox(
+                        "Lista:", _nombres_fam, key="familias_marca",
+                        index=_nombres_fam.index("IMPERIAL") if "IMPERIAL" in _nombres_fam else 0)
+                    _id_fam = next(m["id"] for m in marcas_info if m["nombre"] == _marca_fam)
+                    _familias = recordado_mientras_no_cambie(
+                        "familias_sin_nombre", (_id_fam, version_del_catalogo()),
+                        lambda: familias_sin_nombre(_id_fam))
+                    _sin_nombre = [f for f in _familias if not f["pieza"]]
+                    _con_nombre = [f for f in _familias if f["pieza"]]
+                    if not _familias:
+                        st.caption("✅ En esta lista no hay familias de códigos sin decir qué "
+                                   "pieza son.")
+                    if _sin_nombre:
+                        st.caption(f"{miles(len(_sin_nombre))} familia(s) con "
+                                   f"{miles(sum(f['sin_pieza'] for f in _sin_nombre))} "
+                                   "producto(s) que no dicen qué pieza son.")
+                        _por_familia = {f["familia"]: f for f in _sin_nombre}
+                        _fam_elegida = st.selectbox(
+                            "Familia:", list(_por_familia), key="familias_elegida",
+                            format_func=lambda x: (f"{x} — {miles(_por_familia[x]['sin_pieza'])} "
+                                                   "sin decir qué pieza son"))
+                        for _ej in _por_familia[_fam_elegida]["ejemplos"]:
+                            st.caption(f"· {_ej}")
+                        _pieza_fam = st.text_input("¿Qué pieza es?", key="familias_pieza",
+                                                   placeholder="Por ejemplo: CAMISA, AROS, PISTON")
+                        if candado("ponerle nombre a una familia de códigos",
+                                   st.button("🏷️ Ponerle el nombre", key="btn_nombrar_familia",
+                                             disabled=not _pieza_fam.strip()),
+                                   "nombrar_familia"):
+                            try:
+                                _n_fam = nombrar_familia(_id_fam, _fam_elegida, _pieza_fam)
+                            except ValueError as _err:
+                                st.error(el_error_en_castellano(_err))
+                            else:
+                                avisar("success", f"🏷️ La familia {_fam_elegida} es "
+                                                  f"«{_pieza_fam.strip().upper()}»: se sumó a "
+                                                  f"{miles(_n_fam)} descripción(es).")
+                                st.rerun()
+                    for _f in _con_nombre:
+                        _c1, _c2 = st.columns([3, 1])
+                        _c1.markdown(f"🏷️ **{_f['familia']}** es «{_f['pieza']}» "
+                                     f"({miles(_f['productos'])} producto(s))")
+                        if candado("sacarle el nombre a una familia de códigos",
+                                   _c2.button("↩️ Sacar el nombre",
+                                              key=f"btn_sacar_familia_{_f['familia']}"),
+                                   f"sacar_familia_{_f['familia']}"):
+                            _v_fam = sacar_nombre_de_familia(_id_fam, _f["familia"])
+                            avisar("success", f"↩️ {miles(_v_fam)} descripción(es) de la "
+                                              f"familia {_f['familia']} quedaron como estaban.")
+                            st.rerun()
+
     if sub_admin == SUB_ADMIN[1]:
         # Antes del formulario manual: lo que ya se puede leer de las descripciones.
         # Cargar medidas a mano, una por una, no lo hace nadie con 20.000 productos; y

@@ -732,6 +732,22 @@ def _esquema_mostrador(c):
         created_at TEXT DEFAULT (datetime('now'))
     )""")
 
+    # QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS (ver logica/importar.py): el nombre que le puso
+    # alguien a una familia de códigos de una lista, y la descripción que tenía cada producto
+    # antes de sumárselo, para poder deshacerlo.
+    c.execute("""CREATE TABLE IF NOT EXISTS piezas_de_las_familias (
+        marca_id INTEGER NOT NULL,
+        familia TEXT NOT NULL,
+        pieza TEXT NOT NULL,
+        quien TEXT,
+        fecha TEXT DEFAULT (datetime('now', 'localtime')),
+        PRIMARY KEY (marca_id, familia)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS descripciones_antes_de_la_familia (
+        producto_id INTEGER PRIMARY KEY,
+        descripcion TEXT
+    )""")
+
     c.execute("""CREATE TABLE IF NOT EXISTS historial_busquedas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         termino TEXT NOT NULL,
