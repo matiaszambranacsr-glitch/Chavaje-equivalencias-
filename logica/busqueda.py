@@ -1988,6 +1988,17 @@ def productos_con_vinculos_esperando():
         return {}
 
 
+# Ver «UNA LISTA CHICA QUE NO CRUZA» en salud_de_los_cruces(): desde cuántos productos una
+# lista sin cruces es sospechosa de haberse importado mal, y cuánto tiene que estar esperando
+# revisión para que «falta revisarlas» sea la explicación (no 4 pares sueltos de 81 productos).
+LISTA_CHICA_SIN_CRUCES = 200
+_ESPERANDO_PARA_AVISAR = 10
+
+
+def _esperando_de_peso(fila):
+    esperando, productos = fila["Esperando revisión"], fila["Productos"]
+    return esperando >= _ESPERANDO_PARA_AVISAR or (productos and esperando * 20 >= productos)
+
 def salud_de_los_cruces():
     """Cuánto cruza de verdad tu catálogo entre proveedores, marca por marca.
 
@@ -2034,13 +2045,22 @@ def salud_de_los_cruces():
         # El diagnóstico en palabras: es lo que convierte la tabla en algo accionable.
         if f["_tipo"] == "OEM":
             f["Qué pasa"] = "Códigos de fábrica: son el puente, no hace falta que crucen."
-        elif not f["Cruzan a otra marca"] and f["Esperando revisión"]:
+        elif not f["Cruzan a otra marca"] and _esperando_de_peso(f):
             # Este caso va ANTES que el de la lista aislada y no se cuenta como aislada: el
             # síntoma es el mismo —cero cruces— pero lo que hay que hacer es lo contrario.
             f["Qué pasa"] = (f"⏳ Todavía ninguno cruza, pero {miles(f['Esperando revisión'])} "
                               "producto(s) ya tienen equivalencias encontradas esperando que "
                               "las apruebes. No falta la columna: falta revisarlas.")
             resumen["listas_esperando"].append(f["Marca"])
+        elif not f["Cruzan a otra marca"] and f["Productos"] < LISTA_CHICA_SIN_CRUCES:
+            # UNA LISTA CHICA QUE NO CRUZA no es una importación mal hecha: puede ser de algo
+            # que no vende otro proveedor. MANNOL (81 lubricantes) salía en la salud como
+            # «equivalencias encontradas y sin aprobar», por 4 pares que había juntado el
+            # catálogo de MANN entre su grasa y un filtro (🔴 en la cola); sin ellos habría
+            # salido «se importó sin la columna de código de fábrica». Las dos, falsas, y en
+            # rojo. Queda dicho en la tabla, sin alarma.
+            f["Qué pasa"] = ("Ninguno cruza, pero es una lista chica: si es de algo que no vende "
+                              "otro proveedor (lubricantes, herramientas), está bien así.")
         elif not f["Cruzan a otra marca"]:
             f["Qué pasa"] = ("⚠️ NINGUNO cruza. Esa lista se importó sin la columna de código "
                               "de fábrica, o esa columna quedó mal mapeada.")

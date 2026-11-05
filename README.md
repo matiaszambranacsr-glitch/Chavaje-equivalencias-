@@ -6967,6 +6967,17 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🛢️ Una lista chica que no cruza no es una alarma
+
+Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.
+
+Ahora, en «¿Cuánto cruza tu catálogo entre proveedores?» (`salud_de_los_cruces()`):
+
+- **«Equivalencias encontradas y sin aprobar»** pide que lo que espera tenga peso: 10 productos o más, o el 5 % de la lista. Unos pares sueltos no explican que una lista entera no cruce.
+- **Una lista de menos de 200 productos que no cruza** queda explicada en la tabla («si es de algo que no vende otro proveedor —lubricantes, herramientas—, está bien así»), sin alarma. Una grande sin cruces sigue siendo «se importó sin la columna de código de fábrica».
+
+`pruebas_de_la_plata_y_el_stock.py` (10) lo controla con tres listas: la chica no alarma, la grande sin cruces sí, y la que tiene 22 productos esperando sale como «esperando».
+
 ## 🧰 La salud avisa lo que falta cargar para vender
 
 Hay tres datos que se cargan una vez y, si faltan, algo deja de andar sin decir nada. En la copia de la base del 12/10 faltaban los tres, y solo se sabía entrando a cada pantalla:

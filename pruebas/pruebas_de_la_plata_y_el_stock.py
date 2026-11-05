@@ -294,6 +294,29 @@ def probar(L):
     ns["guardar_bonificacion_del_proveedor"](_msc, 25)
     esperar("cargados el WhatsApp y la bonificación, esos dos se van", _config9(),
             ([], [True], False))
+
+    # 10. UNA LISTA CHICA QUE NO CRUZA (ver salud_de_los_cruces()): una lista de 80 productos
+    # con un par suelto esperando no es «equivalencias sin aprobar» ni una importación mal
+    # hecha; una de 250 sin cruces sí es «aislada», y una de 250 con 20 esperando, «esperando».
+    _ids10 = {}
+    for _nombre, _cuantos in (("CHICA10", 80), ("AISLADA10", 250), ("ESPERA10", 250)):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (_nombre,))
+        _m10 = c.lastrowid
+        c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                      "VALUES (?, ?, 'JUNTA', ?)",
+                      [(f"{_nombre}X{i}", f"{_nombre}X{i}", _m10) for i in range(_cuantos)])
+        _ids10[_nombre] = [r[0] for r in c.execute(
+            "SELECT id FROM productos WHERE marca_id = ? ORDER BY id", (_m10,))]
+    c.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, "
+                  "lote) VALUES (?, ?, 'prueba', 'PRUEBA 10')",
+                  [(_ids10["CHICA10"][0], _ids10["ESPERA10"][-1])]
+                  + [(x, _ids10["ESPERA10"][-2]) for x in _ids10["ESPERA10"][:20]])
+    conn.commit()
+    _res10 = ns["salud_de_los_cruces"]()[1]
+    esperar("la lista chica no alarma; la grande sin cruces sí, y la que espera, como esperando",
+            ("CHICA10" in _res10["listas_aisladas"] + _res10["listas_esperando"],
+             "AISLADA10" in _res10["listas_aisladas"], "ESPERA10" in _res10["listas_esperando"]),
+            (False, True, True))
     return fallas
 
 
