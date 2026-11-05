@@ -760,6 +760,13 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     if (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")) and _RE_JUNTA_DEL_TURBO.search(
             limpio):
         pieza.add("TURBO")
+    # EL COMPRESOR DE AIRE NO ES EL TURBO. «JUEGO JUNTAS COMPRESOR SCANIA» (el compresor de aire
+    # de los frenos) concordaba con siete «Juego de juntas para Turbo Compresor SCANIA …» de
+    # ILLINOIS: COMPRESOR no llegaba a la pieza, y las dos «coincidían en COMPRESOR, JUNTA».
+    # En una junta, el compresor es su lugar, salvo que sea el del turbo.
+    if ((pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")) and "TURBO" not in pieza
+            and re.search(r"\bCOMPRESOR\b", limpio)):
+        pieza.add("COMPRESOR")
     # JL escribe «JUNTAS FIAT TEMPRA WEBER» y «JUNTAS DODGE 1500 STROMBERG» sin decir
     # «carburador»: la marca del carburador lo dice. Sin esto se emparejaban con juntas de tapa
     # de cilindros del mismo auto. CARTER no cuenta acá: también es la junta de cárter.
@@ -978,6 +985,10 @@ _LUGARES_DE_LA_PIEZA = {
     # «JTA RAD.ACEITE» contra la junta de cárter, «JTA CODO AGUA TORINO» contra la de la bomba
     # de agua del Torino: salidas de revisar a mano los amarillos del barrido.
     "RADIADOR", "CODO",
+    # Salidas de mirar en la cola qué palabras de pieza tenía un solo lado: «JTA ARRANQUE J.DEERE»
+    # contra la de la caja del termostato, y el compresor de aire contra el turbo (ver «EL
+    # COMPRESOR DE AIRE NO ES EL TURBO» en _firma_armada()).
+    "ARRANQUE", "COMPRESOR",
 }
 
 # Las juntas de una PARTE de otra pieza: la tapita de inspección de la tapa de cilindros, el

@@ -6967,6 +6967,17 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🧭 Lugares de pieza que faltaban, sacados de la cola: el compresor y el arranque
+
+En vez de mirar pares de a uno, se contó en los 🟠 de la cola qué palabras de pieza tiene un solo lado y no están entre los lugares (`_LUGARES_DE_LA_PIEZA`). Casi todas son la misma pieza dicha distinto («sensor de presión colector MAP» contra «SENSOR MAP»), pero dos eran lugares:
+
+- **El compresor de aire no es el turbo.** «JUEGO JUNTAS COMPRESOR SCANIA» de TARANTO (810240, el compresor de los frenos) estaba emparejado con 8 «Juego de juntas para Turbo Compresor SCANIA …» de ILLINOIS, y salían compatibles: «coinciden en COMPRESOR, JUNTA». Ahora, en una junta, el compresor es su lugar, salvo que sea el del turbo; contra el turbo es rojo. Dos juegos de compresor de aire siguen juntos, y el compresor del aire acondicionado (que no es una junta) no cambia.
+- **El arranque es un lugar.** «JTA ARRANQUE J.DEERE» contra la junta de la caja del termostato solo «compartía 1 palabra», que no tumba el par.
+
+Lo que se dejó: «VALVULA EGR» contra «CONT PRESION TURBO» y la base del calefactor del Falcon contra la base del carburador. No está claro que sean piezas distintas.
+
+En la copia de la base del 12/10: 9 pares de la cola pasan de 🟠 a rojo. Lo cargado, las fichas, las búsquedas y lo rechazado, sin cambios. Reglas versión 29. `pruebas_de_la_precision.py` (115) lo controla.
+
 ## 🔤 «C/TERMOST.» es el termostato
 
 En la cola, la «JTA.C/TERMOST. J. DEERE 4CIL.119mm.» de TARANTO (850042, la junta de la caja del termostato) esperaba emparejada con 16 juntas de J. DEERE de IMPERIAL —cárter, aceite, múltiple de escape—, todas 🟠. La firma corta las palabras en los espacios y deja la barra adentro (hace falta para 1/2, 4/6 y T-PRT04/B), así que «C/TERMOST.» era una palabra sola y la junta no decía de qué era.

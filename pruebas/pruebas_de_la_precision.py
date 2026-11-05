@@ -3074,6 +3074,22 @@ def probar(L):
     esperar("«C/BOMBA» fuera de una junta queda como está",
             "BOMBA" in ns["firma_de_producto"]("AFORADOR C/BOMBA 22181 PEUGEOT 306")["pieza"],
             False)
+
+    # 115. EL COMPRESOR DE AIRE NO ES EL TURBO, Y EL ARRANQUE ES UN LUGAR (ver
+    # _LUGARES_DE_LA_PIEZA): el juego del compresor de los frenos contra el del turbocompresor, y la junta del arranque
+    # contra la de la caja del termostato, en rojo. Dos juegos de compresor de aire no chocan.
+    for _x115, _y115, _que115 in (
+            ("JUEGO DE JUNTAS PARA TURBO COMPRESOR SCANIA L113 P-93 TURBO",
+             "JUEGO JUNTAS COMPRESOR SCANIA", "COMPRESOR"),
+            ("JTA ARRANQUE J.DEERE 6076-6466", "JTA.C/TERMOST. J. DEERE 4CIL.119MM.", "ARRANQUE")):
+        _ok115, _por115 = _sprint111(_x115, _y115)
+        esperar(f"{_que115}: lugares distintos, en rojo",
+                (_ok115, _por115.startswith(ns["_MOTIVOS_QUE_CONTRADICEN"]), _que115 in _por115),
+                (False, True, True))
+    esperar("dos juegos de compresor de aire no chocan por el lugar",
+            "lugares distintos" in _sprint111(
+                "Juego de juntas para Compresor de Aire KNORR M.BENZ OHL355/366 VOLVO / SCANIA",
+                "JUEGO JUNTAS COMPRESOR SCANIA")[1], False)
     return fallas
 
 

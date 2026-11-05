@@ -769,7 +769,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "28"   # ver VERSIONES_DE_LAS_REGLAS
+VERSION_CONFIANZA = "29"   # ver VERSIONES_DE_LAS_REGLAS
 
 # LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
 # ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
@@ -778,6 +778,9 @@ VERSION_CONFIANZA = "28"   # ver VERSIONES_DE_LAS_REGLAS
 # nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
 # git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
 VERSIONES_DE_LAS_REGLAS = [
+    ("29", "2026-11-05", "el compresor de aire (en una junta) y el arranque son lugares: el "
+                         "juego del compresor de SCANIA contra 8 juegos de turbocompresor, y "
+                         "la junta del arranque contra la del termostato, en rojo (9 de la cola)"),
     ("28", "2026-11-04", "la letra con barra delante del lugar, en las juntas («JTA.C/TERMOST.», "
                          "«T/DISTRIBUCION»): el lugar se lee. 16 pares de la cola de la junta "
                          "del termostato de J. DEERE, en rojo"),
