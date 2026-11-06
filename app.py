@@ -577,10 +577,15 @@ if _total_productos == 0:
         "la sección de copia permanente."
     )
 elif st.session_state.get("_restaurado_de_semilla"):
+    # Con la fecha de la copia: «lo cargado después» no dice nada si no se sabe de cuándo es.
+    # El administrador lo ve además en la salud unos días (ver arranque_desde_copia()).
+    _arranque = arranque_desde_copia()
     st.info(
-        f"♻️ La base se restauró sola desde la copia guardada en el repositorio "
-        f"({_total_productos} productos). Lo cargado después de esa copia no está — "
-        "acordate de actualizarla cada tanto."
+        "♻️ La base se restauró sola desde la copia"
+        + (f" del {_arranque['copia']:%d/%m %H:%M}" if _arranque and _arranque["copia"] else "")
+        + f" ({miles(_total_productos)} productos). Lo cargado después de esa copia no está: "
+        "si tenés un backup descargado más nuevo, restauralo en **Estadísticas → 💾 Backup y "
+        "config**."
     )
 
 # Chequeo de salud, en cualquier sección. Va arriba a propósito: los controles de mantenimiento

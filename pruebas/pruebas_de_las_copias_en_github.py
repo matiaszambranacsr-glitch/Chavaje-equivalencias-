@@ -240,6 +240,13 @@ def probar(ns, gh, carpeta):
                       "AND origen = 'subida'").fetchone()[0])
     esperar("y son la foto de su ficha",
             vacia.execute("SELECT COUNT(*) FROM productos WHERE imagen_url LIKE 'data:%'").fetchone()[0], 3)
+    # Y queda anotado cuándo arrancó y de qué fecha era la copia (ver arranque_desde_copia()):
+    # la de la copia es la que ella misma trae, la de cuando se armó.
+    _anotado = (vacia.execute("SELECT valor FROM configuracion WHERE clave = 'arranque_desde_copia'")
+                .fetchone() or [""])[0].split("|")
+    _de_la_copia = vacia.execute("SELECT valor FROM configuracion "
+                                 "WHERE clave = 'ultimo_backup_github'").fetchone()[0]
+    esperar("anota el arranque: de qué copia y de dónde", _anotado[1:], [_de_la_copia, "github"])
     vacia.close()
 
     # Una foto nueva sube su bloque, y borrar una saca el bloque que quedó vacío.

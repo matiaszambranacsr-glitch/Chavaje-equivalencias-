@@ -103,6 +103,27 @@ def probar(L):
         g["TOPE_FOTOS_PROPIAS_EN_LA_COPIA"] = tope
     ns["generar_backup_sin_fotos"]()
     esperar("sin tope: entran todas", ns["fotos_propias_fuera_de_la_copia"](), 0)
+
+    # LA APP ARRANCÓ DESDE UNA COPIA VIEJA (ver arranque_desde_copia()): la salud se lo dice al
+    # administrador, grave si la copia era de días antes; nada si era de minutos antes (lo
+    # normal) o si ya pasó una semana.
+    from datetime import datetime, timedelta
+    ahora = datetime.now()
+
+    def _arranque(hace, copia_de_hace):
+        ns["guardar_config"]("arranque_desde_copia",
+                             f"{ahora - hace:%Y-%m-%d %H:%M:%S}|"
+                             f"{ahora - hace - copia_de_hace:%Y-%m-%d %H:%M:%S}|github")
+        return [(p["nivel"], p["solo_admin"]) for p in ns["diagnostico_de_salud"]()
+                if p["titulo"].startswith("♻️ La app arrancó")]
+    esperar("arrancó hace una hora desde una copia de 25 días: grave, al administrador",
+            _arranque(timedelta(hours=1), timedelta(days=25)), [("alto", True)])
+    esperar("desde una de 3 horas: se avisa, menos grave",
+            _arranque(timedelta(hours=1), timedelta(hours=3)), [("medio", True)])
+    esperar("desde una de 10 minutos: nada", _arranque(timedelta(hours=1), timedelta(minutes=10)), [])
+    esperar("hace 8 días: ya no", _arranque(timedelta(days=8), timedelta(days=25)), [])
+    ns["guardar_config"]("arranque_desde_copia", "")
+    esperar("sin anotar: nada", ns["arranque_desde_copia"](), None)
     return fallas
 
 

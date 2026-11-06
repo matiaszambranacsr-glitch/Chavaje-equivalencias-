@@ -458,6 +458,30 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/repo_publico", _err)
 
+    # LA APP ARRANCÓ DESDE UNA COPIA VIEJA. Lo anota _restaurar_desde_semilla(): el cartel de
+    # app.py lo veía solo el primero que entraba, y sin la fecha de la copia.
+    try:
+        _arranque = arranque_desde_copia()
+        if (_arranque and _arranque["atraso"] is not None
+                and datetime.now() - _arranque["cuando"]
+                < timedelta(days=DIAS_QUE_SE_AVISA_EL_ARRANQUE)
+                and _arranque["atraso"] >= timedelta(hours=HORAS_DE_ATRASO_PARA_AVISAR)):
+            _atraso = _arranque["atraso"]
+            _cuanto = (f"{_atraso.days} día(s)" if _atraso.days
+                       else f"{int(_atraso.total_seconds() // 3600)} hora(s)")
+            sumar("alto" if _atraso >= timedelta(hours=HORAS_DE_ATRASO_GRAVE) else "medio",
+                  f"♻️ La app arrancó el {_arranque['cuando']:%d/%m %H:%M} desde la copia del "
+                  f"{_arranque['copia']:%d/%m %H:%M}",
+                  f"El servidor se reinició y la base volvió a esa copia: lo cargado en esos "
+                  f"{_cuanto} —ventas, caja, stock, precios, equivalencias aprobadas— no está. "
+                  "Si tenés un backup descargado más nuevo, restauralo; si no, lo que falte hay "
+                  "que volver a cargarlo. Para que no vuelva a pasar, la copia automática tiene "
+                  "que estar subiendo (mirá arriba si dice que está frenada). Se deja de avisar a "
+                  f"los {DIAS_QUE_SE_AVISA_EL_ARRANQUE} días.",
+                  miga_hasta("Backup y config"), solo_admin=True)
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/arranque_desde_copia", _err)
+
     # Lo primero de todo: clientes esperando algo que ahora hay. Es lo único de esta lista
     # que es plata a un llamado de distancia, y lo que más rápido se pierde: entra la
     # mercadería, nadie se acuerda quién la pidió, y el cliente ya la compró en otro lado.

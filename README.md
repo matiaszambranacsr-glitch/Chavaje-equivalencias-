@@ -6994,6 +6994,18 @@ Ahora, mientras «⚡ Revisar de a uno» está prendido, se dibuja solo la tarje
 
 Para la cola entera son unas horas menos de esperar. `pruebas_de_las_pantallas.py` lo controla: prendido no está lo de abajo y está el aviso; apagado, al revés.
 
+## ♻️ Si la app arranca desde una copia vieja, el administrador se entera
+
+Streamlit Cloud borra el disco de la app cuando reinicia el servidor, y la app vuelve sola a la última copia de seguridad. Con la copia subiendo cada vez que hay cambios, lo que se pierde son minutos. Pero la copia está frenada desde el 12/10 (sin `clave_copia`, una copia sin cifrar no sube a un repositorio público), y un reinicio hoy volvería la base 25 días atrás.
+
+El aviso de que eso pasó era un cartel «♻️ La base se restauró sola» que veía una sola persona —la primera que entraba, que puede no ser el administrador—, una sola vez, y sin decir de cuándo era la copia. Ahora:
+
+- **Queda anotado en la base** cuándo arrancó y de qué fecha era la copia. La fecha es la que trae la copia misma: la de GitHub anota cuándo se armó; un backup bajado a mano, cuándo se bajó.
+- **La salud se lo dice al administrador durante 7 días**: «♻️ La app arrancó el 06/11 20:11 desde la copia del 12/10 15:56», con lo que falta («lo cargado en esos 25 días —ventas, caja, stock, precios, equivalencias aprobadas— no está») y qué hacer. Es grave desde un día de atraso. Con menos de una hora, que es lo normal, no avisa.
+- **El cartel dice la fecha de la copia** y manda a restaurar un backup más nuevo, si hay.
+
+Probado con la copia real del 12/10 como si el servidor se hubiera reiniciado el 6/11: anota la copia del 12/10 15:56 y la salud marca en rojo los 25 días. `pruebas_de_las_copias_en_github.py` controla que el reinicio quede anotado, y `pruebas_de_las_copias.py`, cuándo avisa la salud y cuándo no.
+
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
 Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.

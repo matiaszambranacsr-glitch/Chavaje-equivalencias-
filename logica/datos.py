@@ -588,10 +588,61 @@ def _restaurar_desde_semilla(conexion):
             elif filas:
                 meter_las_fotos_bajadas(conexion, filas)
         pedir_de_nuevo_las_fotos(conexion)
+        _anotar_el_arranque_desde_copia(conexion, "github" if semilla == ARCHIVO_COPIA_BAJADA
+                                        else "repositorio")
         return True
     except Exception as _err:
         anotar_error("_restaurar_desde_semilla", _err)
         return False
+
+
+# CUÁNDO ARRANCÓ DESDE UNA COPIA, Y DE QUÉ FECHA ERA. El cartel «♻️ La base se restauró sola»
+# lo veía una sola persona —la primera que entraba después del reinicio, que puede no ser el
+# administrador—, una sola vez, y sin decir de cuándo era la copia. Con la copia frenada desde
+# el 12/10 (ver se_puede_subir_sin_cifrar()), un reinicio el 6/11 volvía la base 25 días atrás
+# y nadie se enteraba hasta buscar una venta que ya no estaba. Queda anotado en la base misma
+# y la salud lo marca unos días (ver arranque_desde_copia()).
+# La fecha de la copia es la que ella misma trae: la de GitHub anota al armarse
+# «ultimo_backup_github» (ver copia_para_github()); la del repositorio, si es un backup bajado
+# a mano, «ultimo_backup_fecha». La más nueva de las dos.
+DIAS_QUE_SE_AVISA_EL_ARRANQUE = 7
+# Una copia de hace minutos es lo normal (se sube cada vez que hay cambios): desde cuánto atraso
+# vale la pena avisar, y desde cuánto es grave.
+HORAS_DE_ATRASO_PARA_AVISAR = 1
+HORAS_DE_ATRASO_GRAVE = 24
+
+
+def _anotar_el_arranque_desde_copia(conexion, origen):
+    try:
+        fechas = [r[0] for r in conexion.execute(
+            "SELECT valor FROM configuracion WHERE clave IN ('ultimo_backup_github', "
+            "'ultimo_backup_fecha')").fetchall() if r[0]]
+        conexion.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES "
+                         "('arranque_desde_copia', ?)",
+                         (f"{datetime.now():%Y-%m-%d %H:%M:%S}|{max(fechas, default='')}|"
+                          f"{origen}",))
+        conexion.commit()
+    except sqlite3.Error as _err:
+        anotar_error("_anotar_el_arranque_desde_copia", _err)
+
+
+def arranque_desde_copia():
+    """El último arranque desde una copia: {"cuando", "copia" (datetime o None si la copia no
+    dice de cuándo es), "origen", "atraso" (timedelta o None)}, o None si nunca pasó."""
+    partes = (obtener_config("arranque_desde_copia", "") or "").split("|")
+    if len(partes) != 3:
+        return None
+
+    def _fecha(texto):
+        try:
+            return datetime.strptime(texto[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    cuando, copia = _fecha(partes[0]), _fecha(partes[1])
+    if not cuando:
+        return None
+    return {"cuando": cuando, "copia": copia, "origen": partes[2],
+            "atraso": (cuando - copia) if copia else None}
 
 
 def _esquema_catalogo(c):
