@@ -962,34 +962,62 @@ def puentes_que_hoy_no_se_generarian(limite=400):
     return salida
 
 
+# APROBADOS SIN MIRARLOS. El 28/09 se aprobaron 36.607 vínculos en siete minutos, de a miles
+# por minuto: entre ellos los 1.412 que la importación de IMPERIAL del 25/09 había sacado de las
+# descripciones —«120Amp» unía una batería con dos soldadoras; «HEXAG.17MM», bocallaves de 3/8 y
+# de 1/2; «DQA-495», la junta de admisión con la de escape—, y en el buscador salían como
+# equivalentes. Una aprobación así no es haberlos mirado. Las de antes de anotar cómo se decidió
+# (ver COMO_SE_DECIDIO) no dicen nada; el ritmo sí: nadie mira de a uno 200 vínculos en un minuto.
+APROBADOS_POR_MINUTO_EN_BLOQUE = 200
+
+
+def pares_aprobados_sin_mirarlos():
+    """Los pares (a, b), a < b, cuya última decisión es «aprobada» y se tomó en bloque: en un
+    minuto en que la misma persona aprobó APROBADOS_POR_MINUTO_EN_BLOQUE o más."""
+    c.execute("""SELECT producto_a_id AS a, producto_b_id AS b, revisado_por AS quien,
+                        SUBSTR(fecha, 1, 16) AS minuto
+                 FROM equivalencias_revisadas
+                 WHERE decision = 'ok' AND producto_a_id < producto_b_id""")
+    filas = c.fetchall()
+    por_minuto = collections.Counter((f["quien"], f["minuto"]) for f in filas)
+    return {(f["a"], f["b"]) for f in filas
+            if por_minuto[(f["quien"], f["minuto"])] >= APROBADOS_POR_MINUTO_EN_BLOQUE}
+
+
 def codigos_adivinados_que_no_unen_nada():
     """Códigos de fábrica leídos de la descripción de una lista que NUNCA marca el código de
-    fábrica, y que no unen nada: cuelgan de productos de esa sola lista y nadie los aprobó.
+    fábrica, que cuelgan de productos de esa sola lista y que ninguna persona miró.
 
     Es la otra mitad de puentes_que_hoy_no_se_generarian(), que pide dos productos porque
     «uno que cuelga un solo producto no hace daño». Sí hace: es un par más en la cola de
     revisión y un código de fábrica falso en la búsqueda. En la base real eran unos 1.300 de la
     lista de IMPERIAL —«85x105x», «ESTR.32MM», «220V-50HZ», «RANGER3L»—, que entraron antes de
-    que la importación aprendiera a no tomarlos: ver la_lista_declara_codigos().
+    que la importación aprendiera a no tomarlos: ver la_lista_declara_codigos(). Y los que unen
+    dos o más productos de esa lista son peores: el buscador los muestra como equivalentes.
 
     Cada uno tiene que cumplir todo esto, y si falta una sola cosa se deja:
       · todos los productos que une son de UNA misma lista, y esa lista no marca el código de
         fábrica (la_lista_declara_codigos() dice que no);
-      · el código está escrito en la descripción de cada uno, SIN marcar: no viene de una
-        columna de código de fábrica ni de un «REF ORIG»;
+      · el código está escrito en la descripción de cada uno, y en ninguna marcado («REF
+        ORIG», «Nº», «//»): no viene de una columna de código de fábrica;
       · no es el código de ningún producto de proveedor (no es un puente a otra lista);
-      · ninguno de sus vínculos está aprobado: solo pendientes.
+      · ninguno de sus vínculos lo verificó ni lo aprobó de a uno una persona: o esperan
+        revisión, o se aprobaron en bloque (ver pares_aprobados_sin_mirarlos()) y une dos
+        productos o más.
     No se pierde la búsqueda por ese número: el buscador lo sigue encontrando adentro de la
     descripción (ver buscar_por_texto())."""
     try:
         c.execute("""
             WITH vecinos AS (
-                SELECT producto_a_id AS ancla, producto_b_id AS otro, 1 AS cargada FROM equivalencias
-                UNION ALL SELECT producto_b_id, producto_a_id, 1 FROM equivalencias
-                UNION ALL SELECT producto_a_id, producto_b_id, 0 FROM equivalencias_pendientes
-                UNION ALL SELECT producto_b_id, producto_a_id, 0 FROM equivalencias_pendientes
+                SELECT producto_a_id AS ancla, producto_b_id AS otro, 1 AS cargada,
+                       COALESCE(verificada, 0) AS verificada FROM equivalencias
+                UNION ALL SELECT producto_b_id, producto_a_id, 1, COALESCE(verificada, 0)
+                          FROM equivalencias
+                UNION ALL SELECT producto_a_id, producto_b_id, 0, 0 FROM equivalencias_pendientes
+                UNION ALL SELECT producto_b_id, producto_a_id, 0, 0 FROM equivalencias_pendientes
             )
             SELECT po.id AS pid, po.codigo_raw AS codigo, v.cargada AS cargada,
+                   v.verificada AS verificada, p.id AS otro_id,
                    p.marca_id AS marca_id, m.nombre AS marca, p.codigo_raw AS codigo_otro,
                    p.descripcion AS descripcion
             FROM productos po
@@ -1013,35 +1041,51 @@ def codigos_adivinados_que_no_unen_nada():
         declaran[marca_id] = la_lista_declara_codigos(
             [(r["descripcion"] or "", r["codigo_raw"] or "") for r in c.fetchall()])
     de_proveedor = codigos_del_catalogo(version_del_catalogo())
+    sin_mirar = None      # se arma recién si hace falta: son 40.000 decisiones
 
     salida = []
     for pid, vecinos in por_codigo.items():
         marcas = {v["marca_id"] for v in vecinos}
         if len(marcas) != 1 or declaran.get(next(iter(marcas)), True):
             continue
-        if any(v["cargada"] for v in vecinos):
+        if any(v["verificada"] for v in vecinos):
             continue
+        cargados = [v for v in vecinos if v["cargada"]]
+        if cargados:
+            # Uno cargado que cuelga un solo producto no muestra ninguna equivalencia falsa, y
+            # alguno sirve para encontrar el producto («ZFR5Q-11», la bujía NGK de una
+            # descripción de TARANTO): esos se dejan. Los que unen dos o más, no.
+            if len({v["otro_id"] for v in vecinos}) < 2:
+                continue
+            if sin_mirar is None:
+                sin_mirar = pares_aprobados_sin_mirarlos()
+            if any((min(pid, v["otro_id"]), max(pid, v["otro_id"])) not in sin_mirar
+                   for v in cargados):
+                continue
         codigo = vecinos[0]["codigo"] or ""
         limpio = sanitizar(codigo)
         if not limpio or limpio in de_proveedor:
             continue
+        # Escrito en cada descripción y en ninguna marcado. Antes se pedía además que el
+        # extractor de hoy lo encontrara sin marcar; pero el de hoy ya no toma muchos de los que
+        # entraron («8v.65CV-MILLE»), y esos son justamente los que hay que encontrar.
         escrito_sin_marcar = True
         for v in vecinos:
             texto = separar_texto_pegado(v["descripcion"] or "")
-            hallados = {sanitizar(x) for x in extraer_codigos_de_texto(
-                texto, codigo_propio=v["codigo_otro"])}
             marcados = {sanitizar(x) for x in extraer_codigos_de_texto(
                 texto, codigo_propio=v["codigo_otro"], solo_declarados=True)}
-            if limpio not in hallados or limpio in marcados:
+            if limpio not in sanitizar(texto) or limpio in marcados:
                 escrito_sin_marcar = False
                 break
         if not escrito_sin_marcar:
             continue
         salida.append({"pid": pid, "Código": codigo, "Lista": vecinos[0]["marca"],
                        "Productos": len({v["codigo_otro"] for v in vecinos}),
-                       "Esperando revisión": len(vecinos),
-                       "Ejemplo": (vecinos[0]["descripcion"] or "")[:70]})
-    salida.sort(key=lambda x: (x["Lista"], x["Código"]))
+                       "Aprobados en bloque": len(cargados),
+                       "Esperando revisión": len(vecinos) - len(cargados),
+                       "Ejemplo": " ↔ ".join(sorted({(v["descripcion"] or "")[:34]
+                                                    for v in vecinos})[:2])})
+    salida.sort(key=lambda x: (-x["Productos"], x["Lista"], x["Código"]))
     return salida
 
 

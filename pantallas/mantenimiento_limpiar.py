@@ -278,7 +278,7 @@ if pagina == PAGINAS[3]:
 
             # La otra mitad de lo de arriba: los que cuelgan de UN solo producto. Ver
             # codigos_adivinados_que_no_unen_nada().
-            st.markdown("**🧽 Códigos adivinados que no unen nada**")
+            st.markdown("**🧽 Códigos adivinados de una lista que no los marca**")
             explicar(
                 "Medidas, motores y herramientas que entraron como código de fábrica, leídos de "
                 "la descripción de una lista que nunca marca el código de fábrica.",
@@ -289,7 +289,13 @@ if pagina == PAGINAS[3]:
                 "Aparece solo el que cumple todo: une productos de una sola lista, esa lista "
                 "casi nunca marca el código de fábrica («REF ORIG», «Nº», «//»), el código "
                 "está escrito sin marcar en la descripción, no es el código de otro "
-                "proveedor, y ninguno de sus vínculos está aprobado.\n\n"
+                "proveedor, y ninguno de sus vínculos lo verificó ni lo aprobó de a uno una "
+                "persona.\n\n"
+                "**Los aprobados en bloque sí aparecen**, si unen dos productos o más: el "
+                "28/09 se aprobaron 36.607 vínculos en siete minutos, y entre ellos «120Amp» "
+                "unía una batería con dos soldadoras y «HEXAG.17MM» bocallaves de 3/8 y de "
+                "1/2, que el buscador mostraba como equivalentes. Se reconocen por el ritmo: "
+                "más de 200 aprobaciones de la misma persona en un minuto.\n\n"
                 "**No se pierde la búsqueda**: si alguien escribe ese número, el buscador lo "
                 "encuentra igual adentro de la descripción."
             )
@@ -303,10 +309,13 @@ if pagina == PAGINAS[3]:
                                "marcó el proveedor.")
                 else:
                     _adv_pend = sum(x.get("Esperando revisión") or 0 for x in _adv)
+                    _adv_carg = sum(x.get("Aprobados en bloque") or 0 for x in _adv)
                     _adv_listas = sorted({x["Lista"] for x in _adv})
                     st.warning(
                         f"**{miles(len(_adv))} código(s) adivinados** de {', '.join(_adv_listas)}, "
-                        f"con {miles(_adv_pend)} par(es) esperando revisión que se van con ellos."
+                        f"con {miles(_adv_pend)} par(es) esperando revisión"
+                        + (f" y {miles(_adv_carg)} vínculo(s) aprobados en bloque" if _adv_carg
+                           else "") + " que se van con ellos."
                     )
                     st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _adv],
                                   width="stretch", hide_index=True)
@@ -317,18 +326,27 @@ if pagina == PAGINAS[3]:
                         file_name="codigos_adivinados.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="dl_adivinados")
-                    st.caption("Se borra el código de fábrica y los pendientes que colgaban de "
-                               "él. **Los productos no se tocan**: precios, stock e historial "
-                               "quedan igual.")
-                    if st.checkbox("Miré la lista y entiendo qué se borra", key="conf_adivinados"):
+                    st.caption("Se borra el código de fábrica, los vínculos y los pendientes "
+                               "que colgaban de él. **Los productos no se tocan**: precios, "
+                               "stock e historial quedan igual.")
+                    # Los que son códigos de verdad se dejan: la lista se mira entera antes de
+                    # borrar, y alguno puede serlo.
+                    _adv_dejar = set(st.multiselect(
+                        "Estos no (son códigos de verdad):", [x["Código"] for x in _adv],
+                        placeholder="Ninguno: se borran todos", key="adivinados_dejar"))
+                    _adv = [x for x in _adv if x["Código"] not in _adv_dejar]
+                    if _adv and st.checkbox("Miré la lista y entiendo qué se borra",
+                                            key="conf_adivinados"):
                         if candado("borrar los códigos adivinados",
                                     st.button(f"🗑️ Borrar los {miles(len(_adv))}", type="primary",
                                                key="btn_borrar_adivinados"),
                                     "borrar_los_codigos_adivinados"):
                             _barra_adv = st.progress(0.0, text="Borrando...")
-                            _tot_adv = 0
+                            _tot_adv = _carg_adv = 0
                             for _i_adv, _x in enumerate(_adv):
-                                _tot_adv += borrar_puente_y_sus_pendientes(_x["pid"])[1]
+                                _borrados_adv = borrar_puente_y_sus_pendientes(_x["pid"])
+                                _carg_adv += _borrados_adv[0]
+                                _tot_adv += _borrados_adv[1]
                                 if _i_adv % 50 == 0:
                                     _barra_adv.progress((_i_adv + 1) / len(_adv),
                                                         text=f"Borrando... {miles(_i_adv + 1)} de "
@@ -336,9 +354,9 @@ if pagina == PAGINAS[3]:
                             _barra_adv.empty()
                             st.session_state.pop("codigos_adivinados", None)
                             invalidar_salud()
-                            avisar("ok", f"Se borraron {miles(len(_adv))} código(s) adivinados y "
-                                          f"{miles(_tot_adv)} pendiente(s). Los productos quedaron "
-                                          "intactos.")
+                            avisar("ok", f"Se borraron {miles(len(_adv))} código(s) adivinados, "
+                                          f"{miles(_carg_adv)} vínculo(s) y {miles(_tot_adv)} "
+                                          "pendiente(s). Los productos quedaron intactos.")
                             st.rerun()
             st.markdown("---")
 

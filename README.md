@@ -7029,6 +7029,14 @@ Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 
 
 `pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
 
+## 🧽 Los números adivinados que se aprobaron en bloque
+
+La importación de IMPERIAL del 25/09 sacó 1.448 «códigos de fábrica» de las descripciones, antes de que la app aprendiera que en una lista que nunca marca sus códigos eso son medidas, motores y herramientas (ver `la_lista_declara_codigos()`). El 28/09 se aprobaron 36.607 vínculos en siete minutos, y esos entraron con ellos. Los que unen dos o más productos son equivalencias falsas que el buscador muestra: «120Amp» une una batería con dos soldadoras; «HEXAG.17MM», bocallaves de 3/8 y de 1/2; «DQA-495», la junta de admisión con la de escape; «8v.65CV-MILLE», un pistón con los aros y la camisa.
+
+«🧽 Códigos adivinados» (en **Limpiar y corregir**) no los mostraba: dejaba afuera todo lo aprobado. Ahora también muestra los aprobados **en bloque** que unen dos productos o más; el bloque se reconoce por el ritmo, porque nadie mira de a uno 200 vínculos en un minuto (más de 200 aprobaciones de la misma persona en un minuto). Lo verificado, lo aprobado de a uno y lo que cuelga de un solo producto ya cargado se deja: alguno sirve («ZFR5Q-11», la bujía NGK de una descripción de TARANTO). Antes de borrar se pueden dejar afuera los que sean códigos de verdad.
+
+Con la copia de la base del 12/10: 302 códigos (271 de IMPERIAL, 31 de TARANTO), 488 vínculos y 165 pendientes; borrándolos, 470 productos dejan de mostrar equivalentes falsos. Los productos no se tocan, y el buscador sigue encontrando ese número adentro de la descripción. `pruebas_de_la_plata_y_el_stock.py` (12) lo controla.
+
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
 Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.

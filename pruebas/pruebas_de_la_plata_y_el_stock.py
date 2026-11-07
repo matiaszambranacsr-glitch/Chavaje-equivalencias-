@@ -354,6 +354,50 @@ def probar(L):
         esperar("un nombre vacío no se acepta", "lo aceptó", "ValueError")
     except ValueError:
         pass
+
+    # 12. LOS CÓDIGOS ADIVINADOS APROBADOS EN BLOQUE (ver codigos_adivinados_que_no_unen_nada()):
+    # «120Amp», leído de las descripciones de una lista que no marca sus códigos, unía una
+    # batería con dos soldadoras, y se aprobó con otros 300 en el mismo minuto: aparece. No
+    # aparecen el aprobado de a uno, el verificado ni el que cuelga un solo producto ya cargado.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('ADIVINA12', 'PROVEEDOR')")
+    _m12 = c.lastrowid
+    _oem12 = c.execute("SELECT id FROM marcas WHERE tipo = 'OEM'").fetchone()
+    _oem12 = _oem12[0] if _oem12 else ns["get_or_create_marca"]("OEM / FABRICA", "OEM")
+    _prods12 = {}
+    for _cod, _desc in [("BAT-120", "BATERIA 12v./120Amp."), ("SOL-120", "SOLDADORA MIG 120Amp."),
+                        ("SOL-150", "SOLDADORA FLUX 120Amp. 150"),
+                        ("STA-17A", "BOCALLAVE 3/8 HEXAG.17MM"), ("STA-17B", "BOCALLAVE 1/2 HEXAG.17MM"),
+                        ("CRO-9", "LLAVE DE IMPACTO 1650Nm"), ("CRO-8", "LLAVE DE IMPACTO 3/4 1650Nm"),
+                        ("NGK-1", "BUJIA NGK ZFR5Q-11 NO EXISTE MAS")]:
+        _prods12[_cod] = ns["get_or_create_producto"](_cod, ns["sanitizar"](_cod), _desc, _m12)
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", [(f"REL-{i}", f"REL{i}", f"RELLENO {i}", _m12)
+                                          for i in range(300)])
+    _ids12 = {}
+    for _oc in ("120Amp", "HEXAG.17MM", "1650Nm", "ZFR5Q-11"):
+        _ids12[_oc] = ns["get_or_create_producto"](_oc, ns["sanitizar"](_oc), "", _oem12)
+    _vinc12 = [("120Amp", "BAT-120"), ("120Amp", "SOL-120"), ("120Amp", "SOL-150"),
+               ("HEXAG.17MM", "STA-17A"), ("HEXAG.17MM", "STA-17B"),
+               ("1650Nm", "CRO-9"), ("1650Nm", "CRO-8"), ("ZFR5Q-11", "NGK-1")]
+    for _oc, _pc in _vinc12:
+        _a, _b = sorted((_ids12[_oc], _prods12[_pc]))
+        c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id, lote, verificada) "
+                  "VALUES (?, ?, 'ADIVINA12 · lista.xlsx', ?)", (_a, _b, int(_oc == "1650Nm")))
+    # La aprobación en bloque: todos en el mismo minuto, con 300 más de relleno.
+    _bloque12 = [tuple(sorted((_ids12[_oc], _prods12[_pc]))) for _oc, _pc in _vinc12
+                 if _pc != "STA-17B"] + [(100000 + i, 200000 + i) for i in range(300)]
+    c.executemany("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, "
+                  "decision, revisado_por, fecha) VALUES (?, ?, 'ok', 'Chavo', "
+                  "'2026-09-28 06:50:10')", _bloque12)
+    # Uno de las bocallaves, aprobado de a uno otro día.
+    c.execute("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, "
+              "decision, revisado_por, fecha) VALUES (?, ?, 'ok', 'Chavo', '2026-10-01 10:00:00')",
+              tuple(sorted((_ids12["HEXAG.17MM"], _prods12["STA-17B"]))))
+    conn.commit()
+    _adv12 = {x["Código"]: (x["Productos"], x["Aprobados en bloque"])
+              for x in ns["codigos_adivinados_que_no_unen_nada"]() if x["Lista"] == "ADIVINA12"}
+    esperar("aprobado en bloque y uniendo tres: aparece; de a uno, verificado o uno solo, no",
+            _adv12, {"120Amp": (3, 3)})
     return fallas
 
 
