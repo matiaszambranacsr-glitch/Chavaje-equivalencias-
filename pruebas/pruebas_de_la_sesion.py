@@ -156,6 +156,43 @@ def probar():
     [b for b in at.button if "Procesar e importar" in b.label][0].click().run()
     esperar("y entera, entra entera", _lo_que_hay(), (3, _antes[1] + 1, _antes[2] + 3))
     esperar("sin errores al importar", [e.value for e in at.exception], [])
+
+    # 2d. Dos productos de la lista que sin los signos se escriben igual (la tuerca CAMBA111.4 de
+    # 5/32 y la CAMBA11.14 de 9/16, de IMPERIAL): el producto queda con SU precio y el otro
+    # renglón no entra, con el motivo. Antes quedaba con la descripción del primero y el precio
+    # del segundo. El mismo código escrito igual dos veces (la unidad y la caja) sigue como
+    # antes: se avisa como repetido. Ver es_otro_producto_con_el_mismo_codigo().
+    def _importar(nombre, renglones):
+        with open(nombre, "w", encoding="utf-8") as f:
+            f.write("Codigo;Descripcion;Precio;Stock\n" + "".join(r + "\n" for r in renglones))
+        [t for t in at.text_input if "Ruta completa" in t.label][0].set_value(
+            os.path.abspath(nombre)).run()
+        at.text_input(key="nombre_prov_carga").set_value("PRUEBACHOQUE").run()
+        [b for b in at.button if "Procesar e importar" in b.label][0].click().run()
+
+    def _precio(limpio):
+        return [tuple(r) for r in ns["c"].execute(
+            "SELECT descripcion, precio FROM productos WHERE codigo_clean = ?",
+            (limpio,)).fetchall()]
+    # Precios que el freno de saltos deja pasar (menos de 3 veces): con la junta de 12", 75
+    # veces más cara, el freno la paraba, alguien tocaba «Aplicar igual» viendo la descripción
+    # de la de 12" y la de ½" quedaba a ese precio.
+    _tuercas = ["CAMBA111.4;TUERCA ZINC 5/32;987;1", "CAMBA11.14;TUERCA NAT 9/16;1873;1"]
+    _importar("choque.csv", _tuercas + ["DOBLE-1;JUNTA UNIDAD;100;1", "DOBLE-1;JUNTA CAJA;900;1"])
+    esperar("choque: la tuerca de 5/32 con su precio, y una sola", _precio("CAMBA1114"),
+            [("TUERCA ZINC 5/32", 987.0)])
+    esperar("y lo dice", any("otro producto que" in w.value and "CAMBA11.14" in w.value
+                             for w in at.warning), True)
+    esperar("escrito igual dos veces: se avisa como repetido, como antes",
+            any("más de una vez en la lista" in w.value and "DOBLE-1" in w.value
+                for w in at.warning), True)
+    # Volver a importar la lista corrige el precio que había quedado mal.
+    ns["c"].execute("UPDATE productos SET precio = 1873 WHERE codigo_clean = 'CAMBA1114'")
+    ns["conn"].commit()
+    _importar("choque2.csv", _tuercas + ["OTRA-1;JUNTA;50;1"])
+    esperar("reimportada: la de 5/32 vuelve a su precio", _precio("CAMBA1114"),
+            [("TUERCA ZINC 5/32", 987.0)])
+    esperar("sin errores con los choques", [e.value for e in at.exception], [])
     # En la app de internet la ruta se leería en el servidor, no en el teléfono: no se ofrece.
     _en_la_nube = _g["corre_en_streamlit_cloud"]
     _g["corre_en_streamlit_cloud"] = lambda: True

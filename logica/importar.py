@@ -778,6 +778,65 @@ def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
 
 
 # ============================================================================================
+# DOS PRODUCTOS DE LA LISTA QUE SIN LOS SIGNOS SE ESCRIBEN IGUAL
+# ============================================================================================
+# El código limpio saca los signos para que «06A 905 115» y «06A905115» sean uno solo. Pero en la
+# lista de IMPERIAL del 18/08 hay 210 pares de productos DISTINTOS que se distinguen por un signo:
+# la junta H21A1/2"RF1,5 (de ½", $643) y la H21A12"RF1,5 (de 12", $48.209), la tuerca CAMBA111.4
+# (5/32, $987) y la CAMBA11.14 (9/16, $11.073). Los dos renglones caían en el mismo producto, que
+# se quedaba con la descripción del primero y el PRECIO DEL SEGUNDO: en la base del 12/10, «JTA
+# PTFE HI-LON.2100 S150 1/2"» estaba a $48.209, 75 veces lo que vale, y la tuerca de 5/32 al
+# precio de la de 9/16. Y los vínculos del segundo renglón se le colgaban al primero.
+# Ahora el renglón escrito distinto que el producto —si la lista también trae el escrito como
+# él— es otro producto: no le toca el precio ni los vínculos, y va a las filas que no entraron
+# con el motivo. Volver a importar la lista corrige los precios que quedaron mal (los que bajan
+# mucho los para el freno, para mirarlos).
+# El mismo código escrito igual dos veces (la unidad y la caja) sigue como antes: queda el último
+# y se avisa (ver codigos_con_dos_precios_en_la_misma_lista()).
+
+
+def codigos_del_proveedor(celda):
+    """Los códigos de proveedor de una celda, como los toma la importación: partidos (ver
+    dividir_codigos()) o, si no se parte, la celda entera si es un código."""
+    codigos = dividir_codigos(celda)
+    if not codigos and celda and es_codigo_util(celda):
+        codigos = [celda]
+    return codigos
+
+
+def _escrito(codigo):
+    return re.sub(r"\s+", "", str(codigo or "")).upper()
+
+
+def como_se_escribe_cada_codigo(celdas):
+    """{código limpio: {cómo se escribe}} de la lista entera, antes de cargar nada: renglón
+    por renglón no se puede saber si dos que caen en el mismo código limpio son el mismo código
+    o dos productos. Sin los espacios ni las mayúsculas, que no distinguen nada."""
+    formas = {}
+    for celda in celdas:
+        for raw in codigos_del_proveedor(celda):
+            limpio = sanitizar(raw)
+            if limpio:
+                formas.setdefault(limpio, set()).add(_escrito(raw))
+    return formas
+
+
+def es_otro_producto_con_el_mismo_codigo(raw, producto_id, formas):
+    """Si este código de la lista cae en un producto escrito distinto, y la lista trae también
+    el código escrito como ese producto, es otro producto que sin los signos se escribe igual:
+    devuelve cómo se escribe el producto (para decirlo). Si no, ''. `formas`: ver
+    como_se_escribe_cada_codigo()."""
+    de_la_lista = formas.get(sanitizar(raw), ())
+    if len(de_la_lista) < 2:
+        return ""
+    fila = c.execute("SELECT codigo_raw FROM productos WHERE id = ?", (producto_id,)).fetchone()
+    del_producto = fila[0] if fila else ""
+    if _escrito(raw) != _escrito(del_producto) and _escrito(del_producto) in de_la_lista:
+        return del_producto
+    return ""
+
+
+# ============================================================================================
 # QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS
 # ============================================================================================
 # IMPERIAL escribe la descripción por el auto y la corta en 30 letras: «SUZUKI HATCH ST80

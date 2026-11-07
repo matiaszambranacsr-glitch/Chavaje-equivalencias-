@@ -49,6 +49,7 @@ específico, y las pantallas quedan todas al final:
     logica/importar.py
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
         · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO
+        · DOS PRODUCTOS DE LA LISTA QUE SIN LOS SIGNOS SE ESCRIBEN IGUAL
         · QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS
     logica/busqueda.py
         · BÚSQUEDA DE EQUIVALENCIAS (el corazón de la app)

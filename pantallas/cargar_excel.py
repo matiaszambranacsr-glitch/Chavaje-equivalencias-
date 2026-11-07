@@ -691,6 +691,14 @@ if pagina == PAGINAS[2]:
                     # Los códigos que ya están cargados. Se leen UNA vez, antes del candado y
                     # antes del bucle: adentro se consultan por cada token de cada fila.
                     codigos_ya_cargados = codigos_del_catalogo(version_del_catalogo())
+                    # Cómo escribe la lista cada código, entera y antes de cargar nada: dos
+                    # productos distintos que sin los signos se escriben igual (la junta de ½"
+                    # y la de 12" de IMPERIAL) no pueden caer en el mismo producto. Ver
+                    # es_otro_producto_con_el_mismo_codigo().
+                    _formas_de_la_lista = como_se_escribe_cada_codigo(
+                        valor_codigo(f[idx_prov]) for f in filas_datos
+                        if idx_prov is not None and idx_prov < len(f))
+                    choques_de_codigo = []
                     oem_desc_estricta = False
                     if buscar_oem_en_desc and idx_desc is not None:
                         _pares_desc = [
@@ -748,9 +756,7 @@ if pagina == PAGINAS[2]:
                             # OJO con el fallback: antes, si dividir_codigos no devolvía nada se
                             # usaba la celda cruda igual — así que un '1' suelto entraba lo mismo.
                             # Ahora la celda cruda también tiene que pasar el filtro.
-                            codigos_prov = dividir_codigos(raw_p_cell)
-                            if not codigos_prov and raw_p_cell and es_codigo_util(raw_p_cell):
-                                codigos_prov = [raw_p_cell]
+                            codigos_prov = codigos_del_proveedor(raw_p_cell)
                             codigos_oem = dividir_codigos(raw_o_cell)
                             if not codigos_oem and raw_o_cell and es_codigo_util(raw_o_cell):
                                 codigos_oem = [raw_o_cell]
@@ -819,10 +825,25 @@ if pagina == PAGINAS[2]:
                             # equivalencias con nada.
                             ids_prov = []
                             ids_prov_sin_digitos = set()
+                            _choco = False
                             for raw_p in codigos_prov:
                                 clean_p = sanitizar(raw_p)
                                 if clean_p:
                                     pid_nuevo = get_or_create_producto(raw_p, clean_p, desc, prov_id)
+                                    # Otro producto que sin los signos se escribe igual: ni su
+                                    # precio ni sus vínculos van al que ya está (ver «DOS
+                                    # PRODUCTOS DE LA LISTA QUE SIN LOS SIGNOS SE ESCRIBEN IGUAL»).
+                                    _el_otro = es_otro_producto_con_el_mismo_codigo(
+                                        raw_p, pid_nuevo, _formas_de_la_lista)
+                                    if _el_otro:
+                                        _choco = True
+                                        choques_de_codigo.append(f"{raw_p} y {_el_otro}")
+                                        filas_omitidas.append({
+                                            "Proveedor": raw_p, "OEM": raw_o_cell,
+                                            "Descripcion": desc,
+                                            "Motivo": f"sin los signos se escribe igual que "
+                                                      f"{_el_otro}, que es otro producto"})
+                                        continue
                                     ids_prov.append(pid_nuevo)
                                     # Lo que dice ESTA lista: ver fichas_que_cambiaron().
                                     if desc:
@@ -853,8 +874,9 @@ if pagina == PAGINAS[2]:
 
                             if not ids_prov:
                                 omitidos += 1
-                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell,
-                                                        "Descripcion": desc, "Motivo": "código de proveedor no válido"})
+                                if not _choco:      # ya está, con su motivo
+                                    filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell,
+                                                           "Descripcion": desc, "Motivo": "código de proveedor no válido"})
                                 if total and n % 25 == 0:
                                     progreso.progress(min((n + 1) / total, 1.0))
                                 continue
@@ -1169,6 +1191,14 @@ if pagina == PAGINAS[2]:
                             "vez en la lista con precios distintos** (suele ser la unidad y la caja, "
                             "o dos presentaciones). Quedó uno solo de los precios: revisalos. "
                             "Ejemplos: " + ", ".join(repetidos_con_otro_precio[:5])
+                        )
+                    if choques_de_codigo:
+                        st.warning(
+                            f"🔀 {miles(len(choques_de_codigo))} renglón(es) son **otro producto que, "
+                            "sin los signos, se escribe igual** que uno de la lista (como la junta "
+                            "de ½\" y la de 12\" de IMPERIAL): el producto que ya estaba quedó con "
+                            "su precio, y esos renglones no entraron. Están en las filas omitidas, "
+                            "abajo. Ejemplos: " + ", ".join(choques_de_codigo[:5])
                         )
                     if precios_en_cero:
                         st.caption(
