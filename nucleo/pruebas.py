@@ -217,6 +217,7 @@ def probar_dividir():
                    'H21A1/2"RF1,5',        # 1/2 es una fracción: media pulgada
                    "RHEIN-SCV3/8a1",
                    "SABO-02233/BRG",       # sufijo de variante, no un código aparte
+                   "SABO-5547/BRAGF",      # ...también largo, si es de solo letras
                    "RODGE-MINI/10F",
                    "W712/94",              # filtro Mann: un solo código
                    "WK842/2"):

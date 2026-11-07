@@ -211,6 +211,15 @@ def _partir_por_barra(trozo):
         # que distingue un caso del otro.
         if len(limpio) <= 4:
             return [trozo]
+    # Y uno de SOLO LETRAS al lado de uno con números, también, aunque sea largo: la lista de
+    # IMPERIAL trae 44 juntas Sabó así —«SABO-5997/BRAGS», «SABO-5547/BRAGF»—, y con el tope
+    # de cuatro letras se partían en «SABO-5547» y un producto llamado «BRAGF» que juntaba 22
+    # precios, uno por cada renglón que lo traía, y que nadie buscaría nunca. Y escribir el
+    # código como está en la lista no encontraba nada. Dos códigos de verdad tienen números de
+    # los dos lados (1109AN/1109AB).
+    _con_numeros = [any(ch.isdigit() for ch in sanitizar(p)) for p in partes]
+    if any(_con_numeros) and not all(_con_numeros):
+        return [trozo]
     return partes
 
 

@@ -7016,6 +7016,10 @@ Ahora la importación mira primero cómo escribe la lista cada código (0,3 s pa
 
 **Para corregir los 210 de la base**: volver a importar la lista de IMPERIAL. Cada producto vuelve a su precio; los que cambian más de 3 veces quedan frenados, para tocar «Aplicar igual» (ahora con la descripción correcta). El segundo producto de cada par todavía no se carga aparte: buscar `CAM-A1781-030` trae la `CAM-A1781+030`. `pruebas_de_la_sesion.py` (2d) lo controla con la importación de verdad: sin el arreglo, la tuerca de 5/32 queda al precio de la de 9/16.
 
+### Y el sufijo de letras va con su código
+
+En la misma lista hay 44 juntas Sabó escritas «SABO-5997/BRAGS», «SABO-5547/BRAGF». La barra se partía: una barra con un pedazo corto del otro lado («SABO-02233/BRG», «W712/94») ya se reconocía como sufijo, pero con más de cuatro letras no. Quedaban «SABO-5547» y un producto llamado «BRAGF», que juntaba 22 precios —uno por cada renglón que lo traía— y que nadie buscaría nunca; y escribir el código como está en la lista no encontraba nada. En la copia de la base hay 13 de esos productos de solo letras, todos de Sabó. Ahora un pedazo de solo letras al lado de uno con números es un sufijo, y el código va entero; dos códigos de verdad tienen números de los dos lados («1109AN/1109AB» se sigue partiendo). Las 43.303 filas de IMPERIAL dan un código cada una. `nucleo/pruebas.py` lo controla.
+
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
 Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.

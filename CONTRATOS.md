@@ -165,6 +165,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | Arrancar desde una copia queda anotado con la fecha de la copia, y la salud se lo dice al administrador 7 días (grave desde un día de atraso; nada con menos de una hora) | `_restaurar_desde_semilla()`, `arranque_desde_copia()` | `pruebas_de_las_copias_en_github.py`, `pruebas_de_las_copias.py` |
 | Con la copia frenada, la salud dice de cuándo es el último backup bajado a mano (o que no hay) | `marcar_backup_bajado()` | `pruebas_de_las_copias.py` |
 | Al importar, un renglón que sin los signos se escribe igual que otro producto de la lista no le pone el precio ni los vínculos: va a las filas omitidas con el motivo | `como_se_escribe_cada_codigo()`, `es_otro_producto_con_el_mismo_codigo()` | `pruebas_de_la_sesion.py` (2d) |
+| Un pedazo de solo letras al otro lado de la barra de un código con números es un sufijo: el código no se parte («SABO-5547/BRAGF») | `_partir_por_barra()` | `nucleo/pruebas.py` |
 | Si la última vuelta no pudo subir, la pantalla dice «atrasada» y desde cuándo, nunca «al día» | `cuanto_perderias_si_reinicia()` | `pruebas_de_las_copias_en_github.py` |
 | La frase que propone la app para `clave_copia` es al azar, larga y no rompe los secretos | `frase_para_la_copia()` | `pruebas_de_las_copias_en_github.py` |
 | La prueba de la copia mira las claves foráneas de todas las tablas | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_las_copias_en_github.py` |
