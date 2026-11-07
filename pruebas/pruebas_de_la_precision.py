@@ -249,6 +249,12 @@ def probar(L):
             (cambios["codigos"], cambios["sin_ninguno"]), (2, 2))
     cambios = ns["equivalentes_que_la_lista_dejo_de_declarar"]("FISPA", hoy, {r300}, set())
     esperar("el que dejó de venir en la lista no cuenta", cambios["codigos"], 1)
+    # La misma descripción de siempre: no lo cambió el proveedor, lo leía distinto una versión
+    # anterior de la app (la lista de IMPERIAL reimportada: «1.332 códigos ya no dicen lo mismo»).
+    cambios = ns["equivalentes_que_la_lista_dejo_de_declarar"](
+        "FISPA", hoy, {r200, r300}, set(),
+        descripciones_que_trae={r200: "FILTRO DE ACEITE", r300: "FILTRO DE AIRE NUEVO"})
+    esperar("con la misma descripción: uno de los dos", cambios["misma_descripcion"], 1)
 
     # 9. Con o sin ABS, aire o sensor: dos versiones de la misma pieza.
     equip = ns["equipamiento_declarado"]

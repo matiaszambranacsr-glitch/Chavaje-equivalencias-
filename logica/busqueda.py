@@ -1127,7 +1127,8 @@ def lo_que_cambia_la_pieza(vieja, nueva):
 
 
 def equivalentes_que_la_lista_dejo_de_declarar(nombre_prov, lote_actual, ids_de_la_lista,
-                                                pares_de_la_lista, tope=30):
+                                                pares_de_la_lista, tope=30,
+                                                descripciones_que_trae=None):
     """Los códigos de esta lista que la importación anterior del MISMO proveedor vinculaba con
     otro número, y que esta ya no vincula. No se borra nada: se avisa.
 
@@ -1138,8 +1139,17 @@ def equivalentes_que_la_lista_dejo_de_declarar(nombre_prov, lote_actual, ids_de_
     Solo cuenta los productos que la lista nueva SÍ trae: el que dejó de venir no cambió de
     equivalente, dejó de estar. Devuelve {"codigos", "sin_ninguno", "ejemplos"}: sin_ninguno
     son los que ahora no traen ningún número, que en cantidad suele ser la columna de códigos
-    de fábrica que quedó sin elegir al importar."""
-    vacio = {"codigos": 0, "sin_ninguno": 0, "ejemplos": []}
+    de fábrica que quedó sin elegir al importar.
+
+    «misma_descripcion»: de esos, cuántos vienen en esta lista con la descripción de siempre
+    (`descripciones_que_trae`: id -> la de esta lista). Ahí el proveedor no cambió nada: el
+    vínculo viejo lo sacó de la descripción una versión anterior de la app. Volviendo a
+    importar la lista de IMPERIAL del 18/08, la misma de la importación del 25/09, el aviso
+    decía «1.332 códigos ya no dicen lo mismo… si el proveedor los corrigió, buscá el código y
+    cortá el viejo»: el texto era idéntico, y eran números que entonces se tomaban de cualquier
+    descripción («ALU.203», «V-16.8x2.7») y hoy, en una lista que casi nunca marca sus códigos,
+    solo se toman marcados o conocidos (ver la_lista_declara_codigos())."""
+    vacio = {"codigos": 0, "sin_ninguno": 0, "misma_descripcion": 0, "ejemplos": []}
     if not ids_de_la_lista:
         return vacio
     prefijo = f"{str(nombre_prov).upper()} · "
@@ -1171,8 +1181,15 @@ def equivalentes_que_la_lista_dejo_de_declarar(nombre_prov, lote_actual, ids_de_
         return ", ".join(sorted(codigos.get(x, str(x)) for x in xs)) or "(ninguno)"
     ejemplos = [{"Código": codigos.get(p, str(p)), "Antes decía": lista(dejados[p]),
                  "Ahora dice": lista(ahora.get(p, set()))} for p in elegidos]
+    misma = 0
+    if descripciones_que_trae:
+        for tanda, marcadores in en_tandas([p for p in dejados if p in descripciones_que_trae]):
+            c.execute(f"SELECT id, descripcion FROM productos WHERE id IN ({marcadores})", tanda)
+            misma += sum(1 for r in c.fetchall()
+                         if (r["descripcion"] or "").strip()
+                         == (descripciones_que_trae[r["id"]] or "").strip())
     return {"codigos": len(dejados), "sin_ninguno": sum(1 for p in dejados if p not in ahora),
-            "ejemplos": ejemplos}
+            "misma_descripcion": misma, "ejemplos": ejemplos}
 
 
 def vinculos_por_origen():

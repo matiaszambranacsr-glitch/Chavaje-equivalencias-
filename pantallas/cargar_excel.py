@@ -1046,11 +1046,24 @@ if pagina == PAGINAS[2]:
                     # un error de la lista nueva. Ver equivalentes_que_la_lista_dejo_de_declarar().
                     try:
                         _cambios = equivalentes_que_la_lista_dejo_de_declarar(
-                            nombre_prov, lote_importacion, _ids_de_la_lista, _pares_de_la_lista)
+                            nombre_prov, lote_importacion, _ids_de_la_lista, _pares_de_la_lista,
+                            descripciones_que_trae=_descripciones_que_trae)
                     except sqlite3.Error as _err:
                         anotar_error("importar/cambios de equivalente", _err)
                         _cambios = {"codigos": 0}
-                    if _cambios["codigos"]:
+                    _igual = _cambios.get("misma_descripcion", 0)
+                    if _cambios["codigos"] and _igual == _cambios["codigos"]:
+                        # La lista dice lo mismo: no es el proveedor, es la app que hoy lee
+                        # distinto. Ver equivalentes_que_la_lista_dejo_de_declarar().
+                        st.info(
+                            f"🔁 **{miles(_igual)} código(s) de {nombre_prov} tienen vínculos de "
+                            "una importación anterior que esta no repite, pero la lista dice lo "
+                            "mismo** (la descripción es la de siempre). Esos números los sacó de "
+                            "las descripciones una versión anterior de la app; hoy, en una lista "
+                            "que casi nunca marca sus códigos de fábrica, solo toma los marcados "
+                            "o los que ya conoce de otra lista. **No se borró nada.**")
+                        st.dataframe(_cambios["ejemplos"], hide_index=True, width="stretch")
+                    elif _cambios["codigos"]:
                         st.warning(
                             f"🔀 **{miles(_cambios['codigos'])} código(s) de {nombre_prov} ya no "
                             "dicen lo mismo que en la lista anterior**: antes los vinculaba con un "
@@ -1059,7 +1072,10 @@ if pagina == PAGINAS[2]:
                             "cortá el viejo; si la que está mal es esta lista, no hagas nada."
                             + (f" {miles(_cambios['sin_ninguno'])} de ellos ahora no traen "
                                "ningún número: si son muchos, fijate si la columna de códigos "
-                               "de fábrica quedó elegida." if _cambios["sin_ninguno"] else ""))
+                               "de fábrica quedó elegida." if _cambios["sin_ninguno"] else "")
+                            + (f" {miles(_igual)} vienen con la misma descripción de siempre: "
+                               "esos no los cambió el proveedor, los leía distinto una versión "
+                               "anterior de la app." if _igual else ""))
                         st.dataframe(_cambios["ejemplos"], hide_index=True, width="stretch")
                     # LA FICHA QUE CAMBIÓ: el producto ya estaba y esta lista lo describe con
                     # otra medida, otro lado u otra tensión. La descripción guardada no se pisa
@@ -1225,7 +1241,20 @@ if pagina == PAGINAS[2]:
                                + ", ".join(f"{c} ({v} veces)" for v, c in _repes) if _repes else "")
                         )
                     if omitidos:
-                        st.warning(f"Se omitieron {omitidos} filas porque no tenían código de proveedor.")
+                        # Por motivo: decía «porque no tenían código de proveedor» para todas, y
+                        # con la lista de IMPERIAL las 210 omitidas sí lo tenían (eran otro
+                        # producto que se escribe igual sin los signos: ver arriba).
+                        _motivos_omitidas = collections.Counter(
+                            "son otro producto que sin los signos se escribe igual"
+                            if f["Motivo"].startswith("sin los signos")
+                            else {"sin código de proveedor": "no tenían código de proveedor",
+                                  "código de proveedor no válido":
+                                      "el código de proveedor no es válido"}.get(
+                                f["Motivo"], f["Motivo"])
+                            for f in filas_omitidas)
+                        st.warning(f"Se omitieron {miles(omitidos)} filas: " + "; ".join(
+                            f"{miles(_n)} {_texto}" for _texto, _n in _motivos_omitidas.most_common())
+                            + ".")
                         st.dataframe(filas_omitidas, width="stretch")
                         st.download_button(
                             "⬇️ Descargar filas omitidas",

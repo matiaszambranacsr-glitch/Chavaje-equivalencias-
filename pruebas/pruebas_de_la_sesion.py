@@ -183,6 +183,9 @@ def probar():
             [("TUERCA ZINC 5/32", 987.0)])
     esperar("y lo dice", any("otro producto que" in w.value and "CAMBA11.14" in w.value
                              for w in at.warning), True)
+    esperar("las omitidas, con su motivo (no «sin código de proveedor»)",
+            [w.value for w in at.warning if w.value.startswith("Se omitieron")],
+            ["Se omitieron 1 filas: 1 son otro producto que sin los signos se escribe igual."])
     esperar("escrito igual dos veces: se avisa como repetido, como antes",
             any("más de una vez en la lista" in w.value and "DOBLE-1" in w.value
                 for w in at.warning), True)

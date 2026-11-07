@@ -7020,6 +7020,15 @@ Ahora la importación mira primero cómo escribe la lista cada código (0,3 s pa
 
 En la misma lista hay 44 juntas Sabó escritas «SABO-5997/BRAGS», «SABO-5547/BRAGF». La barra se partía: una barra con un pedazo corto del otro lado («SABO-02233/BRG», «W712/94») ya se reconocía como sufijo, pero con más de cuatro letras no. Quedaban «SABO-5547» y un producto llamado «BRAGF», que juntaba 22 precios —uno por cada renglón que lo traía— y que nadie buscaría nunca; y escribir el código como está en la lista no encontraba nada. En la copia de la base hay 13 de esos productos de solo letras, todos de Sabó. Ahora un pedazo de solo letras al lado de uno con números es un sufijo, y el código va entero; dos códigos de verdad tienen números de los dos lados («1109AN/1109AB» se sigue partiendo). Las 43.303 filas de IMPERIAL dan un código cada una. `nucleo/pruebas.py` lo controla.
 
+### Volver a importar la lista de IMPERIAL, medido
+
+Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 9 s; los 210 renglones que son otro producto quedan afuera con su motivo; 117 precios quedan frenados para «Aplicar igual» —la junta de ½" pasa de $48.209 a $643, la tuerca de 5/32 de $11.073 a $987, el filtro LX208/1 de $176.130 a $8.732— y los que cambian menos de 3 veces se corrigen solos; entran las 44 juntas Sabó con el código entero. Al reimportar salían dos avisos que no decían lo que pasaba, y se arreglaron:
+
+- «Se omitieron 210 filas porque no tenían código de proveedor»: sí lo tenían. Ahora dice el motivo de cada grupo («210 son otro producto que sin los signos se escribe igual»).
+- «1.332 códigos de IMPERIAL ya no dicen lo mismo que en la lista anterior… si el proveedor los corrigió, buscá el código y cortá el viejo»: la lista era la misma, palabra por palabra. Esos vínculos los sacó de las descripciones la importación del 25/09, que tomaba cualquier número («ALU.203», «V-16.8x2.7»); hoy, en una lista que casi nunca marca sus códigos, solo se toman los marcados o los que ya se conocen de otra lista. Ahora, si la descripción es la de siempre, lo dice así, en azul y sin mandar a revisar mil códigos de a uno.
+
+`pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
+
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
 Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.
