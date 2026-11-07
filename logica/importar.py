@@ -411,6 +411,15 @@ def marcar_backup_hecho():
     invalidar_salud()
 
 
+def marcar_backup_bajado():
+    """El backup bajado a mano (los botones de Backup y config). Además de la marca de
+    marcar_backup_hecho(), que también pone la copia de GitHub, deja la suya: con la copia
+    frenada desde el 12/10 (ver se_puede_subir_sin_cifrar()) un backup en la compu es lo único
+    que protege lo cargado de un reinicio, y la salud dice de cuándo es el último."""
+    marcar_backup_hecho()
+    guardar_config("ultimo_backup_bajado", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
 # Archivos que genera la propia app. Reimportar uno de estos es un error que no da ningún
 # aviso y ensucia la base: subir el filas_omitidas.xlsx crea una marca llamada "FILAS OMITIDAS"
 # con los productos que justamente se habían descartado.

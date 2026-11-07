@@ -7006,6 +7006,8 @@ El aviso de que eso pasó era un cartel «♻️ La base se restauró sola» que
 
 Probado con la copia real del 12/10 como si el servidor se hubiera reiniciado el 6/11: anota la copia del 12/10 15:56 y la salud marca en rojo los 25 días. `pruebas_de_las_copias_en_github.py` controla que el reinicio quede anotado, y `pruebas_de_las_copias.py`, cuándo avisa la salud y cuándo no.
 
+Y mientras la copia esté frenada, el aviso de la salud dice lo que se puede hacer hoy, en dos toques, sin entrar a Streamlit ni a GitHub: bajar un backup a la compu (🪶 sin fotos alcanza), que es lo único que protege lo cargado de un reinicio, con la fecha del último que se bajó («el último que bajaste es del 07/11/2026 10:15», o «no bajaste ninguno»). La copia de GitHub y el backup bajado a mano ya no comparten la marca: cada uno tiene la suya. `pruebas_de_las_copias.py` lo controla.
+
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
 Con la copia del 12/10, la salud decía en rojo «MANNOL LUBRICANTES: las equivalencias están encontradas y sin aprobar». Eran 4 pares que había juntado el catálogo de MANN entre la «Grasa de Molibdeno EP-2» y un filtro de combustible (🔴 en la cola). Sin ellos habría dicho, también en rojo, que MANNOL «se importó sin la columna de código de fábrica». Las dos cosas son falsas: son 81 lubricantes y ningún otro proveedor vende aceites, así que no tienen con qué cruzar.

@@ -324,7 +324,7 @@ if pagina == PAGINAS[4]:
                     f"⬇️ Descargar ({miles(len(st.session_state['backup_bytes'])/(1024*1024), 0)} MB)",
                     data=st.session_state["backup_bytes"],
                     file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db",
-                    on_click=marcar_backup_hecho
+                    on_click=marcar_backup_bajado
                 )
         with cbk2:
             st.markdown("*Liviano (sin fotos) — para el repositorio*")
@@ -337,7 +337,7 @@ if pagina == PAGINAS[4]:
                     data=st.session_state["backup_liviano"],
                     file_name="datos_iniciales.db",
                     help="Ya viene con el nombre listo para subir al repositorio",
-                    on_click=marcar_backup_hecho
+                    on_click=marcar_backup_bajado
                 )
                 st.caption(
                     f"Lleva los {total_prod_backup} productos con precios, equivalencias, vehículos e "

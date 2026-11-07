@@ -163,6 +163,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | Restaurar deja la base sana y con los mismos datos, también desde la copia cifrada de GitHub | `restaurar_backup()` | `pruebas_de_los_frenos.py` (16) |
 | La copia sin cifrar no sube a un repositorio público | `se_puede_subir_sin_cifrar()` | `pruebas_de_las_copias_en_github.py` |
 | Arrancar desde una copia queda anotado con la fecha de la copia, y la salud se lo dice al administrador 7 días (grave desde un día de atraso; nada con menos de una hora) | `_restaurar_desde_semilla()`, `arranque_desde_copia()` | `pruebas_de_las_copias_en_github.py`, `pruebas_de_las_copias.py` |
+| Con la copia frenada, la salud dice de cuándo es el último backup bajado a mano (o que no hay) | `marcar_backup_bajado()` | `pruebas_de_las_copias.py` |
 | Si la última vuelta no pudo subir, la pantalla dice «atrasada» y desde cuándo, nunca «al día» | `cuanto_perderias_si_reinicia()` | `pruebas_de_las_copias_en_github.py` |
 | La frase que propone la app para `clave_copia` es al azar, larga y no rompe los secretos | `frase_para_la_copia()` | `pruebas_de_las_copias_en_github.py` |
 | La prueba de la copia mira las claves foráneas de todas las tablas | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_las_copias_en_github.py` |

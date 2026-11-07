@@ -124,6 +124,20 @@ def probar(L):
     esperar("hace 8 días: ya no", _arranque(timedelta(days=8), timedelta(days=25)), [])
     ns["guardar_config"]("arranque_desde_copia", "")
     esperar("sin anotar: nada", ns["arranque_desde_copia"](), None)
+
+    # CON LA COPIA FRENADA, el aviso dice de cuándo es el último backup bajado a mano (ver
+    # marcar_backup_bajado()): es lo único que protege lo cargado de un reinicio.
+    ns["guardar_config"]("copia_frenada_sin_cifrar", "2026-10-12 15:56:50")
+
+    def _frenada():
+        return [p["detalle"].split("Mientras tanto")[-1] for p in ns["diagnostico_de_salud"]()
+                if "NO SE ESTÁ SUBIENDO" in p["titulo"]]
+    esperar("frenada y sin backup bajado: lo dice", [("no bajaste ninguno" in d) for d in _frenada()],
+            [True])
+    ns["marcar_backup_bajado"]()
+    esperar("bajado uno: dice de cuándo", [f"del {datetime.now():%d/%m/%Y}" in d for d in _frenada()],
+            [True])
+    ns["guardar_config"]("copia_frenada_sin_cifrar", "")
     return fallas
 
 
