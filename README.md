@@ -7035,6 +7035,10 @@ Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 
 
 `pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
 
+## 🗂️ «Limpiar y corregir», en tres solapas
+
+Eran quince herramientas una debajo de la otra, y la que hacía falta podía estar al fondo («🧽 Códigos adivinados», «💲 Dos precios»). Ahora están en tres solapas por tema: **🔗 Vínculos** (puentes, códigos adivinados, unidos a piezas distintas, revisar lo cargado, corte automático…), **💲 Precios** (los que no cierran entre equivalentes y los que vinieron dos veces) y **🔢 Códigos y descripciones** (números sueltos, el «.0» de Excel, columnas pegadas…). Las migas de los avisos nombran la solapa («… → 🧹 Limpiar y corregir → 💲 Precios → …»). Ninguna herramienta cambió por dentro. `pruebas_de_la_plata_y_el_stock.py` (14) controla que cada una tenga su solapa.
+
 ## 🆕 Lo nuevo de cada versión, al administrador
 
 Cada tanda de mejoras trae herramientas en pantallas que nadie vuelve a abrir («🧽 Códigos adivinados» está al fondo de «Limpiar y corregir»), y una herramienta que no se encuentra no existe. Ahora, cuando se publica una versión, el administrador ve arriba un recuadro «🆕 Lo nuevo» con cada cosa y dónde está, hasta que toca «👍 Entendido». Para la próxima, se cambia `VERSION_DE_LO_NUEVO` y la lista `LO_NUEVO` en `logica/interfaz.py`. El operador no lo ve. `pruebas_de_la_sesion.py` (10) lo controla.

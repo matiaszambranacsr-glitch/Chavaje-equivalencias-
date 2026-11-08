@@ -334,8 +334,11 @@ def miga_hasta(nombre):
             return f"🗂️ Administrar → 🧹 Mantenimiento → {grupo}"
     for titulo, grupo, *_ in HERRAMIENTAS_MANTENIMIENTO:
         if _es_el_mismo_nombre(nombre, titulo):
+            # Con la solapa de «Limpiar y corregir» en el medio (ver SOLAPA_DE_LA_HERRAMIENTA):
+            # sin ella, «💲 Precios que no cierran» no se veía al llegar, estaba en otra solapa.
+            _solapa = SOLAPA_DE_LA_HERRAMIENTA.get(titulo)
             return (f"🗂️ Administrar → 🧹 Mantenimiento → {GRUPOS_MANTENIMIENTO[grupo]} → "
-                    f"{titulo}")
+                    + (f"{_solapa} → " if _solapa else "") + f"{titulo}")
     raise ValueError(f"miga_hasta(): no hay ninguna pantalla, solapa ni herramienta «{nombre}»")
 
 
@@ -1939,7 +1942,7 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("🏷️ Códigos de fábrica con la marca pegada", 1,
      "Números como «POWER836120129» o «DEERER43413»: se les saca la marca, no se borran.",
      "marca pegada power deere benz ferguson codigo mal escrito corregir"),
-    ("🧽 Códigos adivinados que no unen nada", 1,
+    ("🧽 Códigos adivinados de una lista que no los marca", 1,
      "Medidas y motores leídos como código de fábrica en listas que nunca lo marcan.",
      "adivinados medidas motores imperial descripcion limpiar cola pendientes falsos"),
     ("🔗 Vínculos que unen dos familias de repuestos", 1,
@@ -2027,6 +2030,28 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "papelera borrado restaurar recuperar deshacer borre borro elimine sin querer equivoque error"),
 ]
 
+
+# LAS SOLAPAS DE «LIMPIAR Y CORREGIR» (ver pantallas/mantenimiento_limpiar.py) y en cuál está
+# cada herramienta: las migas de los avisos la nombran, para que se sepa qué solapa tocar.
+SOLAPAS_DE_LIMPIAR = ("🔗 Vínculos", "💲 Precios", "🔢 Códigos y descripciones")
+SOLAPA_DE_LA_HERRAMIENTA = {
+    **{t: SOLAPAS_DE_LIMPIAR[0] for t in (
+        "🌉 Códigos puente — los que rompen la búsqueda", "🧯 Puentes que hoy ya no se generarían",
+        "🕸️ Unidos a varias piezas distintas de una misma lista",
+        "🏷️ Códigos de fábrica con la marca pegada",
+        "🧽 Códigos adivinados de una lista que no los marca",
+        "🔗 Vínculos que unen dos familias de repuestos",
+        "🔍 Revisar los vínculos que YA están cargados",
+        "🕵️ Puentes falsos: códigos que unen repuestos que no tienen nada que ver",
+        "🔁 Equivalencias anotadas dos veces")},
+    **{t: SOLAPAS_DE_LIMPIAR[1] for t in (
+        "💲 Precios que no cierran entre equivalentes",
+        "💲 Códigos que vinieron dos veces con precios distintos")},
+    **{t: SOLAPAS_DE_LIMPIAR[2] for t in (
+        "🗑️ Códigos que son solo un número suelto", "🔎 Códigos que el buscador no encuentra",
+        "🔢 Códigos que quedaron con '.0'", "🔢 Códigos con el '.0' de Excel",
+        "📝 Descripciones con las columnas pegadas")},
+}
 
 def texto_para_markdown(valor):
     """Un texto de la base listo para st.markdown SIN HTML: se escapan los signos que markdown

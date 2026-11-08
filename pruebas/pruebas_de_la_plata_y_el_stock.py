@@ -428,6 +428,15 @@ def probar(L):
             [ns["codigo_para_buscar"](x) for x in ("CAM-A1781-030", "cam-a1781-030",
                                                     "CAM-A1781+030", "CAMA1781030")],
             [ns["codigo_de_la_variante"]("CAM-A1781-030")] * 2 + ["CAMA1781030"] * 2)
+
+    # 14. LAS SOLAPAS DE «LIMPIAR Y CORREGIR» (ver SOLAPA_DE_LA_HERRAMIENTA): cada herramienta
+    # en una, y la miga de los avisos la nombra. Una herramienta nueva sin solapa, falla acá.
+    _de_limpiar = {t for t, g, *_ in ns["HERRAMIENTAS_MANTENIMIENTO"] if g == 1}
+    esperar("cada herramienta de Limpiar y corregir tiene su solapa",
+            (_de_limpiar - set(ns["SOLAPA_DE_LA_HERRAMIENTA"]),
+             set(ns["SOLAPA_DE_LA_HERRAMIENTA"]) - _de_limpiar), (set(), set()))
+    esperar("y la miga la nombra", "→ 💲 Precios →" in ns["miga_hasta"](
+        "Precios que no cierran entre equivalentes"), True)
     return fallas
 
 
