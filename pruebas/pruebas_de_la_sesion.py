@@ -200,6 +200,28 @@ def probar():
     esperar("y la de 9/16 sigue siendo una sola, aparte",
             ns["c"].execute("SELECT COUNT(*) FROM productos WHERE codigo_raw = 'CAMBA11.14'")
             .fetchone()[0], 1)
+    # El frenado que vuelve a un precio que ya tuvo (ver precio_que_ya_tuvo()): la de 5/32 valía
+    # 987, un choque le pisó 48.209, y la lista trae 987. El freno la para (49 veces), pero la
+    # marca, y se aplica con un botón sin tocar los otros frenados.
+    _pid_v = ns["c"].execute("SELECT id FROM productos WHERE codigo_clean = 'CAMBA1114'").fetchone()[0]
+    ns["c"].execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+                    "SELECT 'OTRA-3', 'OTRA3', 'JUNTA', marca_id, 100 FROM productos WHERE id = ?",
+                    (_pid_v,))
+    ns["c"].execute("UPDATE productos SET precio = 48209 WHERE id = ?", (_pid_v,))
+    ns["c"].execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, 48209)", (_pid_v,))
+    ns["conn"].commit()
+    _importar("vuelve.csv", _tuercas + ["OTRA-3;JUNTA;5000;1"])
+    _fr_v = at.session_state["precios_frenados_de_la_carga"]["filas"]
+    esperar("dos frenados, y uno vuelve a un precio que ya tuvo",
+            sorted((f["Código"], f["_vuelve"], f["Ya tuvo"][:7]) for f in _fr_v),
+            [("CAMBA111.4", True, "$ 987, "), ("OTRA-3", False, "")])
+    [b for b in at.button if b.key == "aplicar_frenados_que_vuelven"][0].click().run()
+    esperar("aplicado el que vuelve; el otro sigue frenado y con su precio",
+            (_precio("CAMBA1114"), [f["Código"] for f in
+                                    at.session_state["precios_frenados_de_la_carga"]["filas"]],
+             ns["c"].execute("SELECT precio FROM productos WHERE codigo_clean = 'OTRA3'").fetchone()[0]),
+            ([("TUERCA ZINC 5/32", 987.0)], ["OTRA-3"], 100.0))
+    at.session_state["precios_frenados_de_la_carga"] = None
     # Y en el buscador: escrito con sus signos trae la de 9/16; sin ellos, la de 5/32, y avisa
     # que hay otra que se escribe igual.
     at.session_state["pagina_actual"] = "🔍 Buscador"

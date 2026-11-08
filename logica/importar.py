@@ -754,6 +754,28 @@ def aplicar_precios_frenados(frenados):
     return aplicados
 
 
+def precio_que_ya_tuvo(producto_id, precio, precio_actual, tope_salto, de_relleno=()):
+    """(precio, fecha) del último precio del historial de este producto que no es el de ahora y
+    del que `precio` no está lejos (el freno no lo pararía), o None.
+
+    Reimportando la lista de IMPERIAL sobre la copia del 12/10, el freno paró 116 precios y los
+    116 eran esto: la junta de ½" valía $643, un choque de código le pisó los $48.209 de la de
+    12" (ver «DOS PRODUCTOS DE LA LISTA QUE SIN LOS SIGNOS SE ESCRIBEN IGUAL»), y la lista trae
+    $643 de nuevo. El freno compara contra el de ahora, que es justo el equivocado. No se aplica
+    solo: se marca, y la importación ofrece aplicar esos de una."""
+    de_relleno = {float(p) for p in de_relleno or ()}
+    c.execute("SELECT precio, fecha FROM historial_precios WHERE producto_id = ? AND precio > 0 "
+              "ORDER BY id DESC LIMIT 50", (producto_id,))
+    for r in c.fetchall():
+        anterior = float(r["precio"])
+        if anterior in de_relleno or (precio_actual is not None
+                                      and abs(anterior - float(precio_actual)) < 0.005):
+            continue
+        if not salto_de_precio_sospechoso(anterior, precio, tope_salto)[0]:
+            return anterior, r["fecha"]
+    return None
+
+
 def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
     # Un producto nuevo de una familia a la que ya se le puso nombre entra con la pieza: ver «QUÉ
     # PIEZA ES CADA FAMILIA DE CÓDIGOS». Los que ya estaban no se tocan (la descripción no se

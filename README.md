@@ -7049,6 +7049,14 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 🔁 El precio frenado que vuelve al que el producto ya tenía
+
+Reimportando la lista de IMPERIAL sobre la copia del 12/10, el freno de saltos para 116 precios, y **los 116 son el mismo caso**: la junta de ½" valía $643, un choque de código le pisó los $48.209 de la de 12" (ver «Dos productos que sin los signos se escriben igual»), y la lista trae $643 de nuevo. El freno compara contra el precio de ahora, que es justo el equivocado.
+
+Ahora cada frenado mira su historial (`precio_que_ya_tuvo()`): si el precio de la lista está cerca de uno que el producto ya tuvo —cerca quiere decir que el freno no lo pararía contra ese—, la tabla lo dice en la columna «Ya tuvo» («$ 643, el 25/09/2026»), y arriba aparece «💲 Aplicar los N que vuelven a un precio que ya tuvieron». Se aplican esos y los demás siguen frenados, para mirarlos. No se aplica solo: un error de la lista que vuelve a repetirse también «vuelve a un precio que ya tuvo».
+
+Con la lista real: los 116 de 116 quedan marcados. Lo que después de publicar era revisar 116 precios de a uno, es un botón. `pruebas_de_la_sesion.py` (2d) lo controla.
+
 ## 📏 El precio que se sale de su familia de medidas
 
 En una familia que viene en varias medidas (la misma descripción, y cambia el 1/4, el 5/16, el 20 mm) el precio sube con la medida. En la lista de IMPERIAL del 18/08 hay quince que no:

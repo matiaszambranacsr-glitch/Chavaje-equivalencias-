@@ -495,7 +495,8 @@ VERSION_DE_LO_NUEVO = "2026-11-08"
 LO_NUEVO = (
     ("🔀 Los productos que sin los signos se escriben igual (la junta de ½\" y la de 12\", la "
      "camisa +030 y la -030) ahora entran aparte, cada uno con su precio. Volvé a importar la "
-     "lista de IMPERIAL: entran los 210 que faltaban y se corrigen los precios cruzados.",
+     "lista de IMPERIAL: entran los 210 que faltaban, y los 116 precios cruzados que frena "
+     "vuelven al que tenían con un solo botón.",
      "📁 Cargar Excel"),
     ("🧹 La lista de IMPERIAL pone 999.999 donde no tiene precio, y entraba como precio (1.292 "
      "productos: una pipeta a 1.437.139). Ahora la importación no lo carga, y los que ya lo "

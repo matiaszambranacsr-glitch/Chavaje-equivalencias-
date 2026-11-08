@@ -891,11 +891,20 @@ if pagina == PAGINAS[2]:
                                         de_relleno=_de_relleno)
                                     precios_actualizados += _cambio
                                     if _frenado:
+                                        # El que vuelve a un precio que ya tuvo: casi seguro
+                                        # el equivocado es el de ahora (ver precio_que_ya_tuvo()).
+                                        _ya_tuvo = precio_que_ya_tuvo(pid_nuevo, precio_fila,
+                                                                      _frenado[0], tope_salto,
+                                                                      _de_relleno)
                                         precios_frenados.append({
                                             "Código": raw_p, "Descripción": (desc or "")[:60],
                                             "Precio actual": _frenado[0],
                                             "Precio de la lista": precio_fila,
                                             "Motivo": _frenado[1],
+                                            "Ya tuvo": (f"{formato_precio(_ya_tuvo[0])}, el "
+                                                        f"{str(fecha_legible(_ya_tuvo[1]))[:10]}"
+                                                        if _ya_tuvo else ""),
+                                            "_vuelve": bool(_ya_tuvo),
                                             "_id": pid_nuevo,
                                         })
 
@@ -1336,12 +1345,31 @@ if pagina == PAGINAS[2]:
                 "porque el cambio no parece un aumento sino un error de la lista. El producto se "
                 "cargó igual; lo único que no se tocó es el precio."
             )
-            st.dataframe(_filas_fr[:100], width="stretch", hide_index=True,
-                         column_config={"_id": None})
+            # Los que vuelven a un precio que ese producto ya tuvo, de una (ver
+            # precio_que_ya_tuvo()): los 116 de IMPERIAL eran todos así.
+            _vuelven = [f for f in _filas_fr if f.get("_vuelve")]
+            if _vuelven:
+                st.info(f"🔁 **{miles(len(_vuelven))} de esos vuelven a un precio que ese producto "
+                        "ya tuvo** (columna «Ya tuvo»). Casi siempre el que está mal es el de "
+                        "ahora —un choque de código, una lista vieja con un error— y no el de la "
+                        "planilla.")
+                if st.button(f"💲 Aplicar los {miles(len(_vuelven))} que vuelven a un precio que "
+                             "ya tuvieron", key="aplicar_frenados_que_vuelven"):
+                    _aplicados_v = aplicar_precios_frenados(_vuelven)
+                    _resto_fr = [f for f in _filas_fr if not f.get("_vuelve")]
+                    if _resto_fr:
+                        st.session_state["precios_frenados_de_la_carga"] = {**_frenados,
+                                                                            "filas": _resto_fr}
+                    else:
+                        st.session_state.pop("precios_frenados_de_la_carga", None)
+                    invalidar_salud()
+                    avisar("success", f"💲 Se aplicaron {miles(_aplicados_v)} precio(s) que vuelven "
+                                      "a uno que ya tuvieron.")
+                    st.rerun()
+            st.dataframe(quitar_id(_filas_fr[:100]), width="stretch", hide_index=True)
             st.download_button(
                 "⬇️ Bajar la lista completa de precios frenados",
-                data=lambda: to_excel_bytes([{k: v for k, v in f.items() if k != "_id"}
-                                     for f in _filas_fr]),
+                data=lambda: to_excel_bytes(quitar_id(_filas_fr)),
                 file_name="precios_frenados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="bajar_precios_frenados"
