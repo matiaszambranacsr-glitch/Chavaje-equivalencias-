@@ -1188,6 +1188,20 @@ a traer solas desde Administrar → Mantenimiento.
                                    f"{_u.get('listas', 0)} lista(s).")
                     except ValueError:
                         pass
+                # Antes de prenderlo, ver qué se iría (ver lo_que_descartaria()).
+                if not _auto:
+                    if st.button("👀 Ver qué descartaría", key="btn_ver_que_descartaria"):
+                        with st.spinner("Pasando cada lista de la cola por el análisis…"):
+                            st.session_state["_lo_que_descartaria"] = lo_que_descartaria()
+                    _previa = st.session_state.get("_lo_que_descartaria")
+                    if _previa:
+                        st.markdown(
+                            f"Descartaría **{miles(_previa['rojos'])}** 🔴 casi seguro mal y "
+                            f"**{miles(_previa['kits'])}** kits con su pieza. Los motivos más "
+                            "comunes: " + " · ".join(f"{_m} ({miles(_n)})"
+                                                    for _m, _n in _previa["por_motivo"][:5])
+                            + ".")
+                        st.dataframe(_previa["ejemplos"], width="stretch", hide_index=True)
                 _da1, _da2 = st.columns(2)
                 if candado("prender o apagar el descarte automático",
                            _da1.button("⏸️ Apagarlo" if _auto else "🤖 Prenderlo",

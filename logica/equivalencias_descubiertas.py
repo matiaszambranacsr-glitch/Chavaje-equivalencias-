@@ -5642,6 +5642,32 @@ def descartar_solos_los_casi_seguro_mal(lotes=None):
     return salida
 
 
+def lo_que_descartaria(ejemplos=8):
+    """Lo que descartaría el descarte automático si se prendiera ahora, sin tocar nada: {"rojos",
+    "kits", "por_motivo": [(motivo, cuántos)], "ejemplos": [{Código A, Código B, Por qué}]}.
+
+    Está apagado desde que existe: se explica con números («4.187 de los 7.827 salen 🔴») y
+    nadie lo prendió. Mirar diez pares de lo que se va —«cilindradas distintas: 1.6 vs 2.0»—
+    es lo que deja decidir. Recorre las listas de la cola con el mismo análisis que usa al
+    descartar (unos segundos), así que va a pedido, con un botón."""
+    rojos_todos, kits = [], 0
+    for lote in [x["lote"] for x in resumen_lotes_pendientes()]:
+        _limpias, sospechosas, relacionadas = analizar_lote_pendiente(lote)
+        rojos_todos += [f for f in sospechosas
+                        if nivel_de_confianza(f.get("confianza", 50))[0].startswith("🔴")]
+        kits += len(relacionadas)
+    motivos = collections.Counter(
+        re.sub(r"[\d.,]+", "N", ((f.get("alarmas") or ["(sin motivo escrito)"])[0] or "")
+               .split(":")[0])[:60] for f in rojos_todos)
+    paso = max(1, len(rojos_todos) // max(1, ejemplos))
+    return {"rojos": len(rojos_todos), "kits": kits,
+            "por_motivo": motivos.most_common(8),
+            "ejemplos": [{"Código A": f"{f.get('marca_a')} {f.get('cod_a')}",
+                          "Código B": f"{f.get('marca_b')} {f.get('cod_b')}",
+                          "Por qué": ((f.get("alarmas") or [""])[0] or "")[:90]}
+                         for f in rojos_todos[::paso][:ejemplos]]}
+
+
 def lo_que_descarto_sola():
     """Lo que la app descartó sola y nadie volvió a decidir: [{"a", "b", "lote", "desde",
     "confianza", "motivo"}]. Ver devolver_lo_que_descarto_sola()."""

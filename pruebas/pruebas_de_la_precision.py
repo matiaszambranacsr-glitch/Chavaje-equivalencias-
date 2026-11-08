@@ -2046,6 +2046,11 @@ def probar(L):
         "SELECT producto_b_id FROM equivalencias_pendientes WHERE lote = 'AUTO · 26/10'"))
     _antes_ap = ns["aprender_de_las_decisiones"]()
     esperar("apagado, nada", ns["descartar_solos_los_casi_seguro_mal"](["AUTO · 26/10"])["descartados"], 0)
+    # La vista previa (ver lo_que_descartaria()): apagado y sin tocar nada, dice lo que se iría.
+    _previa = ns["lo_que_descartaria"]()
+    esperar("la vista previa ve la bujía contra el filtro, y no la saca de la cola",
+            ([e["Código B"] for e in _previa["ejemplos"] if "AU1" in e["Código A"] + e["Código B"]],
+             len(_en_cola())), (["AUTO DOS AD1"], 2))
     ns["guardar_config"](ns["DESCARTE_AUTOMATICO"], "1")
     _r_auto = ns["descartar_solos_los_casi_seguro_mal"](["AUTO · 26/10"])
     esperar("prendido: la bujía contra el filtro se va, la bujía con la bujía queda",

@@ -7035,6 +7035,10 @@ Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 
 
 `pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
 
+## 👀 Ver qué descartaría el descarte automático, antes de prenderlo
+
+«🤖 Que la app descarte sola lo casi seguro mal» está apagado desde que existe: se explicaba con números y nadie lo prendió. Ahora, apagado, trae «👀 Ver qué descartaría»: pasa cada lista de la cola por el mismo análisis que usa al descartar —sin tocar nada— y dice cuántos se irían, por qué y diez ejemplos. Con la copia de la base del 12/10, en 5 s: 4.416 🔴 y 285 kits con su pieza; los motivos más comunes, «cilindradas distintas» (1.397), «juegos distintos» (653), «modelos distintos» (596) y «los precios no cierran» (387); y ejemplos como «distinta cantidad de cilindros: 4 vs 3» o «largo de cable distinto (46 vs 68 cm)». `pruebas_de_la_precision.py` (80) lo controla: la vista previa ve lo que se iría y no saca nada de la cola.
+
 ## 📏 El coeficiente de la lista, con ejemplos para creerle
 
 El coeficiente de TARANTO está sugerido desde hace muchas vueltas (×15,3) y nadie lo puso. «Cuesta ×0,07 lo que sus equivalentes» es un número; la misma pieza con los dos precios es algo que se puede mirar. Ahora, en **Marcas → 📏 Coeficiente de la lista**, debajo del sugerido hay una tabla con la misma pieza en esa marca y en otro proveedor —los pares más cercanos a la mediana, uno por producto—, y el aviso de la salud trae uno: «Por ejemplo, «BOBINA IGNICION, CITROEN XM» cuesta 1.670 acá y 25.537 en FISPA». En la copia de la base del 12/10 los cuatro primeros son dos bobinas de encendido contra FISPA, una junta de tapa contra ILLINOIS (3.685 contra 56.400) y otra bobina: ×15,3 los cuatro. `pruebas_de_los_cambios.py` (9f) lo controla.
