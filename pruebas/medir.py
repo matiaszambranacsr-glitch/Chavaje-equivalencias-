@@ -44,13 +44,19 @@ def _cargar(base):
     return logica.todo_lo_de_la_logica(), carpeta
 
 
-def busquedas(ns, n):
+def busquedas(ns, n, muestra_previa=None):
+    """Con `muestra_previa` (la «_muestra» de una corrida guardada) se buscan los MISMOS
+    productos: la muestra sale de las redes de 3 o más, y borrando vínculos cambia entera —
+    cortando los 302 códigos adivinados, «nuevos 3431, ya no están 3310», que no decía nada."""
     c = ns["c"]
     raiz, tam = ns["_red_de_equivalencias"]()
     tipo = dict(c.execute("SELECT p.id, m.tipo FROM productos p JOIN marcas m ON m.id = p.marca_id"))
     codigo = dict(c.execute("SELECT id, codigo_clean FROM productos"))
-    prods = sorted(p for p, r in raiz.items() if tam.get(r, 0) >= 3 and tipo.get(p) != "OEM")
-    muestra = random.Random(7).sample(prods, min(n, len(prods)))
+    if muestra_previa:
+        muestra = [p for p in muestra_previa if p in codigo]
+    else:
+        prods = sorted(p for p, r in raiz.items() if tam.get(r, 0) >= 3 and tipo.get(p) != "OEM")
+        muestra = random.Random(7).sample(prods, min(n, len(prods)))
     salida, tiempos = {}, []
     for p in muestra:
         t = time.time()
@@ -71,6 +77,7 @@ def busquedas(ns, n):
     print(f"tiempo: promedio {sum(ts) / len(ts):.3f} s, p95 {ts[int(len(ts) * .95)]:.3f} s, "
           f"máximo {ts[-1]:.3f} s; las más lentas: "
           + ", ".join(f"{cod} {t:.2f}" for t, cod in tiempos[-5:][::-1]))
+    salida["_muestra"] = muestra
     return salida
 
 
@@ -258,6 +265,8 @@ def comparar_puestos(antes, ahora):
 
 
 def comparar(antes, ahora):
+    antes = {k: v for k, v in antes.items() if not k.startswith("_")}
+    ahora = {k: v for k, v in ahora.items() if not k.startswith("_")}
     if ahora and len(next(iter(ahora.values()))) == 2:
         return comparar_puestos(antes, ahora)
     cambios = collections.Counter()
@@ -293,8 +302,13 @@ def main():
                 comparar_toques(json.load(f), datos)
         return 0
     ns, carpeta = _cargar(os.path.abspath(base))
+    previa = None
+    if contra and "busquedas" in sys.argv:
+        with open(contra, encoding="utf-8") as f:
+            previa = json.load(f).get("_muestra")
     try:
-        datos = (busquedas(ns, int(_argumento("--n", "1500"))) if "busquedas" in sys.argv
+        datos = (busquedas(ns, int(_argumento("--n", "1500")), previa)
+                 if "busquedas" in sys.argv
                  else fichas(ns, int(_argumento("--n", "2000"))) if "fichas" in sys.argv
                  else texto(ns, int(_argumento("--n", "1000"))) if "texto" in sys.argv
                  else cola(ns))

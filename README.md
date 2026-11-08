@@ -7037,7 +7037,7 @@ La importación de IMPERIAL del 25/09 sacó 1.448 «códigos de fábrica» de la
 
 «🧽 Códigos adivinados» (en **Limpiar y corregir**) no los mostraba: dejaba afuera todo lo aprobado. Ahora también muestra los aprobados **en bloque** que unen dos productos o más; el bloque se reconoce por el ritmo, porque nadie mira de a uno 200 vínculos en un minuto (más de 200 aprobaciones de la misma persona en un minuto). Lo verificado, lo aprobado de a uno y lo que cuelga de un solo producto ya cargado se deja: alguno sirve («ZFR5Q-11», la bujía NGK de una descripción de TARANTO). Antes de borrar se pueden dejar afuera los que sean códigos de verdad.
 
-Con la copia de la base del 12/10: 302 códigos (271 de IMPERIAL, 31 de TARANTO), 488 vínculos y 165 pendientes; borrándolos, 470 productos dejan de mostrar equivalentes falsos. Los productos no se tocan, y el buscador sigue encontrando ese número adentro de la descripción. `pruebas_de_la_plata_y_el_stock.py` (12) lo controla.
+Con la copia de la base del 12/10: 302 códigos (271 de IMPERIAL, 31 de TARANTO), 488 vínculos y 165 pendientes; borrándolos, 470 productos dejan de mostrar equivalentes falsos. En las mismas 1.500 búsquedas de `pruebas/medir.py`, se van 144 resultados —139 ya salían en rojo— y ningún otro cambia. (Para poder medirlo, `medir.py busquedas` guarda la muestra y `--comparar` repite las mismas búsquedas: antes la muestra salía de las redes de equivalencias, y borrando vínculos cambiaba entera.) Los productos no se tocan, y el buscador sigue encontrando ese número adentro de la descripción. `pruebas_de_la_plata_y_el_stock.py` (12) lo controla.
 
 ## 🛢️ Una lista chica que no cruza no es una alarma
 
