@@ -1171,7 +1171,7 @@ def agregar_punto_esquema(esquema_id, numero, nombre_pieza, codigo, pos_x=None, 
     codigo = (codigo or "").strip()
     producto_id = None
     if codigo:
-        clean = sanitizar(codigo)
+        clean = codigo_para_buscar(codigo)     # con signos, el que entró aparte
         if clean:
             c.execute("SELECT id FROM productos WHERE codigo_clean = ? LIMIT 1", (clean,))
             fila = c.fetchone()
