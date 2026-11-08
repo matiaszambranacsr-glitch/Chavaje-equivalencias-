@@ -102,6 +102,7 @@ específico, y las pantallas quedan todas al final:
     logica/interfaz.py
         · PIEZAS DE INTERFAZ QUE SE REPITEN
         · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
+        · LO NUEVO DE ESTA VERSIÓN
         · LA AYUDA DE CADA PANTALLA
         · EL CLICK DERECHO, LAS TECLAS Y EL PITIDO (en el navegador)
         · LOS GRÁFICOS, CON LOS NÚMEROS Y LAS FECHAS COMO SE ESCRIBEN ACÁ
@@ -721,6 +722,21 @@ if _problemas and _se_muestra_la_salud:
             if revisar_la_salud_a_mano():
                 st.rerun()
             st.caption("Recién revisado: esto ya es lo de ahora.")
+
+
+# LO NUEVO DE ESTA VERSIÓN, al administrador, una vez (ver LO_NUEVO en logica/interfaz.py).
+if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
+    try:
+        if obtener_config("lo_nuevo_visto", "") != VERSION_DE_LO_NUEVO:
+            with st.container(border=True):
+                st.markdown("**🆕 Lo nuevo**")
+                for _nuevo, _donde in LO_NUEVO:
+                    st.markdown(f"- {_nuevo} *({_donde})*")
+                if st.button("👍 Entendido", key="lo_nuevo_entendido"):
+                    guardar_config("lo_nuevo_visto", VERSION_DE_LO_NUEVO)
+                    st.rerun()
+    except Exception as _err:             # lo nuevo no puede impedir que la app abra
+        anotar_error("lo_nuevo", _err)
 
 
 # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta, a quien puede darlos, en cualquier

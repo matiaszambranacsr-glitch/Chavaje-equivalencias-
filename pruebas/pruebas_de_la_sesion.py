@@ -512,6 +512,21 @@ def probar():
     ns["guardar_config"]("copia_frenada_sin_cifrar", "")
     ns["invalidar_salud"]()
     esperar("sin la copia frenada, no está", _bajar_backup(sesion_nueva("clave-duenio-1")), [])
+
+    # 10. LO NUEVO DE ESTA VERSIÓN (ver LO_NUEVO): al administrador una vez; «Entendido» lo
+    # guarda, y no vuelve. Al operador, nunca.
+    ns["guardar_config"]("lo_nuevo_visto", "")
+
+    def _lo_nuevo(sesion):
+        return any(m.value == "**🆕 Lo nuevo**" for m in sesion.markdown)
+    _adm_n = sesion_nueva("clave-duenio-1")
+    esperar("el administrador ve lo nuevo", _lo_nuevo(_adm_n), True)
+    _rita_n = sesion_nueva("clave-rita-1")
+    esperar("el operador no", (_rita_n.session_state["nivel_usuario"], _lo_nuevo(_rita_n)),
+            ("operador", False))
+    [b for b in _adm_n.button if b.key == "lo_nuevo_entendido"][0].click().run()
+    esperar("con «Entendido», no vuelve", (_lo_nuevo(_adm_n), _lo_nuevo(sesion_nueva("clave-duenio-1"))),
+            (False, False))
     return fallas
 
 

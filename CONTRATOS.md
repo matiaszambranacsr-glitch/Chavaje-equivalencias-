@@ -170,6 +170,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | Un pedazo de solo letras al otro lado de la barra de un código con números es un sufijo: el código no se parte («SABO-5547/BRAGF») | `_partir_por_barra()` | `nucleo/pruebas.py` |
 | Al reimportar, los vínculos que la lista ya no repite se separan de los que vienen con la misma descripción de siempre (no los cambió el proveedor) | `equivalentes_que_la_lista_dejo_de_declarar()` | `pruebas_de_la_precision.py` (8) |
 | La vista previa del descarte automático dice qué se iría, por qué y con ejemplos, sin sacar nada de la cola | `lo_que_descartaria()` | `pruebas_de_la_precision.py` (80) |
+| «🆕 Lo nuevo» sale al administrador una vez por versión, hasta «Entendido»; al operador, nunca | `LO_NUEVO`, `VERSION_DE_LO_NUEVO` | `pruebas_de_la_sesion.py` (10) |
 | En el CSV del catálogo exportado, lo que una planilla tomaría por fórmula («=», «+», «@») viaja como texto, con un apóstrofo; el «-» no se toca | `celda_segura_para_planilla()` | `pruebas_de_la_precision.py` (34) |
 | La venta avisa en el renglón cuando la lista de la marca está en otra escala | `marcas_con_precios_fuera_de_escala()` (pantallas/ventas.py) | `pruebas_de_la_sesion.py` (2d) |
 | El coeficiente de una lista fuera de escala se muestra con ejemplos de la misma pieza en otro proveedor (los más cercanos a la mediana, uno por producto) | `ejemplos_de_la_escala()` | `pruebas_de_los_cambios.py` (9f) |

@@ -482,6 +482,33 @@ def _clave_de_ayuda(texto):
 
 
 # ============================================================================================
+# LO NUEVO DE ESTA VERSIÓN
+# ============================================================================================
+# Lo que cambió y dónde está, para el administrador, una vez por versión. Cada tanda de mejoras
+# trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
+# al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
+# VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
+VERSION_DE_LO_NUEVO = "2026-11-08"
+LO_NUEVO = (
+    ("🔀 Los productos que sin los signos se escriben igual (la junta de ½\" y la de 12\", la "
+     "camisa +030 y la -030) ahora entran aparte, cada uno con su precio. Volvé a importar la "
+     "lista de IMPERIAL: entran los 210 que faltaban y se corrigen los precios cruzados.",
+     "📁 Cargar Excel"),
+    ("🧽 Los «códigos» que una lista vieja sacó de las descripciones (medidas, motores) y se "
+     "aprobaron en bloque se pueden cortar: unen una batería con dos soldadoras.",
+     "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir"),
+    ("👀 Antes de prender el descarte automático, «Ver qué descartaría» muestra cuántos, por qué "
+     "y ejemplos.", "📊 Estadísticas → 🔗 Equivalencias sugeridas"),
+    ("📏 El coeficiente de la lista trae ejemplos de la misma pieza en otro proveedor (TARANTO: "
+     "una bobina a 1.670 contra 25.537 en FISPA).", "🗂️ Administrar → 🏷️ Marcas"),
+    ("⚠️ La venta y el presupuesto avisan cuando la lista de una marca está en otra escala.",
+     "🧾 Ventas"),
+    ("⬇️ Con la copia frenada, el backup se baja desde la campanita, y si la app arranca desde "
+     "una copia vieja lo avisa con las fechas.", "🔔 la campanita"),
+)
+
+
+# ============================================================================================
 # LA AYUDA DE CADA PANTALLA
 # ============================================================================================
 # Arriba de cada pantalla había tres explicaciones, una abajo de la otra: para qué sirve la
