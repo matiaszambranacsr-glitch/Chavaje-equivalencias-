@@ -388,15 +388,17 @@ def diagnostico_de_salud():
     Cada punto trae a dónde ir y qué pasa si no se toca, porque un número suelto no dice nada."""
     problemas = []
 
-    def sumar(nivel, titulo, detalle, donde, solo_admin=False):
+    # «accion»: algo que se puede hacer ahí mismo, en el aviso, sin ir a otra pantalla (ver
+    # ACCIONES_DE_LOS_AVISOS en app.py).
+    def sumar(nivel, titulo, detalle, donde, solo_admin=False, accion=None):
         problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde,
-                          "solo_admin": solo_admin})
+                          "solo_admin": solo_admin, "accion": accion})
 
     # LO TÉCNICO, SOLO AL ADMINISTRADOR: la copia, las tareas de fondo, el repositorio, la base.
     # Al mostrador no le sirve y lo asusta: no lo puede arreglar (lo señaló una revisión con
     # ChatGPT). Lo del negocio —clientes esperando, faltantes, vínculos dudosos— lo ven todos.
-    def sumar_tecnico(nivel, titulo, detalle, donde):
-        sumar(nivel, titulo, detalle, donde, solo_admin=True)
+    def sumar_tecnico(nivel, titulo, detalle, donde, accion=None):
+        sumar(nivel, titulo, detalle, donde, solo_admin=True, accion=accion)
 
     # LAS TAREAS AUTOMÁTICAS QUE VIENEN FALLANDO. Sus errores se anotaban (anotar_error()) y
     # se veían solo entrando a buscarlos: las 5.063 fotos de FISPA fallaron por el certificado
@@ -447,7 +449,7 @@ def diagnostico_de_salud():
                   "compu (🪶 sin fotos alcanza; si la app se reinicia, se restaura desde ahí): "
                   + (f"el último que bajaste es del {fecha_legible(_bajado)}." if _bajado
                      else "no bajaste ninguno."),
-                  miga_hasta("Backup y config"))
+                  miga_hasta("Backup y config"), accion="bajar_backup")
         elif obtener_config("repo_copia_publico", "") == "1":
             if not clave_de_la_copia():
                 sumar_tecnico("alto", "🔓 La copia de tu base se sube SIN CIFRAR a un repositorio PÚBLICO",

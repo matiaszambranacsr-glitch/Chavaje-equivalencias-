@@ -455,6 +455,23 @@ def probar():
                         "producto_b_id = ?", _par).fetchone() or [None])[0],
              adm.session_state["unidos_a_piezas"]), (0, "rechazada", []))
     esperar("sin errores en la limpieza", [e.value for e in adm.exception], [])
+
+    # 9. LA COPIA FRENADA: el aviso trae el botón para bajar el backup ahí mismo, sin ir a
+    # Backup y config (ver ACCIONES en la salud). Al administrador, y a nadie más.
+    ns["guardar_config"]("copia_frenada_sin_cifrar", "2026-10-12 15:56:50")
+    ns["invalidar_salud"]()
+
+    def _bajar_backup(sesion):
+        return [b.proto.label for b in sesion.get("download_button")
+                if "Bajar un backup ahora" in b.proto.label]
+    esperar("con la copia frenada, el administrador lo baja desde el aviso",
+            _bajar_backup(sesion_nueva("clave-duenio-1")), ["⬇️ Bajar un backup ahora"])
+    _rita = sesion_nueva("clave-rita-1")
+    esperar("el operador (que entró) no", (_rita.session_state["nivel_usuario"],
+                                           _bajar_backup(_rita)), ("operador", []))
+    ns["guardar_config"]("copia_frenada_sin_cifrar", "")
+    ns["invalidar_salud"]()
+    esperar("sin la copia frenada, no está", _bajar_backup(sesion_nueva("clave-duenio-1")), [])
     return fallas
 
 

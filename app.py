@@ -696,6 +696,16 @@ if _problemas and _se_muestra_la_salud:
             st.markdown(f"**{texto_para_html(_p['titulo'])}**  \n<span style='opacity:.75;"
                         f"font-size:.87em'>{texto_para_html(_p['detalle'])}</span>",
                         unsafe_allow_html=True)
+            # LO QUE SE PUEDE HACER AHÍ MISMO. Con la copia frenada, bajar un backup es lo único
+            # que protege lo cargado, y pedía ir a Backup y config, tocar «Preparar» y después
+            # «Descargar»: en 26 días no se hizo ni eso. El archivo se arma recién al tocar.
+            if _p.get("accion") == "bajar_backup" and es_admin():
+                st.download_button(
+                    "⬇️ Bajar un backup ahora", data=generar_backup_sin_fotos,
+                    file_name=f"equivalencias_backup_{datetime.now():%Y%m%d_%H%M}.db",
+                    on_click=marcar_backup_bajado, key=f"bajar_backup_desde_el_aviso_{_i_p}",
+                    help="La base entera sin las fotos que se vuelven a bajar solas. Si la app "
+                         "se reinicia, se restaura desde Estadísticas → 💾 Backup y config.")
             st.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
                       on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],), help=_p["donde"])
         if _resto:
