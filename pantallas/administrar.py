@@ -222,6 +222,11 @@ if pagina == PAGINAS[3]:
                               "lista le falte el coeficiente: el número exacto lo publica el "
                               "proveedor, y es mejor ese que el sugerido."
                               if len(_cada_uno) >= 2 else ""))
+                # Para mirarlo y creerlo: la misma pieza acá y en otro proveedor.
+                _ejemplos_coef = ejemplos_de_la_escala(_marca_coef)
+                if _ejemplos_coef:
+                    st.caption(f"La misma pieza en {_marca_coef} y en otro proveedor:")
+                    st.dataframe(_ejemplos_coef, width="stretch", hide_index=True)
             # Las listas en dólares: el coeficiente es el dólar oficial del día, y se actualiza
             # solo en cada importación (ver coeficiente_de_lista()).
             _dolar_hoy, _dolar_fecha, _dolar_fuente = dolar_guardado()

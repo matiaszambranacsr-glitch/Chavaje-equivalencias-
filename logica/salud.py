@@ -838,9 +838,17 @@ def diagnostico_de_salud():
             _d = escala_de_precios_por_marca()[_marca]
             _cuanto = (f"{miles(1 / _d['factor'], 0)} veces menos" if _d["factor"] < 1
                        else f"{miles(_d['factor'], 0)} veces más")
+            # Un ejemplo para mirarlo y creerlo (ver ejemplos_de_la_escala()). Sin «$»: dos en
+            # el mismo texto se leen como una fórmula.
+            _ej = (ejemplos_de_la_escala(_marca, cuantos=1) or [None])[0]
+            _ejemplo = (f" Por ejemplo, «{_ej['Pieza'][:30].strip()}» cuesta "
+                        f"{_ej['Precio'].replace('$', '').strip()} acá y "
+                        f"{_ej['Precio en la otra'].replace('$', '').strip()} en "
+                        f"{_ej['Otra'].split()[0]}." if _ej else "")
             sumar("alto", f"Los precios de {_marca} están en otra escala",
                   f"Cuestan {_cuanto} que los mismos repuestos de "
-                  f"{', '.join(_d['contra'][:4])} ({miles(_d['comparaciones'])} comparaciones). "
+                  f"{', '.join(_d['contra'][:4])} ({miles(_d['comparaciones'])} comparaciones)."
+                  f"{_ejemplo} "
                   "Casi seguro la lista necesita un coeficiente o está vieja: hasta "
                   "corregirlo, se cotiza mal.",
                   f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista")

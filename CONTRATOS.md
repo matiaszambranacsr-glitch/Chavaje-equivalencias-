@@ -169,6 +169,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | «Limpiar y corregir» no cuenta como desfasado (ni fusiona) el código limpio de un producto que entró aparte | `codigos_limpios_desfasados()`, `_codigos_con_decimal_de_excel()` | `pruebas_de_la_plata_y_el_stock.py` (13) |
 | Un pedazo de solo letras al otro lado de la barra de un código con números es un sufijo: el código no se parte («SABO-5547/BRAGF») | `_partir_por_barra()` | `nucleo/pruebas.py` |
 | Al reimportar, los vínculos que la lista ya no repite se separan de los que vienen con la misma descripción de siempre (no los cambió el proveedor) | `equivalentes_que_la_lista_dejo_de_declarar()` | `pruebas_de_la_precision.py` (8) |
+| El coeficiente de una lista fuera de escala se muestra con ejemplos de la misma pieza en otro proveedor (los más cercanos a la mediana, uno por producto) | `ejemplos_de_la_escala()` | `pruebas_de_los_cambios.py` (9f) |
 | Los códigos adivinados de una lista que no los marca incluyen los aprobados en bloque que unen dos productos o más; nunca lo verificado ni lo aprobado de a uno | `codigos_adivinados_que_no_unen_nada()`, `pares_aprobados_sin_mirarlos()` | `pruebas_de_la_plata_y_el_stock.py` (12) |
 | Si la última vuelta no pudo subir, la pantalla dice «atrasada» y desde cuándo, nunca «al día» | `cuanto_perderias_si_reinicia()` | `pruebas_de_las_copias_en_github.py` |
 | La frase que propone la app para `clave_copia` es al azar, larga y no rompe los secretos | `frase_para_la_copia()` | `pruebas_de_las_copias_en_github.py` |

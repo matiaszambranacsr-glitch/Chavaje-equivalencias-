@@ -660,6 +660,12 @@ def probar(L):
     esperar("la escala contra cada proveedor",
             {k: round(v, 4) for k, v in _esc["por_proveedor"].items()},
             {"ESCALA-B": round(100 / 1500, 4), "ESCALA-C": round(100 / 1600, 4)})
+    # Y los ejemplos para mirarlo (ver ejemplos_de_la_escala()): la misma pieza acá y en otro
+    # proveedor, uno por producto, con cuántas veces más cuesta allá.
+    _ej = ns["ejemplos_de_la_escala"]("ESCALA-A", cuantos=3)
+    esperar("tres ejemplos, de productos distintos, con las veces",
+            (len(_ej), len({x["ESCALA-A"] for x in _ej}),
+             all(x["Veces"] in ("×15,0", "×16,0") for x in _ej)), (3, 3, True))
     c.execute("DELETE FROM equivalencias WHERE producto_a_id IN (SELECT id FROM productos "
               "WHERE codigo_clean LIKE 'ESC%')")
     c.execute("DELETE FROM productos WHERE codigo_clean LIKE 'ESC%' AND descripcion = "

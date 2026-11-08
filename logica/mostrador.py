@@ -941,6 +941,49 @@ def escala_de_precios_por_marca(segundos_de_memoria=300):
     return datos
 
 
+def ejemplos_de_la_escala(marca, cuantos=4):
+    """Unos pares de la misma pieza en esta marca y en otro proveedor, con los dos precios: los
+    más cercanos a la mediana (ver escala_de_precios_por_marca()), que son los que la
+    representan. [{Pieza, marca, Precio, Otra, Precio en la otra, Veces}].
+
+    El coeficiente de TARANTO estuvo sugerido muchas vueltas sin que nadie lo pusiera: «cuesta
+    ×0,07 lo que sus equivalentes» es un número; «la misma junta, $1.505 acá y $24.140 en
+    ILLINOIS» es algo que se puede mirar y creer."""
+    escala = escala_de_precios_por_marca().get(marca)
+    if not escala:
+        return []
+    c.execute("""-- FILA Y NO PAR: el lado de esta marca de cada vínculo; si la relación está
+                 -- anotada de ida y de vuelta sale dos veces, y abajo queda uno por producto.
+                 SELECT pa.codigo_raw AS ca, pa.descripcion AS da, pa.precio AS pa,
+                        mb.nombre AS otra, pb.codigo_raw AS cb, pb.precio AS pb
+                 FROM equivalencias e
+                 JOIN productos pa ON pa.id IN (e.producto_a_id, e.producto_b_id)
+                 JOIN productos pb ON pb.id IN (e.producto_a_id, e.producto_b_id) AND pb.id <> pa.id
+                 JOIN marcas ma ON ma.id = pa.marca_id
+                 JOIN marcas mb ON mb.id = pb.marca_id
+                 WHERE ma.nombre = ? AND mb.id <> ma.id AND mb.tipo <> 'OEM'
+                   AND pa.precio > 0 AND pb.precio > 0
+                   AND COALESCE(e.confianza, 50) >= 50""", (marca,))
+    filas = c.fetchall()
+    def _lejos_de_la_mediana(r):
+        q = (r["pa"] / r["pb"]) / escala["factor"]
+        return max(q, 1 / q)
+    filas = sorted(filas, key=_lejos_de_la_mediana)
+    salida, vistos = [], set()
+    for r in filas:
+        if r["ca"] in vistos:
+            continue
+        vistos.add(r["ca"])
+        salida.append({"Pieza": (r["da"] or "")[:40], marca: r["ca"],
+                       "Precio": formato_precio(r["pa"]), "Otra": f"{r['otra']} {r['cb']}",
+                       "Precio en la otra": formato_precio(r["pb"]),
+                       "Veces": f"×{miles(r['pb'] / r['pa'], 1)}" if r["pa"] < r["pb"]
+                                else f"÷{miles(r['pa'] / r['pb'], 1)}"})
+        if len(salida) >= cuantos:
+            break
+    return salida
+
+
 def marcas_con_precios_fuera_de_escala():
     """Los nombres de las marcas cuyos precios no se pueden comparar con los de las demás."""
     try:

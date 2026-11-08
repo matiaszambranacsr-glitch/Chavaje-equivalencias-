@@ -7035,6 +7035,10 @@ Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 
 
 `pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
 
+## 📏 El coeficiente de la lista, con ejemplos para creerle
+
+El coeficiente de TARANTO está sugerido desde hace muchas vueltas (×15,3) y nadie lo puso. «Cuesta ×0,07 lo que sus equivalentes» es un número; la misma pieza con los dos precios es algo que se puede mirar. Ahora, en **Marcas → 📏 Coeficiente de la lista**, debajo del sugerido hay una tabla con la misma pieza en esa marca y en otro proveedor —los pares más cercanos a la mediana, uno por producto—, y el aviso de la salud trae uno: «Por ejemplo, «BOBINA IGNICION, CITROEN XM» cuesta 1.670 acá y 25.537 en FISPA». En la copia de la base del 12/10 los cuatro primeros son dos bobinas de encendido contra FISPA, una junta de tapa contra ILLINOIS (3.685 contra 56.400) y otra bobina: ×15,3 los cuatro. `pruebas_de_los_cambios.py` (9f) lo controla.
+
 ## 🧽 Los números adivinados que se aprobaron en bloque
 
 La importación de IMPERIAL del 25/09 sacó 1.448 «códigos de fábrica» de las descripciones, antes de que la app aprendiera que en una lista que nunca marca sus códigos eso son medidas, motores y herramientas (ver `la_lista_declara_codigos()`). El 28/09 se aprobaron 36.607 vínculos en siete minutos, y esos entraron con ellos. Los que unen dos o más productos son equivalencias falsas que el buscador muestra: «120Amp» une una batería con dos soldadoras; «HEXAG.17MM», bocallaves de 3/8 y de 1/2; «DQA-495», la junta de admisión con la de escape; «8v.65CV-MILLE», un pistón con los aros y la camisa.
