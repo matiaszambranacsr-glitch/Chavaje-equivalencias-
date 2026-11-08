@@ -75,7 +75,7 @@ if pagina == PAGINAS[8]:
                 if mostrar_quien:
                     _detalle += [f"para {_p['cuenta'] or NOMBRE_DEL_MOSTRADOR}",
                                  f"pidió {_p['pedido_por'] or '¿?'} a las "
-                                 f"{_hora_corta(_p['pedido_en'])}",
+                                 f"{hora_corta_aca(_p['pedido_en'])}",
                                  f"esperando {como_se_lee_la_espera(minutos_entre(_p['pedido_en']))}"]
                 if _p["stock"] is not None:
                     _detalle.append(f"stock: {_p['stock']}")
@@ -217,7 +217,7 @@ if pagina == PAGINAS[8]:
                 with st.container(border=True):
                     _gc1, _gc2 = st.columns([3, 1])
                     _gc1.markdown(f"**🧾 Pedido de {texto_para_html(_quien)}** — "
-                                  f"{len(_g['items'])} ítem(s) · {_hora_corta(_g['pedido_en'])} · "
+                                  f"{len(_g['items'])} ítem(s) · {hora_corta_aca(_g['pedido_en'])} · "
                                   f"esperando {como_se_lee_la_espera(minutos_entre(_g['pedido_en']))}")
                     _gc2.button("✅ Entregar todo", key=f"dep_todo_{_g['tanda']}", width="stretch",
                                 on_click=_entregar_todo, args=(_g["tanda"], f"Pedido de {_quien}"))
@@ -287,7 +287,7 @@ if pagina == PAGINAS[8]:
                 with st.container(border=True):
                     st.markdown(f"**{texto_para_html(_cuenta)}** — {len(_renglones)} renglón(es), "
                                 f"**{formato_precio(_total)}**")
-                    st.dataframe([{"Entregado": _hora_corta(r["resuelto_en"]),
+                    st.dataframe([{"Entregado": hora_corta_aca(r["resuelto_en"]),
                                    "Código": f"{r['marca']} {r['codigo_raw']}",
                                    "Descripción": (r["descripcion"] or "")[:60],
                                    "Cant.": r["cantidad"],
@@ -306,7 +306,7 @@ if pagina == PAGINAS[8]:
             if not _ultimos:
                 st.caption("Todavía nada.")
             else:
-                st.dataframe([{"Cuándo": _hora_corta(r["resuelto_en"]),
+                st.dataframe([{"Cuándo": hora_corta_aca(r["resuelto_en"]),
                                "Qué": f"{r['marca']} {r['codigo_raw']} x{r['cantidad']}",
                                "Para": r["cuenta"] or NOMBRE_DEL_MOSTRADOR,
                                "Cómo": ESTADOS_DEL_PEDIDO.get(r["estado"], r["estado"]),

@@ -461,7 +461,7 @@ if pagina == PAGINAS[3]:
                                     f"vínculos y ninguno quedó por debajo del umbral "
                                     f"({fecha_legible(_fec_prev)}).")
                     else:
-                        st.warning(f"⚠️ En la última importación ({_fec_prev}) quedaron "
+                        st.warning(f"⚠️ En la última importación ({fecha_legible(_fec_prev)}) quedaron "
                                     f"**{int(_dud_prev)} vínculo(s) con evidencia en contra** de "
                                     f"{miles(int(_rev_prev))} revisados. Analizalos acá para verlos y "
                                     "decidir cuáles cortar.")

@@ -104,7 +104,7 @@ if pagina == PAGINAS[3]:
                         "encontrarlas solo la próxima vez."
                     )
                     if st.button(f"📥 Mandar esas {len(sin_vincular)} a revisión"):
-                        lote_v = f"CONFIRMADAS EN EL MOSTRADOR · {datetime.now():%d/%m %H:%M}"
+                        lote_v = f"CONFIRMADAS EN EL MOSTRADOR · {ahora_aca():%d/%m %H:%M}"
                         n = guardar_equivalencias_derivadas(
                             [(x["_a"], x["_b"]) for x in sin_vincular], lote_v)
                         invalidar_salud()

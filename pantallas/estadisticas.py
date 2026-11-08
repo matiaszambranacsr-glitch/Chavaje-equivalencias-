@@ -211,11 +211,11 @@ if pagina == PAGINAS[4]:
                 # Subida no es recuperable: ver verificar_la_copia_de_github().
                 _verif = estado_de_la_verificacion()
                 if _verif.get("ok"):
-                    st.caption(f"✅ Copia verificada el {_verif['cuando'][:16]}: "
+                    st.caption(f"✅ Copia verificada el {fecha_legible(_verif['cuando'][:16])}: "
                                f"{_verif['detalle']}.")
                 elif _verif:
                     st.error(f"⚠️ La copia de GitHub no pasó la prueba de recuperación "
-                             f"({_verif['cuando'][:16]}): {_verif['detalle']}.")
+                             f"({fecha_legible(_verif['cuando'][:16])}): {_verif['detalle']}.")
                 else:
                     st.caption("La prueba de recuperación de la copia todavía no se hizo: "
                                "corre sola una vez por día.")
@@ -284,7 +284,8 @@ if pagina == PAGINAS[4]:
                 st.warning(f"⚠️ La última subida de las fotos falló: {_err_fotos}")
             _ult_fotos = obtener_config("ultimo_backup_fotos", "")
             if _ult_fotos:
-                st.caption(f"📷 Tus fotos se guardaron en GitHub por última vez el {_ult_fotos[:16]}.")
+                st.caption(f"📷 Tus fotos se guardaron en GitHub por última vez el "
+                           f"{fecha_legible(_ult_fotos[:16])}.")
             _fuera = fotos_propias_fuera_de_la_copia()
             if _fuera:
                 st.caption(f"En el último backup liviano bajado a mano no entraron {_fuera} "
@@ -323,7 +324,7 @@ if pagina == PAGINAS[4]:
                 st.download_button(
                     f"⬇️ Descargar ({miles(len(st.session_state['backup_bytes'])/(1024*1024), 0)} MB)",
                     data=st.session_state["backup_bytes"],
-                    file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db",
+                    file_name=f"equivalencias_backup_{ahora_aca():%Y%m%d}.db",
                     on_click=marcar_backup_bajado
                 )
         with cbk2:
@@ -367,7 +368,7 @@ if pagina == PAGINAS[4]:
             _zip, _cuantas = st.session_state["_zip_catalogo"]
             st.caption(" · ".join(f"{a}: {miles(n)}" for a, n in _cuantas.items()))
             st.download_button(f"⬇️ Bajar el catálogo ({miles(len(_zip) / 1048576, 1)} MB)",
-                               data=_zip, file_name=f"catalogo_{datetime.now():%Y%m%d}.zip",
+                               data=_zip, file_name=f"catalogo_{ahora_aca():%Y%m%d}.zip",
                                mime="application/zip", key="bajar_zip_catalogo")
 
         st.markdown("---")
@@ -379,7 +380,7 @@ if pagina == PAGINAS[4]:
         st.download_button(
             "⬇️ Descargar configuración (.txt)",
             data=exportar_configuracion_txt(),
-            file_name=f"configuracion_{datetime.now():%Y%m%d}.txt",
+            file_name=f"configuracion_{ahora_aca():%Y%m%d}.txt",
             mime="text/plain"
         )
 
@@ -445,7 +446,7 @@ a traer solas desde Administrar → Mantenimiento.
                 _hoy_productos = c.fetchone()[0]
                 st.warning(
                     "⚠️ **Esto reemplaza los datos actuales.** "
-                    + (f"Es una copia del **{_vistazo['fecha'][:16]}**. "
+                    + (f"Es una copia del **{fecha_legible(_vistazo['fecha'][:16])}**. "
                        if _vistazo.get("fecha") else "")
                     + f"El backup trae "
                     f"**{miles(_vistazo['productos'] or 0)} productos**, "
@@ -902,7 +903,7 @@ a traer solas desde Administrar → Mantenimiento.
             c.execute("""SELECT codigo_viejo AS "Ya no se fabrica",
                                 codigo_nuevo AS "Lo reemplaza", nota AS "Nota",
                                 COALESCE(cargado_por, '') AS "Cargó",
-                                substr(fecha, 1, 10) AS "Cargado"
+                                date(fecha, '-3 hours') AS "Cargado"
                          FROM reemplazos_codigo ORDER BY fecha DESC""")
             _lista_r = filas_a_listas(c)
         except sqlite3.OperationalError as _err:

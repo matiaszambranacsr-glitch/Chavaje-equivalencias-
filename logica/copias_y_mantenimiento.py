@@ -1768,7 +1768,7 @@ def exportar_catalogo_zip():
         z.writestr("rechazadas.csv", "\ufeff" + texto.getvalue())
         cuantas["rechazadas"] = n
         z.writestr("LEEME.txt", (
-            f"Catálogo exportado el {datetime.now():%d/%m/%Y %H:%M}.\n\n"
+            f"Catálogo exportado el {ahora_aca():%d/%m/%Y %H:%M}.\n\n"
             "Un archivo CSV por tabla, separado por comas, con el punto como decimal.\n"
             "Los productos se unen con las marcas por marca_id, y las equivalencias con los\n"
             "productos por producto_a_id / producto_b_id (el id de productos.csv).\n"
@@ -1969,7 +1969,7 @@ def _volver_a_cargar_la_logica():
 def apartar_la_base_danada():
     """Renombra la base (y sus -wal / -shm) a «….danada-AAAAMMDD-HHMMSS», y vuelve a cargar
     la lógica. Devuelve el nombre nuevo. No borra nada."""
-    destino = f"{DB_PATH}.danada-{datetime.now():%Y%m%d-%H%M%S}"
+    destino = f"{DB_PATH}.danada-{ahora_aca():%Y%m%d-%H%M%S}"
     for sufijo in ("", "-wal", "-shm"):
         if os.path.exists(DB_PATH + sufijo):
             os.replace(DB_PATH + sufijo, destino + sufijo)
@@ -2068,11 +2068,11 @@ def subir_backup_a_github(datos_db, mensaje=""):
     # Lo dañado no se sube: pisaría la última copia buena. Ver la_base_esta_sana().
     _sana, _detalle = la_base_esta_sana(datos=datos_db)
     guardar_config("base_danada", "" if _sana else
-                   f"{datetime.now():%d/%m %H:%M} — {_detalle}")
+                   f"{ahora_aca():%d/%m %H:%M} — {_detalle}")
     if not _sana:
         texto = ("La copia NO se subió: la base tiene daño y habría pisado la última copia "
                  f"buena de GitHub, que queda como estaba. Detalle: {_detalle}")
-        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        guardar_config("ultimo_backup_github_error", f"{ahora_aca():%d/%m %H:%M} — {texto}")
         return False, texto
     ok, texto = _subir_backup_a_github(cfg, datos_db, mensaje)
     # Se anota el resultado, sea cual sea. La subida diaria corre sola en
@@ -2080,7 +2080,7 @@ def subir_backup_a_github(datos_db, mensaje=""):
     # la copia estuviera, y el aviso de «no hay copia» quedaba igual que siempre, sin decir
     # que se estaba intentando y fallando. Ver diagnostico_de_salud().
     guardar_config("ultimo_backup_github_error",
-                   "" if ok else f"{datetime.now():%d/%m %H:%M} — {texto}")
+                   "" if ok else f"{ahora_aca():%d/%m %H:%M} — {texto}")
     return ok, texto
 
 
@@ -2240,7 +2240,7 @@ def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
     arbol = _arbol_de_la_rama(cfg, cabeceras)
     if arbol is None:
         return False, None, "no se pudo leer qué hay en la rama de copias"
-    hoy = date.today().isoformat()
+    hoy = hoy_aca().isoformat()
     partes = partes_de_la_copia(cfg["archivo"], datos)
     ficha = (f"{cfg['archivo']}.json", ficha_de_la_copia(datos))
     # Las copias anteriores: cuáles quedan, con la de hoy (que reemplaza a otra de hoy).
@@ -2343,7 +2343,7 @@ def subir_las_fotos_si_cambiaron():
     # se_puede_subir_sin_cifrar().
     _se_puede, _por_que = se_puede_subir_sin_cifrar(cfg, cabeceras)
     if not _se_puede:
-        guardar_config("ultimo_backup_fotos_error", f"{datetime.now():%d/%m %H:%M} — {_por_que}")
+        guardar_config("ultimo_backup_fotos_error", f"{ahora_aca():%d/%m %H:%M} — {_por_que}")
         return False, _por_que
     arbol = _arbol_de_la_rama(cfg, cabeceras)
     if arbol is None:
@@ -2369,7 +2369,7 @@ def subir_las_fotos_si_cambiaron():
         f"Fotos propias — {len(cambiados)} bloque(s)")
     if not ok:
         texto = f"No se pudieron subir las fotos: GitHub respondió {codigo}. {texto}"
-        guardar_config("ultimo_backup_fotos_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        guardar_config("ultimo_backup_fotos_error", f"{ahora_aca():%d/%m %H:%M} — {texto}")
         return False, texto
     guardar_config("huellas_fotos_github", json.dumps({str(n): h for n, h in locales.items()}))
     guardar_config("ultimo_backup_fotos", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -2444,7 +2444,7 @@ def _subir_backup_a_github(cfg, datos_db, mensaje):
         contenido = gzip.compress(datos_db, 6) if cfg["archivo"].endswith(".gz") else datos_db
         # Y cifrada, si está la clave en los secretos. Ver cifrar_copia().
         contenido = cifrar_copia(contenido)
-        mensaje = mensaje or f"Backup automático {datetime.now():%Y-%m-%d %H:%M}"
+        mensaje = mensaje or f"Backup automático {ahora_aca():%Y-%m-%d %H:%M}"
         if cfg["rama"] == RAMA_DE_LA_COPIA:
             ok, codigo, texto_gh = _subir_a_la_rama_de_copias(cfg, contenido, mensaje, cabeceras)
             if ok:
@@ -2520,7 +2520,7 @@ def cuanto_perderias_si_reinicia():
     _ultima_gh = obtener_config("ultimo_backup_github", "") if _cfg_gh else ""
     if _cfg_gh and _cfg_gh["rama"] == RAMA_DE_LA_COPIA and _ultima_gh:
         try:
-            _fecha_gh = datetime.strptime(_ultima_gh, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
+            _fecha_gh = fecha_legible(_ultima_gh[:16])      # en la hora de acá
         except ValueError:
             _fecha_gh = _ultima_gh
         # ...salvo que la última vuelta NO haya podido subir (frenada por ir sin cifrar a un
@@ -2710,7 +2710,7 @@ def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
             if puenteadas:
                 n_p = guardar_equivalencias_derivadas(
                     [(x["_a"], x["_b"]) for x in puenteadas],
-                    f"POR REEMPLAZO (automático) · {datetime.now():%d/%m}")
+                    f"POR REEMPLAZO (automático) · {ahora_aca():%d/%m}")
                 if n_p:
                     hecho.append(f"{n_p} equivalencia(s) por cambio de código, a revisión")
         except Exception as _err:
@@ -2985,7 +2985,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
             if _escritos:
                 _n = guardar_equivalencias_pendientes(
                     list(_escritos), "descripcion-declarada",
-                    f"CÓDIGO ESCRITO EN LA DESCRIPCIÓN (automático) · {datetime.now():%d/%m %H:%M}")
+                    f"CÓDIGO ESCRITO EN LA DESCRIPCIÓN (automático) · {ahora_aca():%d/%m %H:%M}")
                 if _n:
                     hecho.append(f"{_n} par(es) de códigos que el proveedor escribió "
                                  "en la descripción, a revisión")
@@ -3038,7 +3038,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
             if _der:
                 _n = guardar_equivalencias_derivadas(
                     [(x["_a"], x["_b"]) for x in _der],
-                    f"CRUCE POR AUTO (automático) · {datetime.now():%d/%m %H:%M}")
+                    f"CRUCE POR AUTO (automático) · {ahora_aca():%d/%m %H:%M}")
                 if _n:
                     hecho.append(f"{_n} equivalencia(s) por auto, a revisión")
         except Exception as _err:
@@ -3061,7 +3061,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
             if _todas:
                 _n = guardar_equivalencias_pendientes(
                     [(x["_a"], x["_b"]) for x in _todas], "descripcion-todas",
-                    f"BARRIDO (automático) · {datetime.now():%d/%m %H:%M}")
+                    f"BARRIDO (automático) · {ahora_aca():%d/%m %H:%M}")
                 if _n:
                     hecho.append(f"{_n} par(es) del barrido de todo el catálogo, a revisión")
         except Exception as _err:

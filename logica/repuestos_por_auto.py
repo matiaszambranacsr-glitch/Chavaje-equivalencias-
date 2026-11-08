@@ -93,7 +93,7 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
     if vehiculo_id:
         c.execute("""SELECT h.descripcion_pieza AS "Pieza", h.codigo_pieza AS "Código",
                             h.marca_pieza AS "Marca", h.km_instalacion AS "Km",
-                            substr(h.fecha_instalacion, 1, 10) AS "Fecha", h.producto_id AS "_pid"
+                            date(h.fecha_instalacion, '-3 hours') AS "Fecha", h.producto_id AS "_pid"
                      FROM historial_piezas h WHERE h.vehiculo_id = ?
                      ORDER BY h.fecha_instalacion DESC""", (vehiculo_id,))
         resultado["de_este_auto"] = filas_a_listas(c)

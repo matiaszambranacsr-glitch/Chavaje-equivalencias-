@@ -133,7 +133,7 @@ if pagina == PAGINAS[5]:
                                    marcar_a_confirmar)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,
-            file_name=f"cotizacion_{datetime.now():%Y%m%d_%H%M}.pdf",
+            file_name=f"cotizacion_{ahora_aca():%Y%m%d_%H%M}.pdf",
             mime="application/pdf", width="stretch"
         )
 

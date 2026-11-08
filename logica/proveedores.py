@@ -773,7 +773,7 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
                       [(a, b, nombre_marca, o) for a, b, o in pares])
     resumen["pares"] = len({(a, b) for a, b, _o in pares})
     if pares:
-        resumen["lote"] = lote or f"PORTAL {nombre_marca} · {datetime.now():%d/%m %H:%M}"
+        resumen["lote"] = lote or f"PORTAL {nombre_marca} · {ahora_aca():%d/%m %H:%M}"
         resumen["nuevos"] = guardar_equivalencias_pendientes(
             [(a, b) for a, b, _o in pares], "portal", resumen["lote"])
     return resumen
@@ -1105,7 +1105,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
                       [(a, b, portal, o) for a, b, o in pares])
     resumen["pares"] = len({(a, b) for a, b, _o in pares})
     if pares:
-        resumen["lote"] = f"{portal} · {datetime.now():%d/%m %H:%M}"
+        resumen["lote"] = f"{portal} · {ahora_aca():%d/%m %H:%M}"
         resumen["nuevos"] = guardar_equivalencias_pendientes(
             [(a, b) for a, b, _o in pares], "catalogo_fabricante", resumen["lote"])
     return resumen
@@ -1498,7 +1498,7 @@ def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE,
                          VALUES (?, ?, 'MERCADO LIBRE', ?)""", pares)
     resumen["pares"] = len({(a, b) for a, b, _o in pares})
     if pares:
-        resumen["lote"] = f"MERCADO LIBRE · {datetime.now():%d/%m %H:%M}"
+        resumen["lote"] = f"MERCADO LIBRE · {ahora_aca():%d/%m %H:%M}"
         resumen["nuevos"] = guardar_equivalencias_pendientes(
             [(a, b) for a, b, _o in pares], "mercado_libre", resumen["lote"])
     return resumen
@@ -1633,14 +1633,14 @@ def _no_fallo_hoy(fuente, columna="id"):
     reintenta mañana, no en la vuelta siguiente: si no, la tanda lo volvería a bajar cada
     minuto mientras avanza con lo demás."""
     return (f"{columna} NOT IN (SELECT CAST(clave AS INTEGER) FROM descargas_fallidas "
-            f"WHERE fuente = '{fuente}' AND fecha = date('now', 'localtime'))")
+            f"WHERE fuente = '{fuente}' AND fecha = date('now'))")
 
 
 def _fallaron_hoy(fuente):
     """Las claves que fallaron hoy en esa fuente (para las que no son productos)."""
     try:
         c.execute("""SELECT clave FROM descargas_fallidas
-                     WHERE fuente = ? AND fecha = date('now', 'localtime')""", (fuente,))
+                     WHERE fuente = ? AND fecha = date('now')""", (fuente,))
         return {r[0] for r in c.fetchall()}
     except sqlite3.OperationalError as _err:
         anotar_error("_fallaron_hoy", _err)
@@ -1657,7 +1657,7 @@ def _quedan_para_reintentar(prefijo):
     try:
         c.execute("""SELECT 1 FROM descargas_fallidas
                      WHERE fuente LIKE ? AND intentos < ?
-                       AND fecha = date('now', 'localtime') LIMIT 1""",
+                       AND fecha = date('now') LIMIT 1""",
                   (prefijo + "%", INTENTOS_POR_DESCARGA))
         return c.fetchone() is not None
     except sqlite3.OperationalError as _err:
@@ -2363,7 +2363,7 @@ def guardar_equivalencias_de_catalogo(propuestas, marca, lote=None):
     `lote`, como en leer_fichas_del_portal(): leyendo «todas», la misma lista en cada tanda."""
     if not propuestas:
         return 0
-    lote = lote or f"CATÁLOGO {marca} · {datetime.now():%d/%m %H:%M}"
+    lote = lote or f"CATÁLOGO {marca} · {ahora_aca():%d/%m %H:%M}"
     rechazados = pares_rechazados()
     nuevas = [(p["_a"], p["_b"]) for p in propuestas
               if (p["_a"], p["_b"]) not in rechazados]
@@ -2755,7 +2755,7 @@ def _trabajo_de_fondo():
                     if _por_auto:
                         _n_auto = guardar_equivalencias_derivadas(
                             [(x["_a"], x["_b"]) for x in _por_auto],
-                            f"CRUCE POR AUTO (automático) · {datetime.now():%d/%m %H:%M}")
+                            f"CRUCE POR AUTO (automático) · {ahora_aca():%d/%m %H:%M}")
                         guardar_config("aplicaciones_cruces", str(_n_auto))
                 except Exception as _err:
                     anotar_error("_trabajo_de_fondo/cruce_por_auto", _err)
@@ -3261,10 +3261,12 @@ def mostrar_avance_de_tanda(que, unidad):
 
 def _fecha_corta(fecha):
     """«2026-09-28 14:30…» → «hoy 14:30», «mañana 00:05» o «28/09 14:30»."""
-    fecha = str(fecha or "")
-    if len(fecha) < 16:
-        return fecha
-    hoy = datetime.now()
+    aca = a_la_hora_de_aca(fecha)
+    if aca is None:
+        return str(fecha or "")
+    # En la hora de acá (ver «LA HORA DE ACÁ» en logica/base.py).
+    fecha = aca.strftime("%Y-%m-%d %H:%M")
+    hoy = ahora_aca()
     if fecha[:10] == hoy.strftime("%Y-%m-%d"):
         return f"hoy {fecha[11:16]}"
     if fecha[:10] == (hoy + timedelta(days=1)).strftime("%Y-%m-%d"):

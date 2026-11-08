@@ -301,7 +301,7 @@ def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
         # existe. El problema es la clave, y así lo tiene que decir.
         texto = ("GitHub no acepta la clave `github_token`: está vencida, mal copiada o le "
                  "falta el permiso «Contents: Read and write» sobre este repositorio.")
-        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        guardar_config("ultimo_backup_github_error", f"{ahora_aca():%d/%m %H:%M} — {texto}")
         return False, texto
     if not aunque_no_haya_cambios and _hay_copia:
         # Una base que nunca subió copia —no tiene huella— y en GitHub ya hay una: no viene
@@ -310,7 +310,7 @@ def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
                  "por si la buena es esa: puede que al arrancar no se haya podido bajar. "
                  "Reiniciá la app (menú ⋮ → Reboot) para que la baje. Si estás seguro de que "
                  "lo bueno es lo que hay acá, tocá «Subir el backup al repositorio ahora».")
-        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        guardar_config("ultimo_backup_github_error", f"{ahora_aca():%d/%m %H:%M} — {texto}")
         return False, texto
     # EL CATÁLOGO SE ACHICÓ DE GOLPE: la mitad de los productos o más desde la última copia. Puede
     # ser a propósito (se borró una marca grande) o un error (una lista mal importada, una base
@@ -322,7 +322,7 @@ def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
         texto = (f"El catálogo bajó de {miles(_en_la_copia)} a {miles(productos)} productos "
                  "desde la última copia, y la copia buena no se pisa sola. Si fue a propósito, "
                  "tocá «Subir el backup al repositorio ahora»; si no, restaurá la copia.")
-        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        guardar_config("ultimo_backup_github_error", f"{ahora_aca():%d/%m %H:%M} — {texto}")
         return False, texto
     huella, datos = copia_para_github("" if aunque_no_haya_cambios else huella_anterior)
     if datos is None:

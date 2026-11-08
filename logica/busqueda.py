@@ -955,7 +955,7 @@ def anotar_el_respaldo(res, clean_code, quitar_lo_dudoso=False):
     for tanda, marcadores in (en_tandas(ids, usos_por_consulta=2) if origenes else ()):
         marcadores_o = ",".join("?" * len(origenes))
         c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, revisado_por AS quien,
-                             substr(fecha, 1, 10) AS fecha, motivo
+                             date(fecha, '-3 hours') AS fecha, motivo
                       FROM equivalencias_revisadas
                       WHERE decision = 'rechazada'
                         AND ((producto_a_id IN ({marcadores_o}) AND producto_b_id IN ({marcadores}))

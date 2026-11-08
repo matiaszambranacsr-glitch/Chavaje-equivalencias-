@@ -217,7 +217,7 @@ if pagina == PAGINAS[3]:
                     if st.button(f"📥 Mandar las {len(_dm)} a revisión", key="env_med"):
                         _n = guardar_equivalencias_derivadas(
                             [(x["_a"], x["_b"]) for x in _dm],
-                            f"POR MEDIDAS · {datetime.now():%d/%m %H:%M}")
+                            f"POR MEDIDAS · {ahora_aca():%d/%m %H:%M}")
                         st.session_state.pop("deriv_med", None)
                         invalidar_salud()
                         avisar("success", f"{_n} equivalencia(s) para revisar.")
@@ -248,7 +248,7 @@ if pagina == PAGINAS[3]:
                 if st.button(f"📥 Mandar los {len(_pu)} a revisión", key="env_puente"):
                     _n = guardar_equivalencias_derivadas(
                         [(x["_a"], x["_b"]) for x in _pu],
-                        f"POR REEMPLAZO DE CÓDIGO · {datetime.now():%d/%m %H:%M}")
+                        f"POR REEMPLAZO DE CÓDIGO · {ahora_aca():%d/%m %H:%M}")
                     invalidar_salud()
                     avisar("success", f"{_n} equivalencia(s) para revisar.")
                     st.rerun()
@@ -494,7 +494,7 @@ if pagina == PAGINAS[3]:
                         st.session_state["portal_todas"] = {
                             "id": _marca_p["id"], "marca": _marca_p["nombre"],
                             "lote": f"PORTAL {_marca_p['nombre']} · "
-                                    f"{datetime.now():%d/%m %H:%M}"}
+                                    f"{ahora_aca():%d/%m %H:%M}"}
                         st.rerun()
                     _barra = st.progress(0.0, text="Entrando al portal...")
                     _res = leer_fichas_del_portal(
@@ -720,7 +720,7 @@ if pagina == PAGINAS[3]:
                             "qué coinciden. Si ves algo que no cierra, avisame y ajusto el criterio."
                         )
                         if st.button(f"📥 Mandar las {len(_dd)} a revisión", type="primary"):
-                            _lote_d = f"POR DESCRIPCIÓN · {_ma[:14]}↔{_mb[:14]} · {datetime.now():%d/%m %H:%M}"
+                            _lote_d = f"POR DESCRIPCIÓN · {_ma[:14]}↔{_mb[:14]} · {ahora_aca():%d/%m %H:%M}"
                             _n = guardar_equivalencias_derivadas(
                                 [(x["_a"], x["_b"]) for x in _dd], _lote_d)
                             st.session_state.pop("deriv_desc", None)
@@ -758,7 +758,7 @@ if pagina == PAGINAS[3]:
                             "deducción, sigue siendo una deducción."
                         )
                         if st.button(f"📥 Mandar las {len(derivadas)} a revisión", type="primary"):
-                            lote_der = f"CATÁLOGOS DE FABRICANTE · {datetime.now():%d/%m %H:%M}"
+                            lote_der = f"CATÁLOGOS DE FABRICANTE · {ahora_aca():%d/%m %H:%M}"
                             n = guardar_equivalencias_derivadas(
                                 [(x["_a"], x["_b"]) for x in derivadas], lote_der)
                             st.session_state.pop("derivadas", None)
@@ -826,7 +826,7 @@ if pagina == PAGINAS[3]:
                                  type="primary", key="mandar_sug_escritos"):
                         _n = guardar_equivalencias_pendientes(
                             list(_st_escritos), "descripcion-declarada",
-                            f"escritos-{datetime.now().strftime('%d/%m %H:%M')}")
+                            f"escritos-{ahora_aca().strftime('%d/%m %H:%M')}")
                         st.session_state.pop("sug_escritos", None)
                         avisar("ok", f"Listo: {_n} par(es) a la cola. Se aprueban en "
                                      "Estadísticas → 🔗 Equivalencias sugeridas.")
@@ -876,7 +876,7 @@ if pagina == PAGINAS[3]:
                                  type="primary", key="mandar_sug_todas"):
                         _n = guardar_equivalencias_pendientes(
                             _pares_t, "descripcion-todas",
-                            f"todas-{datetime.now().strftime('%d/%m %H:%M')}")
+                            f"todas-{ahora_aca().strftime('%d/%m %H:%M')}")
                         st.session_state.pop("sug_todas", None)
                         avisar("ok", f"Listo: {_n} par(es) a la cola. Se aprueban en "
                                      "Estadísticas → 🔗 Equivalencias sugeridas.")
@@ -1078,7 +1078,7 @@ if pagina == PAGINAS[3]:
                         st.session_state.pop("equiv_catalogo", None)
                         st.session_state["catalogo_todas"] = {
                             "id": opciones_mf[elegida_mf], "marca": _marca_mf,
-                            "lote": f"CATÁLOGO {_marca_mf} · {datetime.now():%d/%m %H:%M}"}
+                            "lote": f"CATÁLOGO {_marca_mf} · {ahora_aca():%d/%m %H:%M}"}
                         st.rerun()
                     barra_mf = st.progress(0.0)
                     with st.spinner("Consultando el catálogo del proveedor..."):

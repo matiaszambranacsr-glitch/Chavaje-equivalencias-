@@ -93,9 +93,10 @@ import os
 import re
 import sys
 import types
-from datetime import datetime
-''', ["del_proceso", "MAXIMO_ERRORES_ANOTADOS", "_ULTIMOS_ERRORES", "_PATRONES_SENSIBLES",
-      "tapar_lo_sensible", "_renglon_del_error", "anotar_error"], '''
+from datetime import datetime, timedelta
+''', ["del_proceso", "DIFERENCIA_CON_LA_HORA_DE_ACA", "ahora_aca", "MAXIMO_ERRORES_ANOTADOS",
+      "_ULTIMOS_ERRORES", "_PATRONES_SENSIBLES", "tapar_lo_sensible", "_renglon_del_error",
+      "anotar_error"], '''
 def errores_anotados():
     """Los últimos errores ignorados, del más viejo al más nuevo. Para mostrarlos en una
     pantalla de diagnóstico sin tocar la lista de adentro."""

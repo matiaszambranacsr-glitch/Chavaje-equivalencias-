@@ -1502,8 +1502,8 @@ def mostrar_aviso_de_lo_aprobado():
         return
     motivos = " · ".join(f"{texto_para_html(m)} ({miles(n)})" for m, n in resumen["grupos"])
     try:
-        cuando = datetime.strptime(resumen["fecha"], "%Y-%m-%d %H:%M").strftime("%d/%m %H:%M")
-    except (KeyError, ValueError):
+        cuando = a_la_hora_de_aca(resumen["fecha"]).strftime("%d/%m %H:%M")
+    except (KeyError, ValueError, AttributeError):
         cuando = resumen.get("fecha", "")
     st.warning(
         f"🔁 **{miles(resumen['vetados'])} vínculo(s) que ya están cargados chocan con las "
@@ -5218,7 +5218,7 @@ def rechazos_entre(ids):
         return []
     marcadores = ",".join("?" * len(ids))
     c.execute(f"""SELECT r.producto_a_id AS a, r.producto_b_id AS b, r.revisado_por,
-                         substr(r.fecha, 1, 10) AS fecha, r.motivo,
+                         date(r.fecha, '-3 hours') AS fecha, r.motivo,
                          pa.codigo_raw AS cod_a, pb.codigo_raw AS cod_b
                   FROM equivalencias_revisadas r
                   JOIN productos pa ON pa.id = r.producto_a_id
@@ -5987,7 +5987,7 @@ def relacionar_las_bujias_que_calzan():
     bujias = bujias_con_medidas()
     pares = pares_de_bujias_que_calzan(bujias)
     if pares:
-        lote_nuevo = f"{LOTE_DE_LAS_BUJIAS} · {datetime.now().strftime('%d/%m')}"
+        lote_nuevo = f"{LOTE_DE_LAS_BUJIAS} · {ahora_aca().strftime('%d/%m')}"
         como_estaba = {}
         for (a, b), (_de, _lote, antes) in pares.items():
             m_a, m_b = bujias[a][1], bujias[b][1]

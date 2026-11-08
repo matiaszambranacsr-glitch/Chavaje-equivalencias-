@@ -462,17 +462,18 @@ def _anular_la_venta(venta_id):
 
 def ventas_del_dia(dia=None):
     """Las ventas de un día (hoy, si no se dice), la última primero, con sus ítems. [dict]."""
-    dia = dia or datetime.now().strftime("%Y-%m-%d")
+    dia = dia or hoy_aca().isoformat()
     # El día de la caja es el día en que se cobró (la plata entra ese día); lo que espera en la
     # caja, el día en que se vendió.
-    c.execute("""SELECT v.id, substr(v.fecha, 12, 5) AS hora, v.usuario, v.cliente,
+    c.execute("""SELECT v.id, substr(datetime(v.fecha, '-3 hours'), 12, 5) AS hora,
+                        v.usuario, v.cliente,
                         v.forma_de_pago, v.total, v.anulada, v.km, ve.patente,
                         COALESCE(v.cobrada, 1) AS cobrada, v.cuotas,
                         COALESCE(v.descuento, 0) AS descuento, v.cobrada_por,
                         k.nombre AS cuenta
                  FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
                  LEFT JOIN mecanicos k ON k.id = v.mecanico_id
-                 WHERE substr(COALESCE(v.cobrada_en, v.fecha), 1, 10) = ?
+                 WHERE date(COALESCE(v.cobrada_en, v.fecha), '-3 hours') = ?
                  ORDER BY v.id DESC""", (dia,))
     ventas = [dict(f) for f in c.fetchall()]
     for v in ventas:
@@ -486,13 +487,14 @@ def ventas_del_dia(dia=None):
 def devoluciones_del_dia(dia=None):
     """Lo que se devolvió en un día (hoy, si no se dice), de ventas no anuladas: con la forma de
     pago de la venta (la plata vuelve por donde entró) y el precio y el costo del ítem. [dict]."""
-    dia = dia or datetime.now().strftime("%Y-%m-%d")
+    dia = dia or hoy_aca().isoformat()
     c.execute("""SELECT d.id, d.venta_id, d.cantidad, d.importe, d.motivo, d.usuario,
-                        substr(d.fecha, 12, 5) AS hora, v.forma_de_pago, vi.marca, vi.codigo,
+                        substr(datetime(d.fecha, '-3 hours'), 12, 5) AS hora, v.forma_de_pago,
+                        vi.marca, vi.codigo,
                         vi.precio, vi.costo
                  FROM ventas_devoluciones d JOIN ventas v ON v.id = d.venta_id
                  JOIN ventas_items vi ON vi.id = d.venta_item_id
-                 WHERE substr(d.fecha, 1, 10) = ? AND v.anulada = 0 ORDER BY d.id""", (dia,))
+                 WHERE date(d.fecha, '-3 hours') = ? AND v.anulada = 0 ORDER BY d.id""", (dia,))
     return [dict(f) for f in c.fetchall()]
 
 
@@ -572,7 +574,7 @@ def texto_del_comprobante(venta_id):
     venta = una_venta(venta_id)
     if not venta:
         return ""
-    lineas = [f"Tu compra en El Chavo — #{venta['id']} — {venta['fecha'][:16]}"]
+    lineas = [f"Tu compra en El Chavo — #{venta['id']} — {fecha_legible(venta['fecha'][:16])}"]
     lineas += [f"{it['cantidad']}× {it['marca']} {it['codigo']} — "
                f"{(it['descripcion'] or '')[:40]} — ${miles(it['cantidad'] * it['precio'], 0)}"
                + (f" (devueltos: {it['devuelto']})" if it["devuelto"] else "")
@@ -615,7 +617,8 @@ def pdf_del_comprobante(venta):
     pdf.cell(0, 10, limpiar(f"El Chavo - Comprobante de venta #{venta['id']}"),
              new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
-    _fecha = datetime.strptime(venta["fecha"][:16], "%Y-%m-%d %H:%M")
+    _fecha = a_la_hora_de_aca(venta["fecha"]) or datetime.strptime(venta["fecha"][:16],
+                                                                   "%Y-%m-%d %H:%M")
     pdf.cell(0, 6, limpiar(f"Fecha: {_fecha:%d/%m/%Y %H:%M}"
                            + (f"   Cliente: {venta['cliente']}" if venta["cliente"] else "")
                            + (f"   Patente: {venta['patente']}" if venta["patente"] else "")),
@@ -673,16 +676,16 @@ def lo_mas_vendido(dias=30, tope=10):
     """Lo que entró en los últimos `dias` días (hoy incluido) y qué se vendió más, por unidades
     y por plata, sin las anuladas. La ganancia, con el costo de cada venta y solo de lo que lo
     tiene. dict."""
-    hoy = datetime.now().date()
+    hoy = hoy_aca()
     desde = hoy - timedelta(days=int(dias) - 1)
-    c.execute("""SELECT substr(fecha, 1, 10) AS dia, COUNT(*) AS ventas, SUM(total) AS total
-                 FROM ventas WHERE anulada = 0 AND substr(fecha, 1, 10) >= ?
+    c.execute("""SELECT date(fecha, '-3 hours') AS dia, COUNT(*) AS ventas, SUM(total) AS total
+                 FROM ventas WHERE anulada = 0 AND date(fecha, '-3 hours') >= ?
                  GROUP BY dia""", (desde.isoformat(),))
     del_dia = {f["dia"]: [f["ventas"], f["total"] or 0] for f in c.fetchall()}
     # Lo devuelto, el día que se devolvió: ver cierre_de_caja().
-    c.execute("""SELECT substr(d.fecha, 1, 10) AS dia, SUM(d.importe) AS importe
+    c.execute("""SELECT date(d.fecha, '-3 hours') AS dia, SUM(d.importe) AS importe
                  FROM ventas_devoluciones d JOIN ventas v ON v.id = d.venta_id
-                 WHERE v.anulada = 0 AND substr(d.fecha, 1, 10) >= ? GROUP BY dia""",
+                 WHERE v.anulada = 0 AND date(d.fecha, '-3 hours') >= ? GROUP BY dia""",
               (desde.isoformat(),))
     for f in c.fetchall():
         del_dia.setdefault(f["dia"], [0, 0])[1] -= f["importe"] or 0
@@ -706,7 +709,7 @@ def lo_mas_vendido(dias=30, tope=10):
                         COUNT(DISTINCT vi.venta_id) AS ventas
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
                       LEFT JOIN productos p ON p.id = vi.producto_id
-                 WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
+                 WHERE v.anulada = 0 AND date(v.fecha, '-3 hours') >= ?
                  GROUP BY vi.producto_id, vi.marca, vi.codigo""", (desde.isoformat(),))
     productos = [dict(f) for f in c.fetchall()]
     ventas = sum(n for n, _ in del_dia.values())
@@ -778,11 +781,11 @@ def buscar_ventas(texto, dias=180, tope=20):
     t = (texto or "").strip()
     if not t:
         return []
-    desde = (datetime.now().date() - timedelta(days=int(dias))).isoformat()
+    desde = (hoy_aca() - timedelta(days=int(dias))).isoformat()
     numero = t.lstrip("#").strip()
     digitos = re.sub(r"\D", "", t)
     c.execute("""SELECT v.id FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
-                 WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
+                 WHERE v.anulada = 0 AND date(v.fecha, '-3 hours') >= ?
                    AND (CAST(v.id AS TEXT) = ? OR v.cliente LIKE ? OR ve.cliente_nombre LIKE ?
                         OR ve.patente = ?
                         OR (length(?) >= 6 AND REPLACE(REPLACE(REPLACE(REPLACE(
@@ -884,7 +887,7 @@ def arquear_la_caja(dia, efectivo_contado, nota=""):
         return False, "Escribí cuánto efectivo hay."
     if contado < 0:
         return False, "El efectivo no puede ser negativo."
-    dia = dia or datetime.now().strftime("%Y-%m-%d")
+    dia = dia or hoy_aca().isoformat()
     esperado = efectivo_esperado(dia)
     with db_lock, transaccion():
         c.execute("""INSERT INTO arqueos_de_caja (dia, efectivo_esperado, efectivo_contado, nota,
@@ -916,8 +919,9 @@ def resumen_de_la_caja(dia=None):
 
 def arqueos_del_dia(dia=None):
     """Los arqueos de un día, el último primero. [dict]."""
-    dia = dia or datetime.now().strftime("%Y-%m-%d")
-    c.execute("""SELECT substr(fecha, 12, 5) AS hora, efectivo_esperado, efectivo_contado,
+    dia = dia or hoy_aca().isoformat()
+    c.execute("""SELECT substr(datetime(fecha, '-3 hours'), 12, 5) AS hora, efectivo_esperado,
+                        efectivo_contado,
                         efectivo_contado - efectivo_esperado AS diferencia, nota, usuario
                  FROM arqueos_de_caja WHERE dia = ? ORDER BY id DESC""", (dia,))
     return [dict(f) for f in c.fetchall()]
@@ -927,7 +931,7 @@ def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
     """Lo que se vende y se va a terminar: con lo vendido en los últimos `dias` días (sin lo
     devuelto) y el stock de hoy, para cuántos días alcanza. Solo lo que alcanza para menos de
     `alcanza_menos_de` días, lo que se termina antes primero. [dict]."""
-    desde = (datetime.now().date() - timedelta(days=int(dias) - 1)).isoformat()
+    desde = (hoy_aca() - timedelta(days=int(dias) - 1)).isoformat()
     c.execute("""SELECT vi.producto_id, MAX(vi.marca) AS marca, MAX(vi.codigo) AS codigo,
                         SUM(vi.cantidad - COALESCE(vi.devuelto, 0)) AS unidades, p.stock,
                         p.descripcion,
@@ -936,7 +940,7 @@ def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
                                   AND pr.estado = 'pendiente') AS anotado
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
                  JOIN productos p ON p.id = vi.producto_id
-                 WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ? AND p.stock IS NOT NULL
+                 WHERE v.anulada = 0 AND date(v.fecha, '-3 hours') >= ? AND p.stock IS NOT NULL
                  GROUP BY vi.producto_id HAVING unidades > 0""", (desde,))
     salida = []
     for f in c.fetchall():
@@ -1010,7 +1014,8 @@ def como_se_pago(venta):
 def ventas_a_cobrar():
     """Lo que espera en la caja, lo más viejo primero: [dict] con quién vendió, a qué cuenta,
     el total, la hora y lo que se lleva."""
-    c.execute("""SELECT v.id, v.fecha, substr(v.fecha, 12, 5) AS hora, v.usuario, v.cliente,
+    c.execute("""SELECT v.id, v.fecha, substr(datetime(v.fecha, '-3 hours'), 12, 5) AS hora,
+                        v.usuario, v.cliente,
                         v.total, v.mecanico_id, k.nombre AS cuenta
                  FROM ventas v LEFT JOIN mecanicos k ON k.id = v.mecanico_id
                  WHERE v.cobrada = 0 AND v.anulada = 0 ORDER BY v.id""")
@@ -1120,7 +1125,7 @@ def poner_a_cuenta(venta_id, mecanico_id=None, descuento=None):
     except ValueError as e:
         return False, str(e)
     usuario = obtener_usuario_actual()
-    vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
+    vence = (hoy_aca() + timedelta(days=config["dias_de_plazo"])).isoformat()
     try:
         with db_lock, transaccion():
             c.execute("""UPDATE ventas SET cobrada = 1, forma_de_pago = ?, mecanico_id = ?,
@@ -1271,8 +1276,9 @@ def _lo_armado(que):
     "total"}, o None."""
     tabla, _ = _LO_QUE_SE_ARMA[que]
     try:
-        c.execute(f"""SELECT items, cliente, substr(guardada, 12, 5) AS hora FROM {tabla}
-                      WHERE usuario = ? AND date(guardada) = date('now', 'localtime')""",
+        c.execute(f"""SELECT items, cliente, substr(datetime(guardada, '-3 hours'), 12, 5) AS hora
+                       FROM {tabla}
+                      WHERE usuario = ? AND date(guardada, '-3 hours') = date('now', '-3 hours')""",
                   (obtener_usuario_actual(),))
         fila = c.fetchone()
         items = json.loads(fila["items"]) if fila else []
@@ -1513,7 +1519,7 @@ CORRECCIONES_DEL_COBRO = ("corrigió cómo se pagó", "volvió una venta a la ca
 def puede_corregir_el_cobro(venta_id):
     """(sí o no, por qué no)."""
     c.execute("""SELECT COALESCE(cobrada, 1) AS cobrada, COALESCE(anulada, 0) AS anulada,
-                        substr(COALESCE(cobrada_en, fecha), 1, 10) AS dia
+                        date(COALESCE(cobrada_en, fecha), '-3 hours') AS dia
                  FROM ventas WHERE id = ?""", (venta_id,))
     v = c.fetchone()
     if not v:
@@ -1528,7 +1534,7 @@ def puede_corregir_el_cobro(venta_id):
                        "no se corrige.")
     if es_admin():
         return True, ""
-    if v["dia"] != date.today().isoformat():
+    if v["dia"] != hoy_aca().isoformat():
         return False, "Se cobró otro día: la corrige el administrador."
     return True, ""
 
@@ -1624,12 +1630,13 @@ def _volver_a_la_caja(venta_id):
 def cobros_corregidos(dia=None):
     """Las correcciones de cobro de un día (hoy, si no se dice), la última primero: para el
     cierre de caja. [{hora, venta, que, antes, despues, quien}]."""
-    dia = dia or date.today().isoformat()
+    dia = dia or hoy_aca().isoformat()
     huecos = ",".join("?" * len(CORRECCIONES_DEL_COBRO))
-    c.execute(f"""SELECT substr(cuando, 12, 5) AS hora, entidad_id AS venta, accion, antes,
+    c.execute(f"""SELECT substr(datetime(cuando, '-3 hours'), 12, 5) AS hora,
+                         entidad_id AS venta, accion, antes,
                          despues, usuario
                   FROM registro_de_cambios
-                  WHERE entidad = 'venta' AND accion IN ({huecos}) AND substr(cuando, 1, 10) = ?
+                  WHERE entidad = 'venta' AND accion IN ({huecos}) AND date(cuando, '-3 hours') = ?
                   ORDER BY id DESC""", (*CORRECCIONES_DEL_COBRO, dia))
     salida = []
     for r in c.fetchall():

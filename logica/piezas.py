@@ -604,7 +604,7 @@ def origen_de_las_medidas(ids):
     if not ids:
         return {}
     marcadores = ",".join("?" * len(ids))
-    c.execute(f"""SELECT producto_id, campo, despues, usuario, substr(fecha, 1, 10) AS fecha, motivo
+    c.execute(f"""SELECT producto_id, campo, despues, usuario, date(fecha, '-3 hours') AS fecha, motivo
                   FROM historial_de_medidas WHERE producto_id IN ({marcadores})
                   ORDER BY fecha, id""", ids)
     salida = {i: {} for i in ids}
@@ -629,7 +629,7 @@ def medidas_cambiadas_desde(ids, desde):
         return []
     marcadores = ",".join("?" * len(ids))
     c.execute(f"""SELECT h.producto_id, p.codigo_raw, h.campo, h.antes, h.despues, h.usuario,
-                         substr(h.fecha, 1, 10) AS fecha, h.motivo
+                         date(h.fecha, '-3 hours') AS fecha, h.motivo
                   FROM historial_de_medidas h JOIN productos p ON p.id = h.producto_id
                   WHERE h.producto_id IN ({marcadores}) AND h.antes IS NOT NULL AND h.fecha > ?
                   ORDER BY h.fecha, h.id""", ids + [desde])
@@ -1683,7 +1683,7 @@ def generar_auditoria_hoy(cantidad=8):
     negocio quizás nunca tuvo, contra un «sistema: None», y cualquier cosa que contara figuraba
     como diferencia. Tampoco entran los códigos de fábrica, que no son algo que esté en un
     estante. La mitad sale de los favoritos (si hay), el resto de todo lo demás, al azar."""
-    hoy = datetime.now().strftime("%Y-%m-%d")
+    hoy = hoy_aca().isoformat()
     with db_lock:
         c.execute("SELECT COUNT(*) FROM auditoria_diaria WHERE fecha = ?", (hoy,))
         if c.fetchone()[0] > 0:
@@ -1708,7 +1708,7 @@ def generar_auditoria_hoy(cantidad=8):
 
 
 def listar_auditoria_hoy():
-    hoy = datetime.now().strftime("%Y-%m-%d")
+    hoy = hoy_aca().isoformat()
     c.execute("""SELECT a.id AS "ID_auditoria", p.codigo_raw AS "Codigo", m.nombre AS "Marca",
                  a.stock_sistema AS "Stock sistema", a.stock_contado AS "Stock contado",
                  a.diferencia AS "Diferencia", a.resuelto AS "Resuelto"

@@ -218,7 +218,7 @@ def entregar_pedido(pedido_id, usuario=""):
             descuento = config["descuento"]
             importe = precio_de_la_cuenta(precio_lista, descuento) * f["cantidad"]
             if importe > 0:
-                vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
+                vence = (hoy_aca() + timedelta(days=config["dias_de_plazo"])).isoformat()
                 c.execute("""INSERT INTO movimientos_de_cuenta
                                 (mecanico_id, concepto, importe, vence, usuario)
                              VALUES (?, ?, ?, ?, ?)""",
@@ -753,7 +753,7 @@ def tiempos_del_deposito(dias=7):
     MINUTOS_PARA_AVISAR[0]."""
     c.execute("""SELECT d.resuelto_por,
                         (julianday(d.resuelto_en) - julianday(d.pedido_en)) * 1440 AS minutos,
-                        date(d.resuelto_en) = date('now', 'localtime') AS es_de_hoy
+                        date(d.resuelto_en, '-3 hours') = date('now', '-3 hours') AS es_de_hoy
                  FROM pedidos_deposito d
                  WHERE d.estado IN ('entregado', 'no_hay') AND d.resuelto_en IS NOT NULL
                    AND d.resuelto_en >= datetime('now', 'localtime', ?)""",
@@ -906,16 +906,6 @@ def pedir_lo_elegido_al_deposito(items, usuario="", nota="", clave=None):
     if clave:
         _recordar_si_fue_por_el_limite(clave, items, pedidos, fallas)
     return pedidos, fallas
-
-
-def _hora_corta(fecha_y_hora):
-    """«2026-10-06 14:32:10» → «14:32» si es de hoy, «06/10 14:32» si no."""
-    texto = str(fecha_y_hora or "")
-    if len(texto) < 16:
-        return texto
-    if texto[:10] == date.today().isoformat():
-        return texto[11:16]
-    return f"{texto[8:10]}/{texto[5:7]} {texto[11:16]}"
 
 
 def mostrar_pedir_al_deposito(resultados, clave):

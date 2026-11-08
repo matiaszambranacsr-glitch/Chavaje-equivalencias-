@@ -498,7 +498,7 @@ def fecha_de_la_lista(archivo, cargada):
 def fecha_de_los_precios(hoy=None):
     """{marca en mayúsculas: {"fecha", "de_donde", "dias"}} según la última lista cargada de
     cada una. Una marca que nunca se cargó por una lista no está."""
-    hoy = hoy or date.today()
+    hoy = hoy or hoy_aca()
     c.execute("""SELECT i.marca, i.archivo, i.fecha FROM importaciones i
                  WHERE i.fecha = (SELECT MAX(j.fecha) FROM importaciones j
                                   WHERE UPPER(j.marca) = UPPER(i.marca))""")

@@ -30,6 +30,71 @@ import itertools
 import types
 from datetime import datetime, timedelta, date, time as dtime
 from urllib.parse import quote
+
+
+# ============================================================================================
+# LA HORA DE ACÁ
+# ============================================================================================
+# La app GUARDA todo en UTC y MUESTRA la hora de Argentina. Streamlit Cloud corre en UTC: la
+# app anotó su última copia «2026-10-12 15:56:50» y GitHub la recibió a las 12:56:59 de acá.
+# Cada hora que se veía —la de la venta, la del cobro, la del arqueo— estaba tres horas
+# adelantada, y lo cobrado después de las 21 caía en la caja del día siguiente.
+# No se arregla poniendo el servidor en hora de acá: unas 40 tablas guardan con datetime('now')
+# de SQLite, que es siempre UTC, y mezclarlas con la hora de acá daba tres horas de error en
+# cualquier cuenta entre las dos (se probó). Así que:
+#   - TZ en UTC, fijo, también en una máquina de acá: todo lo guardado —datetime('now'),
+#     'localtime' y datetime.now()— está en la misma hora, y las cuentas entre dos cierran.
+#   - Para mostrar, ahora_aca(), a_la_hora_de_aca() y fecha_legible(); en SQL, la columna
+#     pasada por datetime(col, A_LA_HORA_DE_ACA).
+#   - Para decidir de qué día es algo (la caja, «hoy»), hoy_aca() y date(col, A_LA_HORA_DE_ACA).
+#     Una fecha sin hora (un vencimiento, un cheque) ya es de acá: se compara con hoy_aca() tal
+#     cual; pasada por A_LA_HORA_DE_ACA caería el día anterior.
+# Sin horario de verano desde 2009: tres horas fijas. auditar.py controla que no se escape una.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
+DIFERENCIA_CON_LA_HORA_DE_ACA = timedelta(hours=-3)
+# El modificador de SQLite. En las consultas va escrito tal cual —datetime(col, '-3 hours'),
+# date(col, '-3 hours'), date('now', '-3 hours')—, y auditar.py controla que sea este.
+A_LA_HORA_DE_ACA = "-3 hours"
+
+
+def ahora_aca():
+    """La fecha y hora de Argentina, para mostrar (lo que se guarda va con datetime.now())."""
+    return datetime.now() + DIFERENCIA_CON_LA_HORA_DE_ACA
+
+
+def hoy_aca():
+    """El día de Argentina: el de la caja, el de «hoy», el de un vencimiento."""
+    return ahora_aca().date()
+
+
+def a_la_hora_de_aca(valor):
+    """Una fecha y hora guardada (texto «2026-10-12 15:56:50» o datetime, en UTC) en la hora de
+    acá, como datetime. None si no tiene hora o no se entiende: una fecha sola no se corre."""
+    if isinstance(valor, datetime):
+        return valor + DIFERENCIA_CON_LA_HORA_DE_ACA
+    texto = str(valor or "").strip().replace("T", " ")
+    for formato, largo in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d %H:%M", 16)):
+        try:
+            return datetime.strptime(texto[:largo], formato) + DIFERENCIA_CON_LA_HORA_DE_ACA
+        except ValueError:
+            continue
+    return None
+
+
+def utc_de_la_hora_de_aca(momento):
+    """Lo contrario: una fecha y hora de acá, en UTC, para guardarla."""
+    return momento - DIFERENCIA_CON_LA_HORA_DE_ACA
+
+
+def hora_corta_aca(fecha_y_hora):
+    """«2026-10-06 14:32:10» (guardado en UTC) → «11:32» si es de hoy, «06/10 11:32» si no, en la
+    hora de acá. Lo usan el depósito y los permisos de las cuentas: eran dos copias iguales."""
+    aca = a_la_hora_de_aca(fecha_y_hora)
+    if aca is None:
+        return str(fecha_y_hora or "")
+    return f"{aca:%H:%M}" if aca.date() == hoy_aca() else f"{aca:%d/%m %H:%M}"
 # openpyxl NO va acá arriba: cargarlo (con numpy, que trae adentro) costaba 0,17 s en cada
 # arranque, y solo se usa al leer o bajar un Excel. Se importa adentro de leer_excel() y de
 # to_excel_bytes().
@@ -217,7 +282,7 @@ def anotar_error(donde, error, codigo=""):
     fallar de nuevo dentro del manejo del primer error."""
     try:
         _ULTIMOS_ERRORES.append({
-            "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
+            "cuando": ahora_aca().strftime("%d/%m %H:%M:%S"),
             "donde": str(donde)[:60],
             "tipo": type(error).__name__,
             "detalle": tapar_lo_sensible(error)[:200],

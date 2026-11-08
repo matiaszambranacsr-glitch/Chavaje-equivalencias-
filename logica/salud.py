@@ -204,8 +204,8 @@ def estado_del_sistema():
         _ult = obtener_config("ultimo_backup_github", "")
         fila("🔴" if _err or (_verif and not _verif.get("ok")) else "🟡" if not _verif else "🟢",
              "Copia en GitHub",
-             (f"falla: {_err[:80]}" if _err else f"última subida {_ult[:16] or 'nunca'}")
-             + (f" · verificada {_verif.get('cuando', '')[:16]}" if _verif.get("ok")
+             (f"falla: {_err[:80]}" if _err else f"última subida {fecha_legible(_ult[:16]) or 'nunca'}")
+             + (f" · verificada {fecha_legible(_verif.get('cuando', '')[:16])}" if _verif.get("ok")
                 else " · NO pasó la prueba de recuperación" if _verif else " · sin verificar todavía"))
     else:
         fila("🔴", "Copia en GitHub", "no está configurada: un reinicio puede borrar lo cargado")
@@ -305,7 +305,7 @@ def anotar_busqueda(tipo, termino, segundos, resultados, error=""):
     try:
         registro = del_proceso("mediciones_de_busqueda",
                                lambda: collections.deque(maxlen=MEDICIONES_DE_BUSQUEDA))
-        registro.append({"codigo": codigo, "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
+        registro.append({"codigo": codigo, "cuando": ahora_aca().strftime("%d/%m %H:%M:%S"),
                          "tipo": tipo, "termino": str(termino)[:80],
                          "usuario": obtener_usuario_actual(), "ms": round(segundos * 1000, 1),
                          "resultados": resultados, "error": str(error)[:200]})
@@ -354,7 +354,7 @@ def conteos_del_catalogo():
 def cambio_anormal_del_catalogo(hoy=None):
     """([«productos: 42.000 → 17.000», ...], fecha de la foto con que se compara). Anota la foto
     de hoy si todavía no está."""
-    hoy = (hoy or date.today()).isoformat()
+    hoy = (hoy or hoy_aca()).isoformat()
     try:
         fotos = json.loads(obtener_config("conteos_por_dia", "") or "{}")
     except ValueError:
@@ -479,8 +479,8 @@ def diagnostico_de_salud():
             _cuanto = (f"{_atraso.days} día(s)" if _atraso.days
                        else f"{int(_atraso.total_seconds() // 3600)} hora(s)")
             sumar("alto" if _atraso >= timedelta(hours=HORAS_DE_ATRASO_GRAVE) else "medio",
-                  f"♻️ La app arrancó el {_arranque['cuando']:%d/%m %H:%M} desde la copia del "
-                  f"{_arranque['copia']:%d/%m %H:%M}",
+                  f"♻️ La app arrancó el {a_la_hora_de_aca(_arranque['cuando']):%d/%m %H:%M} desde la "
+                  f"copia del {a_la_hora_de_aca(_arranque['copia']):%d/%m %H:%M}",
                   f"El servidor se reinició y la base volvió a esa copia: lo cargado en esos "
                   f"{_cuanto} —ventas, caja, stock, precios, equivalencias aprobadas— no está. "
                   "Si tenés un backup descargado más nuevo, restauralo; si no, lo que falte hay "
@@ -993,7 +993,7 @@ def diagnostico_de_salud():
         if config_github() and _verif and not _verif.get("ok"):
             sumar_tecnico("alto", "La copia de GitHub no pasó la prueba de recuperación",
                           f"Se la bajó como después de un reinicio y {_verif.get('detalle')} "
-                          f"({_verif.get('cuando', '')[:16]}). Bajá un backup ahora y probá "
+                          f"({fecha_legible(_verif.get('cuando', '')[:16])}). Bajá un backup ahora y probá "
                           "«Subir el backup al repositorio ahora».",
                           miga_hasta("Backup y config"))
     except Exception as _err:

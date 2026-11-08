@@ -19,7 +19,7 @@ if pagina == PAGINAS[3]:
                 with st.spinner("Controlando la base entera…"):
                     _sana, _detalle = la_base_esta_sana(ruta=DB_PATH)
                 guardar_config("base_danada", "" if _sana else
-                               f"{datetime.now():%d/%m %H:%M} — {_detalle}")
+                               f"{ahora_aca():%d/%m %H:%M} — {_detalle}")
                 invalidar_salud()
                 avisar("success" if _sana else "error",
                        "✅ La base está sana (control de integridad)." if _sana

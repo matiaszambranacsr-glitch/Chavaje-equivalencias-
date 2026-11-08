@@ -121,8 +121,7 @@ if pagina == PAGINAS[10]:
                 _por_id = {v["id"]: v for v in _encontradas}
                 _vsel = st.selectbox(
                     "Venta:", list(_por_id), key="venta_dev_sel",
-                    format_func=lambda i: (f"#{i} — {_por_id[i]['fecha'][8:10]}/"
-                                           f"{_por_id[i]['fecha'][5:7]} {_por_id[i]['fecha'][11:16]}"
+                    format_func=lambda i: (f"#{i} — {fecha_legible(_por_id[i]['fecha'][:16])[:16]}"
                                            f" — {_por_id[i]['cliente'] or _por_id[i]['patente'] or 'sin nombre'}"
                                            f" — ${miles(_por_id[i]['total'] or 0, 0)}"))
                 _v = _por_id[_vsel]

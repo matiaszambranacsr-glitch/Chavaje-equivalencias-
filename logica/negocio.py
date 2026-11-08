@@ -886,7 +886,7 @@ def aplicar_carga_remito(items_cotejados):
             sumados = {}
         if huella in sumados:
             return None
-        sumados[huella] = datetime.now().strftime("%d/%m %H:%M")
+        sumados[huella] = ahora_aca().strftime("%d/%m %H:%M")
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('remitos_sumados', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (json.dumps(dict(list(sumados.items())[-REMITOS_RECORDADOS:])),))
@@ -2941,13 +2941,16 @@ _RE_FECHA_DE_LA_BASE = re.compile(
 
 
 def fecha_legible(valor):
-    """«2026-09-25 20:33:56» → «25/09/2026 20:33», «2026-09-25» → «25/09/2026». Lo demás, tal
-    cual."""
+    """«2026-09-25 20:33:56» → «25/09/2026 17:33», «2026-09-25» → «25/09/2026». Lo demás, tal
+    cual. Con hora, es algo guardado en UTC y se muestra en la hora de acá (ver «LA HORA DE
+    ACÁ» en logica/base.py); una fecha sola ya es de acá y no se corre."""
     hallada = _RE_FECHA_DE_LA_BASE.match(valor.strip()) if isinstance(valor, str) else None
     if not hallada:
         return valor
     anio, mes, dia, hora, minuto = hallada.groups()
-    return f"{dia}/{mes}/{anio}" + (f" {hora}:{minuto}" if hora else "")
+    if not hora:
+        return f"{dia}/{mes}/{anio}"
+    return f"{a_la_hora_de_aca(f'{anio}-{mes}-{dia} {hora}:{minuto}'):%d/%m/%Y %H:%M}"
 
 
 def _vacio(valor):

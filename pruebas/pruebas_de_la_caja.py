@@ -392,6 +392,33 @@ def probar(L):
     esperar("y la campanita se lo dice al administrador",
             any("se corrigieron 4 cobro" in p["titulo"] and p.get("solo_admin")
                 for p in ns["diagnostico_de_salud"]()), True)
+
+    # LA HORA DE ACÁ (ver esa sección en logica/base.py): se guarda en UTC y se muestra —y se
+    # corta el día— en la de Argentina. Lo vendido a las 22:30 de acá es la 01:30 UTC del día
+    # siguiente: iba a la caja de mañana, con la hora «01:30».
+    import time as _t
+    esperar("se guarda en UTC: Python y SQLite en la misma hora",
+            (_t.strftime("%z"), uno("SELECT datetime('now', 'localtime') = datetime('now')")),
+            ("+0000", 1))
+    _diferencia = (ns["ahora_aca"]() - ns["datetime"].now()).total_seconds()
+    esperar("ahora_aca(): tres horas menos", round(_diferencia / 3600), -3)
+    esperar("fecha_legible(): con hora, la de acá; una fecha sola, tal cual",
+            [ns["fecha_legible"](x) for x in ("2026-11-08 22:30:00", "2026-11-09 01:30",
+                                              "2026-11-08")],
+            ["08/11/2026 19:30", "08/11/2026 22:30", "08/11/2026"])
+    st.session_state["admin_nombre"], st.session_state["nivel_usuario"] = "ana", "operador"
+    v_noche, _ = ns["cerrar_venta"]([item("A1")], a_la_caja=True)
+    ns["cobrar_venta"](v_noche, "Efectivo")
+    c.execute("UPDATE ventas SET fecha = '2026-03-11 01:20:00', cobrada_en = '2026-03-11 01:30:00' "
+              "WHERE id = ?", (v_noche,))
+    conn.commit()
+    _del_10 = {v["id"]: v["hora"] for v in ns["ventas_del_dia"]("2026-03-10")}
+    _del_11 = {v["id"] for v in ns["ventas_del_dia"]("2026-03-11")}
+    esperar("cobrada a las 22:30 de acá: en la caja de ese día, con su hora de acá",
+            (_del_10.get(v_noche), v_noche in _del_11), ("22:20", False))
+    esperar("y en el cierre de ese día", ns["cierre_de_caja"]("2026-03-10")["ventas"] >= 1, True)
+    esperar("la hora corta, en la de acá",
+            ns["hora_corta_aca"]("2026-03-11 01:30:00"), "10/03 22:30")
     for k in ("admin_nombre", "nivel_usuario"):
         st.session_state.pop(k, None)
     return fallas

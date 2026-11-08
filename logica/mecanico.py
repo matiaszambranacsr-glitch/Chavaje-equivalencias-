@@ -1299,7 +1299,7 @@ def generar_pdf_presupuesto_mecanico(nombre_mecanico, cliente_nombre, items, man
     pdf.cell(0, 6, limpiar(f"Mecánico: {nombre_mecanico}"), new_x="LMARGIN", new_y="NEXT")
     if cliente_nombre:
         pdf.cell(0, 6, limpiar(f"Cliente: {cliente_nombre}"), new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Fecha: {datetime.now():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Fecha: {ahora_aca():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "B", 11)
@@ -1389,7 +1389,7 @@ def estado_de_cuenta(mecanico_id):
     después de descontar los cargos que todavía no vencieron (y nunca más que el saldo)."""
     exigir_que_sea_su_cuenta(mecanico_id, "ver el estado de la cuenta", None)
     c.execute("""SELECT COALESCE(SUM(importe), 0) AS saldo,
-                        COALESCE(SUM(CASE WHEN importe > 0 AND vence >= date('now', 'localtime')
+                        COALESCE(SUM(CASE WHEN importe > 0 AND vence >= date('now', '-3 hours')
                                           THEN importe END), 0) AS a_vencer
                  FROM movimientos_de_cuenta WHERE mecanico_id = ? AND anulado = 0""",
               (mecanico_id,))
@@ -1399,7 +1399,7 @@ def estado_de_cuenta(mecanico_id):
     c.execute("""SELECT COALESCE(SUM(-importe), 0) AS total, COUNT(*) AS cuantos
                  FROM movimientos_de_cuenta
                  WHERE mecanico_id = ? AND anulado = 0 AND medio = 'Cheque'
-                   AND cheque_fecha > date('now', 'localtime')""", (mecanico_id,))
+                   AND cheque_fecha > date('now', '-3 hours')""", (mecanico_id,))
     ch = c.fetchone()
     return {"saldo": saldo,
             "vencido": max(0.0, min(saldo, saldo - a_vencer)),
@@ -1449,7 +1449,7 @@ def generar_codigo_de_retiro(mecanico_id):
             c.execute("""INSERT INTO codigos_de_retiro (mecanico_id, codigo_hash, salt, vence)
                          VALUES (?, ?, ?, ?)""",
                       (mecanico_id, _hash_del_codigo(codigo, salt), salt, vence))
-    return codigo, vence[:16]
+    return codigo, fecha_legible(vence[:16])   # en la hora de acá, «08/11/2026 19:10»
 
 
 def _codigo_de_retiro_vigente(mecanico_id, codigo):
@@ -1508,7 +1508,7 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
                                    + f", el límite es ${miles(config['limite'], 0)}"
                                    + (f" (más ${miles(margen, 0)} de un permiso)" if margen else "")
                                    + f" y esto suma ${miles(importe, 0)}. {SE_PUEDE_PEDIR_PERMISO}")
-            vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
+            vence = (hoy_aca() + timedelta(days=config["dias_de_plazo"])).isoformat()
             codigo_id = None
             if config["pide_codigo"]:
                 codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo_de_retiro)
@@ -1653,7 +1653,7 @@ def pedir_permiso_de_limite(mecanico_id, importe, motivo, usuario=""):
         ya = c.fetchone()
         if ya:
             return False, (f"Ya hay un pedido sin contestar para esta cuenta: ${miles(ya['importe'], 0)}"
-                           f", de {ya['pedido_por'] or 'alguien'} a las {str(ya['pedido_en'])[11:16]}.")
+                           f", de {ya['pedido_por'] or 'alguien'} a las {hora_corta_aca(ya['pedido_en'])}.")
         c.execute("""INSERT INTO permisos_de_credito (mecanico_id, importe, motivo, pedido_por)
                      VALUES (?, ?, ?, ?)""", (mecanico_id, importe, motivo[:300], quien))
         anotar_cambio("pidió permiso para pasar el límite", "cuenta", mecanico_id,
@@ -1699,7 +1699,7 @@ def contestar_permiso_de_limite(autorizacion_id, autorizar, nota="", importe=Non
                       usuario=quien)
     if autorizar:
         return True, (f"✅ Autorizado: ${miles(fila['importe'], 0)} de más, hasta el "
-                      f"{fila['vence'][8:10]}/{fila['vence'][5:7]} a las {fila['vence'][11:16]}.")
+                      f"{hora_corta_aca(fila['vence'])}.")
     return True, "🚫 No autorizado. Lo ve el que lo pidió."
 
 
@@ -1733,19 +1733,13 @@ def cuantos_permisos_esperando():
     return c.fetchone()[0]
 
 
-def _hora_del_permiso(fecha_y_hora):
-    texto = str(fecha_y_hora or "")
-    return (texto[11:16] if texto[:10] == date.today().isoformat()
-            else f"{texto[8:10]}/{texto[5:7]} {texto[11:16]}")
-
-
 def mostrar_permiso_de_limite(mecanico_id, exceso, clave):
     """Abajo de un «Pasa el límite»: cómo está el permiso de esa cuenta y, si no hay uno
     esperando, el recuadro para pedirlo. `exceso` es lo que se sugiere pedir."""
     ultimo = (permisos_de_limite(mecanico_id=mecanico_id, limite=1) or [None])[0]
     if ultimo and ultimo["esperando"]:
         st.info(f"⏳ Se pidió permiso por ${miles(ultimo['importe'], 0)} a las "
-                f"{_hora_del_permiso(ultimo['pedido_en'])} y todavía no lo contestaron. Lo "
+                f"{hora_corta_aca(ultimo['pedido_en'])} y todavía no lo contestaron. Lo "
                 "autoriza un administrador; cuando lo haga, volvé a tocar el botón.")
         if puede_autorizar_limites():
             mostrar_contestar_permiso(ultimo, f"{clave}_ya")
@@ -1753,12 +1747,12 @@ def mostrar_permiso_de_limite(mecanico_id, exceso, clave):
     if ultimo and ultimo["vigente"]:
         st.success(f"✅ {ultimo['resuelto_por'] or 'Un administrador'} autorizó "
                    f"${miles(ultimo['importe'], 0)} de más, hasta las "
-                   f"{_hora_del_permiso(ultimo['vence'])}. Con esto todavía no alcanza: se "
+                   f"{hora_corta_aca(ultimo['vence'])}. Con esto todavía no alcanza: se "
                    "puede pedir más.")
-    elif ultimo and ultimo["estado"] == "rechazada" and str(ultimo["resuelto_en"] or "")[:10] == \
-            date.today().isoformat():
+    elif ultimo and ultimo["estado"] == "rechazada" and getattr(
+            a_la_hora_de_aca(ultimo["resuelto_en"]), "date", lambda: None)() == hoy_aca():
         st.warning(f"🚫 {ultimo['resuelto_por'] or 'Un administrador'} no lo autorizó a las "
-                   f"{_hora_del_permiso(ultimo['resuelto_en'])}"
+                   f"{hora_corta_aca(ultimo['resuelto_en'])}"
                    + (f": {ultimo['nota']}" if ultimo["nota"] else "") + ".")
     with st.form(f"permiso_limite_{clave}", clear_on_submit=True):
         st.markdown("**🙋 Pedir permiso para pasar el límite**")
@@ -1811,7 +1805,7 @@ def mostrar_permisos_de_limite():
                 st.markdown(f"**{p['cuenta'] or 'Cuenta borrada'}** — "
                             f"${miles(p['importe'], 0)} de más · lo pidió "
                             f"{p['pedido_por'] or 'alguien'} a las "
-                            f"{_hora_del_permiso(p['pedido_en'])}")
+                            f"{hora_corta_aca(p['pedido_en'])}")
                 st.caption(f"Por qué: {p['motivo']}  \nHoy debe \\${miles(_estado['saldo'], 0)} "
                            f"(vencido \\${miles(_estado['vencido'], 0)}), el límite es "
                            f"\\${miles(_config['limite'], 0)} y tiene pedido sin entregar "
@@ -1900,7 +1894,7 @@ def _interes_cobrado_hasta(mecanico_id):
 def interes_por_mora(mecanico_id, tna, hoy=None):
     """{"total", "desde": hasta dónde ya se cobró (o None), "renglones": [{"Cargo", "Venció",
     "Cuenta desde", "Días", "Impago", "Interés"}]}. Ver «INTERÉS POR MORA»."""
-    hoy = hoy or date.today()
+    hoy = hoy or hoy_aca()
     c.execute("""SELECT COALESCE(SUM(-importe), 0) FROM movimientos_de_cuenta
                  WHERE mecanico_id = ? AND anulado = 0 AND importe < 0""", (mecanico_id,))
     pagos = float(c.fetchone()[0])
@@ -1937,7 +1931,7 @@ def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None
     """Carga en la cuenta el interés calculado hoy. (True, aviso) o (False, por qué no). Se
     vuelve a calcular adentro, con el candado, por si alguien cargó otro pago mientras tanto."""
     exigir_nivel("admin", "cargar el interés por mora")
-    hoy = hoy or date.today()
+    hoy = hoy or hoy_aca()
     if not configuracion_de_cuenta(mecanico_id)["cobra_mora"]:
         return False, ("Esta cuenta no tiene recargo por mora: se prende en «⚙️ Configuración "
                        "de la cuenta».")
@@ -1949,7 +1943,11 @@ def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None
         c.execute("""INSERT INTO movimientos_de_cuenta (mecanico_id, fecha, concepto, importe,
                                                         vence, usuario)
                      VALUES (?, ?, ?, ?, ?, ?)""",
-                  (mecanico_id, f"{hoy.isoformat()} {datetime.now():%H:%M:%S}",
+                  # Guardado en UTC (ver «LA HORA DE ACÁ»): el día de acá con la hora de acá,
+                  # pasado a UTC. Con la hora UTC pegada al día de acá, después de las 21 caía
+                  # tres horas corrido y en otro día.
+                  (mecanico_id, utc_de_la_hora_de_aca(datetime.combine(hoy, ahora_aca().time()))
+                   .strftime("%Y-%m-%d %H:%M:%S"),
                    f"{PREFIJO_DEL_INTERES} al {hoy:%d/%m/%Y} — TNA {miles(tna, 2)}%"
                    + (f" ({origen})" if origen else ""),
                    calculo["total"], vence.isoformat(), usuario))

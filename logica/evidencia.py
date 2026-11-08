@@ -1119,7 +1119,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
 
     # Lo que volvió, en los dos sentidos (se pidió A y se llevó B, o al revés). Ver
     # registrar_devolucion(): la que volvió porque no le iba ya está entre los vetos.
-    c.execute("""SELECT d.motivo, d.detalle, d.usuario, substr(d.fecha, 1, 10) AS fecha
+    c.execute("""SELECT d.motivo, d.detalle, d.usuario, date(d.fecha, '-3 hours') AS fecha
                  FROM devoluciones d JOIN productos p ON p.codigo_clean = d.codigo_pedido_clean
                  WHERE (d.producto_id = ? AND p.id = ?) OR (d.producto_id = ? AND p.id = ?)
                  ORDER BY d.fecha DESC""", (id_b, id_a, id_a, id_b))
@@ -1163,7 +1163,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
             "autos de la misma pieza: confirmá la aplicación.")
     # Que una persona la haya rechazado también la contradice, aunque llegue por otro camino:
     # ver anotar_el_respaldo().
-    c.execute("""SELECT revisado_por, substr(fecha, 1, 10) AS fecha, motivo
+    c.execute("""SELECT revisado_por, date(fecha, '-3 hours') AS fecha, motivo
                  FROM equivalencias_revisadas
                  WHERE decision = 'rechazada' AND ((producto_a_id = ? AND producto_b_id = ?)
                                                  OR (producto_a_id = ? AND producto_b_id = ?))""",
@@ -1602,7 +1602,7 @@ def expediente_en_texto(ficha):
     # verificar_el_expediente(). Lo pidió una revisión con ChatGPT («hash del dossier: permite
     # detectar modificaciones posteriores» y «dossier reproducible»).
     cuerpo = "\n".join(renglones) + "\n"
-    return (f"# Expediente de equivalencia — {datetime.now():%d/%m/%Y %H:%M}\n\n" + cuerpo
+    return (f"# Expediente de equivalencia — {ahora_aca():%d/%m/%Y %H:%M}\n\n" + cuerpo
             + f"\n{_HUELLA_DEL_EXPEDIENTE}{_huella_de(cuerpo)}\n")
 
 
@@ -1669,7 +1669,7 @@ def rechazar_por_la_comprobacion(id_a, id_b, que_difiere):
         raise ValueError("Decí qué difiere.")
     a, b = min(id_a, id_b), max(id_a, id_b)
     nota = (f"✋ Rechazada en la mano por {obtener_usuario_actual()} el "
-            f"{datetime.now():%d/%m/%Y}: {que_difiere}")
+            f"{ahora_aca():%d/%m/%Y}: {que_difiere}")
     eliminar_equivalencia(a, b, recordar_rechazo=False)
     marcar_revision([(a, b)], "rechazada", motivo="variante", como="mano")
     anotar_cambio("rechazó en la mano", "equivalencia", f"{a}-{b}", detalle=nota)
@@ -1689,7 +1689,7 @@ def comprobar_en_la_mano(id_a, id_b, como):
         raise ValueError("Escribí qué miraste: la medida, la rosca, la ficha…")
     a, b = min(id_a, id_b), max(id_a, id_b)
     nota = (f"✋ Comprobada en la mano por {obtener_usuario_actual()} el "
-            f"{datetime.now():%d/%m/%Y}: {como}")
+            f"{ahora_aca():%d/%m/%Y}: {como}")
     with db_lock, transaccion():
         c.execute("SELECT nota FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
                   (a, b))
@@ -1703,7 +1703,7 @@ def comprobar_en_la_mano(id_a, id_b, como):
             c.execute("""INSERT INTO equivalencias
                              (producto_a_id, producto_b_id, created_at, verificada, nivel, nota, lote)
                          VALUES (?, ?, datetime('now'), 1, 'Exacta', ?, ?)""",
-                      (a, b, nota, f"COMPROBADA EN LA MANO · {datetime.now():%d/%m/%Y %H:%M}"))
+                      (a, b, nota, f"COMPROBADA EN LA MANO · {ahora_aca():%d/%m/%Y %H:%M}"))
     marcar_revision([(a, b)], "ok", como="mano")
     return nota
 

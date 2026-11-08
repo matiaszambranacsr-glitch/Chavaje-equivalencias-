@@ -86,7 +86,7 @@ if pagina == PAGINAS[2]:
                 if previa:
                     st.warning(
                         f"🔁 Esta misma planilla ya se importó el "
-                        f"**{str(previa['fecha'])[:16]}** como **{previa['marca']}** "
+                        f"**{fecha_legible(str(previa['fecha'])[:16])}** como **{previa['marca']}** "
                         f"({previa['filas_cargadas']} filas). Si la volvés a importar vas a "
                         "revisar de nuevo los mismos vínculos, y los precios que hayas corregido "
                         "a mano desde entonces se pisan con los de esta lista."
@@ -1061,7 +1061,7 @@ if pagina == PAGINAS[2]:
                         _nombre_arch = (os.path.basename(archivo) if isinstance(archivo, str)
                                         else getattr(archivo, "name", "lista"))
                         lote_importacion = (f"{nombre_prov.upper()} · {_nombre_arch} · "
-                                             f"{datetime.now():%d/%m/%Y %H:%M:%S}")
+                                             f"{ahora_aca():%d/%m/%Y %H:%M:%S}")
                         if eq_batch:
                             if cargar_directo:
                                 c.executemany(

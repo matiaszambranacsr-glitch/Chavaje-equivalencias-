@@ -2581,6 +2581,39 @@ for _n in ast.walk(ARBOL):
         reportar("ERROR", _n.lineno, "número con coma de miles («:,»): acá se lee como decimal. "
                                      "Usar miles(n) —o miles(n, 0) para redondear—")
 
+# ============ La hora de acá ============
+# La app guarda todo en UTC y muestra la hora de Argentina (ver «LA HORA DE ACÁ» en
+# logica/base.py). Cada hora que se veía estaba tres horas adelantada, y lo cobrado después de
+# las 21 caía en la caja del día siguiente. Esto controla que no se escape una nueva:
+#   - una hora sacada de la base sin pasarla a la de acá: substr(col, 12, 5);
+#   - date('now', 'localtime'), que da el día UTC: el de acá es date('now', '-3 hours'), y una
+#     marca interna, date('now');
+#   - date.today(), que es el día UTC: hoy_aca();
+#   - la fecha y hora de ahora armada para mostrar con datetime.now(): ahora_aca().
+_HORA_SIN_CONVERTIR = re.compile(r"substr\(\s*[\w.]+\s*,\s*12\s*,\s*5\s*\)", re.I)
+_DIA_UTC = re.compile(r"date\(\s*'now'\s*,\s*'localtime'\s*\)", re.I)
+_MODIFICADOR_DE_ACA = re.compile(r"'(-?\d+) hours'")
+for _n in ast.walk(ARBOL):
+    if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
+        if _HORA_SIN_CONVERTIR.search(_n.value):
+            reportar("ERROR", _n.lineno, "una hora de la base sin pasar a la de acá: "
+                                         "substr(datetime(col, '-3 hours'), 12, 5)")
+        if _DIA_UTC.search(_n.value):
+            reportar("ERROR", _n.lineno, "date('now', 'localtime') es el día UTC: el de acá es "
+                                         "date('now', '-3 hours'); una marca interna, date('now')")
+        for _m in _MODIFICADOR_DE_ACA.finditer(_n.value):
+            if _m.group(1) != "-3":
+                reportar("REVISAR", _n.lineno, f"«'{_m.group(1)} hours'»: la hora de acá es "
+                                               "'-3 hours' (A_LA_HORA_DE_ACA)")
+    if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) == "today"
+            and getattr(_n.func.value, "id", None) == "date"):
+        reportar("ERROR", _n.lineno, "date.today() es el día UTC: usar hoy_aca()")
+    if (isinstance(_n, ast.FormattedValue) and isinstance(_n.value, ast.Call)
+            and getattr(_n.value.func, "attr", None) == "now"
+            and getattr(_n.value.func.value, "id", None) == "datetime"):
+        reportar("ERROR", _n.lineno, "la hora de ahora para mostrar va con ahora_aca(): "
+                                     "datetime.now() es UTC")
+
 # ============ Listas desplegables que hablan en inglés ============
 # Un st.multiselect sin placeholder dice «Choose options», y un st.selectbox que arranca vacío
 # (index=None), «Choose an option»: lo único en inglés de toda la pantalla.

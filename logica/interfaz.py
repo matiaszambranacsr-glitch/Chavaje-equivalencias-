@@ -493,6 +493,8 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-08"
 LO_NUEVO = (
+    ("🕒 Las horas ahora son las de Argentina: antes estaban tres horas adelantadas, y lo cobrado "
+     "después de las 21 caía en la caja del día siguiente.", "💵 Caja"),
     ("✏️ Si la cajera se equivoca, el cobro se corrige: cambiar cómo pagó, o volver la venta a "
      "la caja (sin el descuento, sin el cargo de la cuenta) y cobrarla bien. Cada corrección "
      "queda en el cierre con quién, y te avisa la campanita.",
@@ -1335,7 +1337,7 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "Equivalencias El Chavo - Cotizacion", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"Fecha: {datetime.now():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Fecha: {ahora_aca():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     def limpiar(texto):
@@ -1422,7 +1424,7 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, historial, link_clien
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "Equivalencias El Chavo - Ficha del vehiculo", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"Fecha: {datetime.now():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Fecha: {ahora_aca():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "B", 13)

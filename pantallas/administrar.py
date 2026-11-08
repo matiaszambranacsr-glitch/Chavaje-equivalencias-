@@ -9,7 +9,7 @@ def exportar_configuracion_txt():
     """Junta combos de repuestos, códigos DTC cargados y fabricantes VIN en un solo archivo de texto,
     para respaldo aparte de la base completa o para copiarle la configuración a otra sucursal."""
     lineas = []
-    lineas.append(f"# Exportación de configuración — Equivalencias El Chavo — {datetime.now():%d/%m/%Y %H:%M}")
+    lineas.append(f"# Exportación de configuración — Equivalencias El Chavo — {ahora_aca():%d/%m/%Y %H:%M}")
     lineas.append("")
 
     lineas.append("## COMBOS DE REPUESTOS RELACIONADOS (disparador;item)")
@@ -372,7 +372,7 @@ if pagina == PAGINAS[3]:
                 "pregunta para hacerle al proveedor.",
                 en_expander=True)
             if _chas.get("certificados"):
-                st.caption(f"Cargado el {_chas.get('traido', '')[:16]}: "
+                st.caption(f"Cargado el {fecha_legible(_chas.get('traido', '')[:16])}: "
                            f"{miles(_chas['certificados'])} certificados de "
                            f"{miles(_chas.get('marcas', 0))} marcas. Columnas leídas: "
                            + ", ".join(f"{k} = «{v}»" for k, v in
@@ -1242,7 +1242,7 @@ if pagina == PAGINAS[3]:
                                              key=f"cc_importe_pago_{_mid}")
                 _medio = st.selectbox("Cómo pagó:", MEDIOS_DE_PAGO)
                 _fecha_cheque = st.date_input("Fecha del cheque (si es cheque):",
-                                              value=date.today(), key=f"cc_fecha_cheque_{_mid}",
+                                              value=hoy_aca(), key=f"cc_fecha_cheque_{_mid}",
                                               format="DD/MM/YYYY")
                 _concepto_p = st.text_input("Nota (opcional):", key=f"cc_nota_pago_{_mid}")
                 if st.form_submit_button("💵 Registrar pago"):

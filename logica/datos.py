@@ -619,8 +619,8 @@ def _anotar_el_arranque_desde_copia(conexion, origen):
             "'ultimo_backup_fecha')").fetchall() if r[0]]
         conexion.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES "
                          "('arranque_desde_copia', ?)",
-                         (f"{datetime.now():%Y-%m-%d %H:%M:%S}|{max(fechas, default='')}|"
-                          f"{origen}",))
+                         (datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                          + f"|{max(fechas, default='')}|{origen}",))
         conexion.commit()
     except sqlite3.Error as _err:
         anotar_error("_anotar_el_arranque_desde_copia", _err)

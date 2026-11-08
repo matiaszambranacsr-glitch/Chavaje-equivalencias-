@@ -18,6 +18,7 @@ Buscando «# ===» se salta de una a la otra. El orden va de lo más básico a l
 específico, y las pantallas quedan todas al final:
 
     logica/base.py
+        · LA HORA DE ACÁ
         · CONFIGURACIÓN DE PÁGINA
         · MODO DE VISTA (celular / computadora)
         · PERMISOS ADENTRO DE LAS FUNCIONES Y REGISTRO DE CAMBIOS
@@ -591,7 +592,8 @@ elif st.session_state.get("_restaurado_de_semilla"):
     _arranque = arranque_desde_copia()
     st.info(
         "♻️ La base se restauró sola desde la copia"
-        + (f" del {_arranque['copia']:%d/%m %H:%M}" if _arranque and _arranque["copia"] else "")
+        + (f" del {a_la_hora_de_aca(_arranque['copia']):%d/%m %H:%M}"
+           if _arranque and _arranque["copia"] else "")
         + f" ({miles(_total_productos)} productos). Lo cargado después de esa copia no está: "
         "si tenés un backup descargado más nuevo, restauralo en **Estadísticas → 💾 Backup y "
         "config**."
@@ -710,7 +712,7 @@ if _problemas and _se_muestra_la_salud:
             if _p.get("accion") == "bajar_backup" and es_admin():
                 st.download_button(
                     "⬇️ Bajar un backup ahora", data=generar_backup_sin_fotos,
-                    file_name=f"equivalencias_backup_{datetime.now():%Y%m%d_%H%M}.db",
+                    file_name=f"equivalencias_backup_{ahora_aca():%Y%m%d_%H%M}.db",
                     on_click=marcar_backup_bajado, key=f"bajar_backup_desde_el_aviso_{_i_p}",
                     help="La base entera sin las fotos que se vuelven a bajar solas. Si la app "
                          "se reinicia, se restaura desde Estadísticas → 💾 Backup y config.")

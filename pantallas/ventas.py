@@ -542,8 +542,7 @@ if pagina == PAGINAS[9]:
                 _q[1].metric("Vendió", f"${miles(_cta['total'], 0)}")
                 _q[2].metric("Le devolvieron", f"${miles(_cta['devuelto'], 0)}")
                 if _cta["ventas"]:
-                    st.dataframe([{"#": v["id"], "Cuándo": f"{v['fecha'][8:10]}/{v['fecha'][5:7]} "
-                                                           f"{v['fecha'][11:16]}",
+                    st.dataframe([{"#": v["id"], "Cuándo": fecha_legible(v["fecha"][:16]),
                                    "Cliente": v["cliente"] or "", "Pago": v["forma_de_pago"],
                                    "Total": f"${miles(v['total'] or 0, 0)}"} for v in _cta["ventas"]],
                                  width="stretch", hide_index=True)
@@ -553,8 +552,7 @@ if pagina == PAGINAS[9]:
                 _q[1].metric("Se llevó", f"${miles(_cta['total'], 0)}")
                 _q[2].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")
                 if _cta["entregas"]:
-                    st.dataframe([{"Cuándo": f"{e['resuelto_en'][8:10]}/{e['resuelto_en'][5:7]} "
-                                             f"{e['resuelto_en'][11:16]}",
+                    st.dataframe([{"Cuándo": fecha_legible(e["resuelto_en"][:16]),
                                    "Qué": f"{e['cantidad']}× {e['marca']} {e['codigo_raw']}",
                                    "Importe": f"${miles(e['importe'] or 0, 0)}"}
                                   for e in _cta["entregas"]], width="stretch", hide_index=True)

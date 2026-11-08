@@ -157,7 +157,7 @@ def todo_lo_de_una_patente(patente):
     try:
         c.execute("""SELECT hp.descripcion_pieza AS "Pieza", hp.marca_pieza AS "Marca",
                             hp.codigo_pieza AS "Código", hp.km_instalacion AS "Km",
-                            substr(hp.fecha_instalacion, 1, 10) AS "Cuándo",
+                            date(hp.fecha_instalacion, '-3 hours') AS "Cuándo",
                             p.precio AS "Precio hoy", p.stock AS "Stock"
                      FROM historial_piezas hp
                      LEFT JOIN productos p ON p.id = hp.producto_id
@@ -208,7 +208,7 @@ def repuestos_por_numero_motor(numero):
                              COALESCE(p.descripcion, hp.descripcion_pieza) AS "Descripción",
                              p.precio AS "Precio",
                              p.stock AS "Stock", hp.descripcion_pieza AS "Se puso como",
-                             substr(hp.fecha_instalacion, 1, 10) AS "Cuándo"
+                             date(hp.fecha_instalacion, '-3 hours') AS "Cuándo"
                       FROM historial_piezas hp
                       LEFT JOIN productos p ON p.id = hp.producto_id
                       LEFT JOIN marcas m ON m.id = p.marca_id

@@ -7049,15 +7049,18 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
-## 🕒 La app corre en hora UTC (tres horas adelantada)
+## 🕒 La hora de acá: se guarda en UTC y se muestra en la de Argentina
 
-Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:50» y GitHub la recibió a las **12:56:59 de Argentina**. Streamlit Cloud corre en UTC, así que **cada hora que muestra la app está tres horas adelantada** (la venta de las 10:05 dice 13:05) y **lo que se vende o se cobra después de las 21 cae en la caja del día siguiente**.
+Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:50» y GitHub la recibió a las **12:56:59 de Argentina**. Streamlit Cloud corre en UTC: **cada hora que mostraba la app estaba tres horas adelantada** (la venta de las 10:05 decía 13:05) y **lo vendido o cobrado después de las 21 caía en la caja del día siguiente**.
 
-**No se arregló poniendo la hora de acá en el servidor**, y a propósito: se probó, y unas 40 tablas guardan su hora con `datetime('now')` de SQLite, que es siempre UTC y no se puede cambiar en una tabla que ya existe. Con el servidor en hora de Argentina, esas columnas quedarían en UTC y las de `'localtime'` y `datetime.now()` en hora de acá: cualquier cuenta entre las dos (el tiempo del depósito entre que se pide y se entrega, por ejemplo) daría tres horas de error. Hoy todo es UTC, y aunque la hora que se ve esté corrida, las cuentas cierran.
+**No se arregló poniendo el servidor en hora de acá**, y a propósito (se probó): unas 40 tablas guardan su hora con `datetime('now')` de SQLite, que es siempre UTC y no se puede cambiar en una tabla que ya existe; mezcladas con la hora de acá, cualquier cuenta entre las dos daba tres horas de error (el tiempo del depósito entre que se pide y se entrega, por ejemplo). Así que (sección «LA HORA DE ACÁ» de `logica/base.py`):
 
-**El arreglo correcto** es guardar todo en UTC, como ahora, y convertir a la hora de acá solo al mostrar (119 lugares) y al decidir de qué día es cada cosa (31 cortes por día), con un ayudante para cada cosa y una prueba que lo controle. Queda como primer paso de lo que sigue, porque una factura electrónica no puede salir con la fecha de mañana.
+- **Se guarda todo en UTC**, con TZ fija también en una máquina de acá: `datetime('now')`, `'localtime'` y `datetime.now()` dicen la misma hora, y las cuentas entre dos horas guardadas cierran.
+- **Se muestra en la de acá**: `ahora_aca()` para lo de ahora (los nombres de los lotes, los PDF, los errores de la copia), `a_la_hora_de_aca()` y `hora_corta_aca()` para lo guardado, y en SQL `substr(datetime(col, '-3 hours'), 12, 5)`. `fecha_legible()` —que pasa por todas las tablas de la app— convierte lo que tiene hora; una fecha sola no se corre.
+- **El día es el de acá**: `hoy_aca()` y `date(col, '-3 hours')` en la caja (las ventas, las devoluciones, el arqueo, las correcciones), lo más vendido, lo que se va a terminar, la venta a medio armar «de hoy», los vencimientos de las cuentas y el «hoy 14:32» del depósito, los permisos y los portales. Una fecha sin hora (un vencimiento, un cheque) ya es de acá: se compara tal cual con `hoy_aca()`; pasada por el modificador caería el día anterior.
+- **Las marcas internas** (los cupos diarios de las fuentes de afuera, las fotos diarias de la calidad) siguen en UTC, como se guardan.
 
-Mientras tanto quedaron blindados contra un salto del reloj: el freno de contraseñas nunca espera más que su máximo (sin esto, un intento fallido anotado «en el futuro» trababa la entrada hasta tres horas), y una venta anotada «en el futuro» no cuenta como repetida ni se deja deshacer. `pruebas_de_la_caja.py` lo controla.
+Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), `date('now', 'localtime')`, `date.today()` y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
 
 ## ✏️ Corregir un cobro
 

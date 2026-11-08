@@ -6,7 +6,7 @@ import os
 import re
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 # Los últimos errores que la app se tragó. Hay 142 lugares donde algo puede fallar y la app
@@ -35,6 +35,14 @@ def del_proceso(nombre, crear):
     if nombre not in guardados:
         guardados.setdefault(nombre, crear())
     return guardados[nombre]
+
+
+DIFERENCIA_CON_LA_HORA_DE_ACA = timedelta(hours=-3)
+
+
+def ahora_aca():
+    """La fecha y hora de Argentina, para mostrar (lo que se guarda va con datetime.now())."""
+    return datetime.now() + DIFERENCIA_CON_LA_HORA_DE_ACA
 
 
 MAXIMO_ERRORES_ANOTADOS = 150
@@ -83,7 +91,7 @@ def anotar_error(donde, error, codigo=""):
     fallar de nuevo dentro del manejo del primer error."""
     try:
         _ULTIMOS_ERRORES.append({
-            "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
+            "cuando": ahora_aca().strftime("%d/%m %H:%M:%S"),
             "donde": str(donde)[:60],
             "tipo": type(error).__name__,
             "detalle": tapar_lo_sensible(error)[:200],

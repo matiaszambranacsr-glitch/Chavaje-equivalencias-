@@ -203,8 +203,8 @@ if pagina == PAGINAS[11]:
                               on_change="rerun")
     if _exp_cierre.open:
         with _exp_cierre:
-            _dia_vta = st.date_input("Día:", value=datetime.now().date(), key="venta_dia",
-                                     max_value=datetime.now().date(), format="DD/MM/YYYY")
+            _dia_vta = st.date_input("Día:", value=hoy_aca(), key="venta_dia",
+                                     max_value=hoy_aca(), format="DD/MM/YYYY")
             _dia_txt = _dia_vta.strftime("%Y-%m-%d")
             _del_dia = ventas_del_dia(_dia_txt)
             _validas = [v for v in _del_dia if not v["anulada"]]
