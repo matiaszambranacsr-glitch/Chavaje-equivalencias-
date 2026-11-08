@@ -437,6 +437,67 @@ def probar(L):
              set(ns["SOLAPA_DE_LA_HERRAMIENTA"]) - _de_limpiar), (set(), set()))
     esperar("y la miga la nombra", "→ 💲 Precios →" in ns["miga_hasta"](
         "Precios que no cierran entre equivalentes"), True)
+
+    # 15. EL PRECIO DE RELLENO (ver precios_de_relleno()): IMPERIAL pone 999.999 donde no tiene
+    # precio, en micrómetros, carretillas y tuercas. Un precio repetido de verdad (el 930 de
+    # ILLINOIS, el motor caro que viene en cinco versiones) no es relleno.
+    _clases15 = ["TUERCA", "LLAVE", "DISCO", "PINCEL", "PIPETA", "CARRETILLA", "MICROMETRO",
+                 "VARILLA", "BULON", "ARANDELA"]
+    _lista15 = [(1000 + 37 * i, f"{_clases15[i % 10]} {i}") for i in range(300)]
+    _lista15 += [(999999, f"{_clases15[i % 10]} SIN PRECIO {i}") for i in range(25)]
+    _lista15 += [(930, f"JUNTA {i}") for i in range(30)]
+    _lista15 += [(900000, f"MOTOR COMPLETO {i}") for i in range(25)]
+    esperar("relleno: el 999.999 entre clases distintas, no el repetido de verdad",
+            ns["precios_de_relleno"](_lista15), frozenset({999999.0}))
+    esperar("en una lista chica no se busca", ns["precios_de_relleno"](_lista15[-60:]), frozenset())
+
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('RELLENO15', 'PROVEEDOR')")
+    _m15 = c.lastrowid
+    _ids15 = []
+    for _i, (_p, _d) in enumerate(_lista15):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+                  "VALUES (?, ?, ?, ?, ?)", (f"R15-{_i}", f"R15{_i}", _d, _m15, _p))
+        _ids15.append(c.lastrowid)
+    _pipeta15 = _ids15[300]   # el primero de los de 999.999
+    c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, 4100), (?, 999999)",
+              (_pipeta15, _pipeta15))
+    conn.commit()
+    _en_base15 = [(r["precio"], r["productos"]) for r in
+                  ns["precios_de_relleno_en_la_base"](segundos_de_memoria=0)
+                  if r["marca_id"] == _m15]
+    esperar("en la base: los 25 de 999.999 y nada más", _en_base15, [(999999.0, 25)])
+
+    # El freno de saltos no compara contra el número de relleno: el primer precio de verdad
+    # (3.000, 333 veces menos) se frenaba y quedaba el de mentira.
+    _poner15 = ns["poner_precio_y_stock_de_la_lista"]
+    _frenado15, _ = _poner15(_pipeta15, 3000, None, 200, de_relleno={999999.0})
+    esperar("con el relleno sabido, el precio de verdad entra",
+            (_frenado15, uno("SELECT precio FROM productos WHERE id = ?", _pipeta15)), (None, 3000))
+    _otra15 = _ids15[301]
+    _frenado15b, _ = _poner15(_otra15, 3000, None, 200)
+    esperar("sin saberlo, se frena (es lo que pasaba)", _frenado15b is not None, True)
+
+    # Dejarlos sin precio: los que quedan, y la marca se acuerda para la lista que venga
+    # aunque traiga pocos.
+    _n15 = ns["sacar_precios_de_relleno"](_m15, [999999.0])
+    esperar("quedan sin precio los que tenían el relleno", _n15, 24)
+    esperar("y no los otros", uno("SELECT COUNT(*) FROM productos WHERE marca_id = ? AND precio "
+                                  "IS NULL", _m15), 24)
+    esperar("la marca se acuerda", ns["precios_de_relleno_conocidos"](_m15), frozenset({999999.0}))
+    esperar("ya no aparece en la base",
+            [r for r in ns["precios_de_relleno_en_la_base"]() if r["marca_id"] == _m15], [])
+    # Sin precio y con el 999.999 en el historial: el precio de verdad entra.
+    _frenado15c, _ = _poner15(_ids15[302], 3500, None, 200,
+                              de_relleno=ns["precios_de_relleno_conocidos"](_m15))
+    c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, 999999)",
+              (_ids15[303],))
+    _frenado15d, _ = _poner15(_ids15[303], 3500, None, 200,
+                              de_relleno=ns["precios_de_relleno_conocidos"](_m15))
+    esperar("sin precio, el que llega entra aunque el historial tenga el relleno",
+            (_frenado15c, _frenado15d), (None, None))
+    esperar("la salud lo nombra y lleva a Limpiar",
+            "→ 💲 Precios → 🧹 Precios de relleno" in ns["miga_hasta"]("Precios de relleno de una lista"),
+            True)
     return fallas
 
 

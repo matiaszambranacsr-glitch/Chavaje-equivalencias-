@@ -7035,6 +7035,18 @@ Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 
 
 `pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
 
+## 🧹 El 999.999 de la lista ya no entra como precio
+
+La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no tiene precio: **$999.999 en 490 renglones, $1.437.139,20 en 395, $929.999,10 en 327 y $1.437.498,56 en 80** (el mismo 999.999 pasado por los coeficientes del proveedor). Entraban como precios: la pipeta de baquelita de 3/4 salía $1.437.139 en el buscador, en la venta y en el presupuesto, y 127 de esos productos tienen vínculos, así que aparecían también como equivalentes de otras marcas.
+
+**Cómo se reconoce** (`precios_de_relleno()`): un precio repetido 20 veces o más, en 8 clases de producto o más (la primera palabra de la descripción: MICROMETRO, CARRETILLA, TUERCA…) y que vale 20 veces la mediana de la lista o más. Medido en la base del 12/10: en las otras seis listas el precio más repetido vale a lo sumo 3,8 veces la mediana (el 930 de ILLINOIS se repite 702 veces, pero en tres clases de producto y abajo de la mediana); los de relleno valen de 40 a 62 veces la mediana y caen en 11 a 159 clases. Los cuatro de IMPERIAL entran, ninguno de otra lista.
+
+- **Al importar**: el renglón con ese número entra sin tocar el precio, los productos de la marca que lo tenían de una lista anterior quedan sin precio, y la marca se lo acuerda (una lista parcial no llega a repetirlo 20 veces). El aviso dice cuántos y cuáles.
+- **El freno de saltos** no compara contra él: el primer precio de verdad de la tuerca que estaba a $1.437.139 se frenaba por «333 veces más barato» y se quedaba el de mentira.
+- **Para los que ya están**: Mantenimiento → 🧹 Limpiar y corregir → 💲 Precios → «🧹 Precios de relleno de una lista», con la tabla y el botón «Dejarlos sin precio» (el número queda en el historial de cada producto). La salud lo avisa en rojo.
+
+Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
+
 ## 🗂️ «Limpiar y corregir», en tres solapas
 
 Eran quince herramientas una debajo de la otra, y la que hacía falta podía estar al fondo («🧽 Códigos adivinados», «💲 Dos precios»). Ahora están en tres solapas por tema: **🔗 Vínculos** (puentes, códigos adivinados, unidos a piezas distintas, revisar lo cargado, corte automático…), **💲 Precios** (los que no cierran entre equivalentes y los que vinieron dos veces) y **🔢 Códigos y descripciones** (números sueltos, el «.0» de Excel, columnas pegadas…). Las migas de los avisos nombran la solapa («… → 🧹 Limpiar y corregir → 💲 Precios → …»). Ninguna herramienta cambió por dentro. `pruebas_de_la_plata_y_el_stock.py` (14) controla que cada una tenga su solapa.

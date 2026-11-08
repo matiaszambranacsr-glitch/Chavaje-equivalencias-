@@ -995,6 +995,9 @@ def marcas_con_precios_fuera_de_escala():
 
 def olvidar_la_escala_de_precios():
     _escala_guardada().update(cuando=0.0, datos=None)
+    # Los precios de relleno cambian con lo mismo: ver precios_de_relleno_en_la_base().
+    del_proceso("precios_de_relleno_en_la_base",
+                lambda: {"cuando": 0.0, "datos": None}).update(cuando=0.0, datos=None)
 
 
 def codigos_con_dos_precios_en_la_misma_lista(limite=500):

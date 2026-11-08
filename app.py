@@ -50,6 +50,7 @@ específico, y las pantallas quedan todas al final:
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
         · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO
         · DOS PRODUCTOS DE LA LISTA QUE SIN LOS SIGNOS SE ESCRIBEN IGUAL
+        · PRECIOS DE RELLENO: EL 999.999 QUE EN LA LISTA QUIERE DECIR «SIN PRECIO»
         · QUÉ PIEZA ES CADA FAMILIA DE CÓDIGOS
     logica/busqueda.py
         · BÚSQUEDA DE EQUIVALENCIAS (el corazón de la app)

@@ -497,6 +497,10 @@ LO_NUEVO = (
      "camisa +030 y la -030) ahora entran aparte, cada uno con su precio. Volvé a importar la "
      "lista de IMPERIAL: entran los 210 que faltaban y se corrigen los precios cruzados.",
      "📁 Cargar Excel"),
+    ("🧹 La lista de IMPERIAL pone 999.999 donde no tiene precio, y entraba como precio (1.292 "
+     "productos: una pipeta a 1.437.139). Ahora la importación no lo carga, y los que ya lo "
+     "tienen se dejan sin precio con un botón.",
+     "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir → 💲 Precios"),
     ("🧽 Los «códigos» que una lista vieja sacó de las descripciones (medidas, motores) y se "
      "aprobaron en bloque se pueden cortar: unen una batería con dos soldadoras.",
      "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir → 🔗 Vínculos"),
@@ -1981,6 +1985,9 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("💲 Códigos que vinieron dos veces con precios distintos", 1,
      "La lista traía el mismo código en dos renglones con dos precios, y quedó el último.",
      "precio repetido dos veces lista unidad caja duplicado"),
+    ("🧹 Precios de relleno de una lista", 1,
+     "El $999.999 con que una lista dice «sin precio», cargado como si fuera un precio.",
+     "precio relleno 999999 sin precio consultar absurdo carisimo mentira"),
 
     ("🎯 Puntuar los vínculos para el buscador", 2,
      "Le pone nota a cada vínculo para que el buscador muestre primero los buenos.",
@@ -2048,7 +2055,8 @@ SOLAPA_DE_LA_HERRAMIENTA = {
         "🔁 Equivalencias anotadas dos veces")},
     **{t: SOLAPAS_DE_LIMPIAR[1] for t in (
         "💲 Precios que no cierran entre equivalentes",
-        "💲 Códigos que vinieron dos veces con precios distintos")},
+        "💲 Códigos que vinieron dos veces con precios distintos",
+        "🧹 Precios de relleno de una lista")},
     **{t: SOLAPAS_DE_LIMPIAR[2] for t in (
         "🗑️ Códigos que son solo un número suelto", "🔎 Códigos que el buscador no encuentra",
         "🔢 Códigos que quedaron con '.0'", "🔢 Códigos con el '.0' de Excel",

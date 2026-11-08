@@ -691,10 +691,14 @@ def salto_de_precio_sospechoso(precio_viejo, precio_nuevo, tope_pct=200):
     return False, None
 
 
-def poner_precio_y_stock_de_la_lista(producto_id, precio, stock, tope_salto):
+def poner_precio_y_stock_de_la_lista(producto_id, precio, stock, tope_salto, de_relleno=()):
     """El precio y el stock que trae una fila de la lista, con el freno de saltos. Devuelve
     (frenado, cambio): frenado es (precio con que se comparó, motivo) si el precio NO se pisó
     —el stock sí—; cambio, si el precio cambió (va al historial).
+
+    de_relleno: los precios de relleno de esa marca (ver precios_de_relleno()). No sirven para
+    comparar: el primer precio de verdad de la pipeta que estaba a $1.437.139 se frenaba por
+    «bajó 300 veces», y se quedaba con el de mentira.
 
     Estaba adentro del ciclo de la importación, en la pantalla (lo señaló una revisión con
     Gemini: «la lógica, en logica/»). El candado lo toma quien la llama (la importación ya lo
@@ -708,13 +712,15 @@ def poner_precio_y_stock_de_la_lista(producto_id, precio, stock, tope_salto):
         precio_viejo = _f["precio"] if _f else None
         # Si el precio guardado quedó en 0 (una lista vieja que lo pisó), el freno se compara con
         # el último precio de verdad: si no, cualquier número pasaba sin mirar.
-        precio_ref = precio_viejo
-        if precio is not None and not (precio_viejo and precio_viejo > 0):
+        de_relleno = {float(p) for p in de_relleno or ()}
+        precio_ref = precio_viejo if precio_viejo not in de_relleno else None
+        if precio is not None and not (precio_ref and precio_ref > 0):
             c.execute("SELECT precio FROM historial_precios WHERE producto_id = ? AND precio > 0 "
-                      "ORDER BY id DESC LIMIT 1", (producto_id,))
-            _h = c.fetchone()
-            if _h:
-                precio_ref = _h["precio"]
+                      "ORDER BY id DESC LIMIT 20", (producto_id,))
+            _h = next((h["precio"] for h in c.fetchall() if float(h["precio"]) not in de_relleno),
+                      None)
+            if _h is not None:
+                precio_ref = _h
         raro, motivo = salto_de_precio_sospechoso(precio_ref, precio, tope_salto)
         if raro:
             # El producto se carga igual; lo único que no se pisa es el precio, para no cotizar con
@@ -922,6 +928,180 @@ def es_otro_producto_con_el_mismo_codigo(raw, producto_id, formas):
     if _escrito(raw) != _escrito(del_producto) and _escrito(del_producto) in de_la_lista:
         return del_producto
     return ""
+
+
+# ============================================================================================
+# PRECIOS DE RELLENO: EL 999.999 QUE EN LA LISTA QUIERE DECIR «SIN PRECIO»
+# ============================================================================================
+# La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no tiene precio:
+# $999.999 en 490 renglones, $1.437.139,20 en 395, $929.999,10 en 327 y $1.437.498,56 en 80 (el
+# mismo 999.999 pasado por los coeficientes del proveedor). Entraban como precios: la pipeta de
+# baquelita de 3/4 salía $1.437.139 en el buscador, en la venta y en el presupuesto, y 127 de
+# esos productos tienen vínculos, así que aparecían también como equivalentes de otras marcas.
+# Un precio de verdad se repite entre productos parecidos (930 en 702 renglones de ILLINOIS, de
+# tres clases de producto) y nunca lejos de lo que vale la lista: en las otras seis listas de la
+# base, el precio más repetido es a lo sumo 3,8 veces la mediana. Los de relleno son de 40 a 62
+# veces la mediana y caen en 11 a 159 clases de producto distintas (la primera palabra de la
+# descripción: PIPETAS, DISCO, LLAVE, TUERCA...).
+REPETICIONES_DE_UN_PRECIO_DE_RELLENO = 20
+CLASES_DE_PRODUCTO_DE_UN_PRECIO_DE_RELLENO = 8
+VECES_LA_MEDIANA_DE_UN_PRECIO_DE_RELLENO = 20
+# En una lista chica no hay mediana que valga ni repeticiones que digan algo.
+RENGLONES_PARA_BUSCAR_RELLENO = 200
+# Los que ya se encontraron, por marca: una lista parcial de 50 renglones no llega a repetir
+# veinte veces el 999.999, pero si lo trae, sigue queriendo decir lo mismo.
+CONFIG_PRECIOS_DE_RELLENO = "precios_de_relleno"
+
+
+def _clase_de_producto(descripcion):
+    palabras = str(descripcion or "").upper().split()
+    return palabras[0] if palabras else ""
+
+
+def precios_de_relleno(filas):
+    """Los precios de una lista que no son precios sino su forma de decir «sin precio» (ver
+    arriba). filas: (precio, descripción) de cada renglón. Devuelve un frozenset de precios."""
+    con_precio = [(float(p), d) for p, d in filas
+                  if isinstance(p, (int, float)) and not isinstance(p, bool) and p > 0]
+    if len(con_precio) < RENGLONES_PARA_BUSCAR_RELLENO:
+        return frozenset()
+    precios = sorted(p for p, _ in con_precio)
+    piso = precios[len(precios) // 2] * VECES_LA_MEDIANA_DE_UN_PRECIO_DE_RELLENO
+    veces, clases = collections.Counter(), collections.defaultdict(set)
+    for p, d in con_precio:
+        if p >= piso:
+            veces[p] += 1
+            clases[p].add(_clase_de_producto(d))
+    return frozenset(p for p, n in veces.items()
+                     if n >= REPETICIONES_DE_UN_PRECIO_DE_RELLENO
+                     and len(clases[p]) >= CLASES_DE_PRODUCTO_DE_UN_PRECIO_DE_RELLENO)
+
+
+def _rellenos_guardados():
+    try:
+        datos = json.loads(obtener_config(CONFIG_PRECIOS_DE_RELLENO, "") or "{}")
+        return {int(k): [float(v) for v in vs] for k, vs in datos.items()}
+    except (ValueError, TypeError, AttributeError):
+        return {}
+
+
+def precios_de_relleno_conocidos(marca_id):
+    """Los precios de relleno que ya se le encontraron a esta marca (frozenset)."""
+    return frozenset(_rellenos_guardados().get(int(marca_id), ()))
+
+
+def recordar_precios_de_relleno(marca_id, precios):
+    """Suma estos precios a los de relleno de la marca. guardar_config() toma db_lock y
+    confirma: se llama fuera del candado y fuera de la transacción de una importación."""
+    precios = {float(p) for p in precios}
+    if not precios or marca_id is None:
+        return
+    todos = _rellenos_guardados()
+    ya = set(todos.get(int(marca_id), ()))
+    if precios <= ya:
+        return
+    todos[int(marca_id)] = sorted(ya | precios)
+    guardar_config(CONFIG_PRECIOS_DE_RELLENO, json.dumps({str(k): v for k, v in todos.items()}))
+
+
+def _expr_clase_de_producto(columna="descripcion"):
+    """La primera palabra de la descripción, en SQL: ver _clase_de_producto()."""
+    t = f"UPPER(TRIM(COALESCE({columna}, '')))"
+    return f"CASE WHEN INSTR({t}, ' ') > 0 THEN SUBSTR({t}, 1, INSTR({t}, ' ') - 1) ELSE {t} END"
+
+
+def _rellenos_en_memoria():
+    """Del proceso, como la escala de precios: cambian con lo mismo (una lista, un coeficiente)
+    y olvidar_la_escala_de_precios() olvida los dos."""
+    return del_proceso("precios_de_relleno_en_la_base", lambda: {"cuando": 0.0, "datos": None})
+
+
+def precios_de_relleno_en_la_base(segundos_de_memoria=300):
+    """Los productos que tienen un precio de relleno, por marca y por precio: [{marca_id,
+    marca, precio, productos, ejemplo}], de los que más hay a los que menos. Se recuerda unos
+    minutos: buscarlos son 0,14 s sobre la base real, y lo miran la salud y «🧹 Limpiar»."""
+    guardados = _rellenos_en_memoria()
+    if (guardados["datos"] is not None
+            and time.monotonic() - guardados["cuando"] < segundos_de_memoria):
+        return [dict(x) for x in guardados["datos"]]
+    datos = _buscar_precios_de_relleno_en_la_base()
+    guardados.update(cuando=time.monotonic(), datos=datos)
+    return [dict(x) for x in datos]
+
+
+def _buscar_precios_de_relleno_en_la_base():
+    """Primero los candidatos por SQL (repetidos veinte veces entre ocho clases de producto) y la
+    mediana solo de las marcas que tienen alguno. Más los que ya se le conocen a cada marca,
+    aunque queden pocos."""
+    clase = _expr_clase_de_producto("p.descripcion")
+    c.execute(f"""SELECT p.marca_id, p.precio FROM productos p WHERE p.precio > 0
+                  GROUP BY p.marca_id, p.precio
+                  HAVING COUNT(*) >= ? AND COUNT(DISTINCT {clase}) >= ?""",
+              (REPETICIONES_DE_UN_PRECIO_DE_RELLENO, CLASES_DE_PRODUCTO_DE_UN_PRECIO_DE_RELLENO))
+    candidatos = collections.defaultdict(set)
+    for r in c.fetchall():
+        candidatos[r["marca_id"]].add(float(r["precio"]))
+    rellenos = {}
+    for marca_id, precios in candidatos.items():
+        c.execute("SELECT COUNT(*) FROM productos WHERE marca_id = ? AND precio > 0", (marca_id,))
+        n = c.fetchone()[0]
+        if n < RENGLONES_PARA_BUSCAR_RELLENO:
+            continue
+        c.execute("SELECT precio FROM productos WHERE marca_id = ? AND precio > 0 "
+                  "ORDER BY precio LIMIT 1 OFFSET ?", (marca_id, n // 2))
+        piso = float(c.fetchone()[0]) * VECES_LA_MEDIANA_DE_UN_PRECIO_DE_RELLENO
+        de_la_marca = {p for p in precios if p >= piso}
+        if de_la_marca:
+            rellenos[marca_id] = de_la_marca
+    for marca_id, precios in _rellenos_guardados().items():
+        rellenos.setdefault(marca_id, set()).update(precios)
+    salida = []
+    for marca_id, precios in rellenos.items():
+        for precio in precios:
+            c.execute("SELECT COUNT(*) FROM productos WHERE marca_id = ? AND precio = ?",
+                      (marca_id, precio))
+            n = c.fetchone()[0]
+            if not n:
+                continue
+            c.execute("""SELECT m.nombre AS marca, p.codigo_raw AS codigo, p.descripcion
+                         FROM productos p JOIN marcas m ON m.id = p.marca_id
+                         WHERE p.marca_id = ? AND p.precio = ?
+                         ORDER BY p.codigo_raw LIMIT 1""", (marca_id, precio))
+            f = c.fetchone()
+            salida.append({"marca_id": marca_id, "marca": f["marca"], "precio": precio,
+                           "productos": n,
+                           "ejemplo": f"{f['codigo']} {f['descripcion'] or ''}".strip()})
+    salida.sort(key=lambda x: (-x["productos"], x["marca"], x["precio"]))
+    return salida
+
+
+def vaciar_precios_de_relleno(marca_id, precios):
+    """El UPDATE de sacar_precios_de_relleno(), sin candado ni transacción propios: lo usa
+    también la importación, que ya tiene los dos. Devuelve cuántos productos tocó."""
+    precios = sorted({float(p) for p in precios})
+    if not precios or marca_id is None:
+        return 0
+    huecos = ",".join("?" * len(precios))
+    c.execute(f"UPDATE productos SET precio = NULL WHERE marca_id = ? AND precio IN ({huecos})",
+              (marca_id, *precios))
+    return c.rowcount
+
+
+def sacar_precios_de_relleno(marca_id, precios):
+    """Deja sin precio los productos de esta marca que tienen uno de estos precios de relleno, y
+    los recuerda para las listas que vengan. El número queda en el historial de precios (de
+    ahí se puede ver qué tenía cada uno). Devuelve cuántos productos quedaron sin precio."""
+    exigir_nivel("admin", "sacar los precios de relleno")
+    precios = sorted({float(p) for p in precios})
+    if not precios:
+        return 0
+    with db_lock, transaccion():
+        n = vaciar_precios_de_relleno(marca_id, precios)
+        anotar_cambio("sacó los precios de relleno", "marca", marca_id, None,
+                      {"precios": precios, "productos": n})
+    recordar_precios_de_relleno(marca_id, precios)
+    olvidar_la_escala_de_precios()
+    return n
 
 
 # ============================================================================================

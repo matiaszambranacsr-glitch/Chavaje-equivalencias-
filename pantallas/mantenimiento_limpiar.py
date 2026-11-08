@@ -600,6 +600,38 @@ if pagina == PAGINAS[3]:
                                       "automático quedó apagado.")
                     st.rerun()
             with _sol_precios:
+                # Primero el 999.999: con esos adentro, «Precios que no cierran» se llena de pares
+                # que no tienen ni un precio mal cargado ni un vínculo mal: el precio no existe.
+                _rellenos = precios_de_relleno_en_la_base()
+                if _rellenos:
+                    st.markdown("**🧹 Precios de relleno de una lista**")
+                    explicar(
+                        f"{miles(sum(r['productos'] for r in _rellenos))} producto(s) tienen un "
+                        "precio que no es un precio.",
+                        "Algunas listas ponen \\$999.999 (o ese número pasado por sus coeficientes) "
+                        "donde no tienen precio. Se reconoce porque el mismo número se repite en "
+                        "muchos productos que no tienen nada que ver entre sí —micrómetros, "
+                        "carretillas, tuercas— y vale decenas de veces lo que vale el resto de la "
+                        "lista.\n\nDejarlos sin precio no borra nada: el número queda en el "
+                        "historial de cada producto. Y las listas que vengan de esa marca ya no lo "
+                        "cargan."
+                    )
+                    st.dataframe([{"Marca": r["marca"], "Precio": formato_precio(r["precio"]),
+                                   "Productos": miles(r["productos"]), "Por ejemplo": r["ejemplo"]}
+                                  for r in _rellenos], width="stretch", hide_index=True)
+                    if candado("dejar sin precio los precios de relleno",
+                               st.button("🧹 Dejarlos sin precio", key="btn_sacar_precios_de_relleno"),
+                               "sacar_precios_de_relleno"):
+                        _por_marca_r = collections.defaultdict(list)
+                        for _r in _rellenos:
+                            _por_marca_r[_r["marca_id"]].append(_r["precio"])
+                        _n_r = sum(sacar_precios_de_relleno(_m, _ps)
+                                   for _m, _ps in _por_marca_r.items())
+                        invalidar_salud()
+                        avisar("success", f"{miles(_n_r)} producto(s) quedaron sin precio. Ponéselo a "
+                                          "mano cuando lo vendas, o esperá la próxima lista.")
+                        st.rerun()
+                    st.markdown("---")
                 st.markdown("**💲 Precios que no cierran entre equivalentes**")
                 explicar(
                     "Dos repuestos que hacen lo mismo pueden costar distinto según la marca, pero no ocho "

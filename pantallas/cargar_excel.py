@@ -747,6 +747,19 @@ if pagina == PAGINAS[2]:
                         # Los que ya entraron aparte por escribirse igual que otro sin los
                         # signos: ver codigo_de_la_variante().
                         _variantes_de_la_lista = variantes_cargadas(prov_id)
+                        # El 999.999 con que la lista dice «sin precio» (ver
+                        # precios_de_relleno()), más los que ya se le conocían a la marca: una
+                        # lista parcial no llega a repetirlo veinte veces.
+                        _de_relleno = set(precios_de_relleno_conocidos(prov_id))
+                        if idx_precio is not None:
+                            _de_relleno |= {
+                                round(p * _coef_lista, 2) if _coef_lista != 1 else p
+                                for p in precios_de_relleno(
+                                    (leer_numero(f[idx_precio]) if idx_precio < len(f) else None,
+                                     valor_o_vacio(f[idx_desc])
+                                     if idx_desc is not None and idx_desc < len(f) else "")
+                                    for f in filas_datos)}
+                        precios_de_relleno_de_la_lista = collections.Counter()
 
                         for n, fila in enumerate(filas_datos):
                             def celda(idx):
@@ -807,6 +820,9 @@ if pagina == PAGINAS[2]:
                                 precio_fila = None
                             if precio_fila is not None and _coef_lista != 1:
                                 precio_fila = round(precio_fila * _coef_lista, 2)
+                            if precio_fila is not None and precio_fila in _de_relleno:
+                                precios_de_relleno_de_la_lista[precio_fila] += 1
+                                precio_fila = None
                             stock_fila = leer_numero(celda(idx_stock)) if idx_stock is not None else None
 
                             # El código de barras de esta fila, si la lista lo trae. Va pegado
@@ -871,7 +887,8 @@ if pagina == PAGINAS[2]:
                                         _precio_en_esta_lista.setdefault(pid_nuevo, precio_fila)
                                     # El freno de saltos: ver poner_precio_y_stock_de_la_lista().
                                     _frenado, _cambio = poner_precio_y_stock_de_la_lista(
-                                        pid_nuevo, precio_fila, stock_fila, tope_salto)
+                                        pid_nuevo, precio_fila, stock_fila, tope_salto,
+                                        de_relleno=_de_relleno)
                                     precios_actualizados += _cambio
                                     if _frenado:
                                         precios_frenados.append({
@@ -1005,7 +1022,12 @@ if pagina == PAGINAS[2]:
                             (nombre_prov.upper(), getattr(archivo, "name", str(archivo)),
                              cargados, omitidos, _huella, lote_importacion)
                         )
+                        # Los que ya tenían el número de relleno de una lista anterior quedan sin
+                        # precio: la lista dice que no lo tienen. Ver precios_de_relleno().
+                        sin_precio_por_relleno = vaciar_precios_de_relleno(prov_id, _de_relleno)
 
+                    # Afuera de la transacción: guardar_config() toma el candado y confirma.
+                    recordar_precios_de_relleno(prov_id, _de_relleno)
                     progreso.empty()
 
                     # CADA NÚMERO CON SU NOMBRE. 'cargados' NO es «filas leídas»: es la
@@ -1229,6 +1251,22 @@ if pagina == PAGINAS[2]:
                             "escribí el código con sus signos. Ejemplos: "
                             + ", ".join(choques_de_codigo[:5])
                         )
+                    if precios_de_relleno_de_la_lista or sin_precio_por_relleno:
+                        _partes_relleno = []
+                        if precios_de_relleno_de_la_lista:
+                            _partes_relleno.append(
+                                f"{miles(sum(precios_de_relleno_de_la_lista.values()))} renglón(es) "
+                                "traían un **precio de relleno**, el número con que la lista dice "
+                                "«sin precio» ("
+                                + ", ".join(f"{formato_precio(p, en_markdown=True)} en {miles(n)}"
+                                            for p, n in precios_de_relleno_de_la_lista.most_common(4))
+                                + "): entraron sin tocar el precio.")
+                        if sin_precio_por_relleno:
+                            _partes_relleno.append(
+                                f"{miles(sin_precio_por_relleno)} producto(s) que lo tenían de una "
+                                "lista anterior quedaron **sin precio**.")
+                        st.warning("🧹 " + " ".join(_partes_relleno)
+                                   + " Ponelo a mano antes de venderlos.")
                     if precios_en_cero:
                         st.caption(
                             f"🧹 {miles(precios_en_cero)} fila(s) traían el precio en 0 o negativo "

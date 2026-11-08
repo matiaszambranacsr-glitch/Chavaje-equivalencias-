@@ -71,7 +71,8 @@ def del_proceso(nombre, crear):
 # aparece uno nuevo sin decidir de cuál es.
 MEMORIAS_DE_LA_BASE = ("autos_contra_el_catalogo", "autos_del_motor", "cobertura_del_catalogo",
                        "cuenta_de_palabras", "indice_de_busqueda",
-                       "escala_de_precios", "marca_del_modelo", "marcas_con_chas", "red_de_equivalencias",
+                       "escala_de_precios", "marca_del_modelo", "marcas_con_chas",
+                       "precios_de_relleno_en_la_base", "red_de_equivalencias",
                        "salud_compartida")
 MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     # Candados, sesiones con los sitios de afuera, lo bajado de internet y lo que se midió.

@@ -851,6 +851,20 @@ def diagnostico_de_salud():
                   "Casi seguro la lista necesita un coeficiente o está vieja: hasta "
                   "corregirlo, se cotiza mal.",
                   f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista")
+        # Antes que los pares que no cierran: con el 999.999 adentro, muchos de esos pares
+        # no tienen ni un precio mal ni un vínculo mal (ver precios_de_relleno()).
+        _rellenos = precios_de_relleno_en_la_base()
+        if _rellenos:
+            _por_marca_r = collections.Counter()
+            for _r in _rellenos:
+                _por_marca_r[_r["marca"]] += _r["productos"]
+            sumar("alto", f"{miles(sum(_por_marca_r.values()))} producto(s) con un precio de "
+                          "relleno",
+                  f"La lista de {', '.join(_por_marca_r)} pone 999.999 (o ese número pasado por "
+                  "sus coeficientes) donde no tiene precio, y entró como si fuera un precio: "
+                  f"«{_rellenos[0]['ejemplo'][:40]}» sale {miles(_rellenos[0]['precio'], 0)}. "
+                  "Se venden y se cotizan con ese número.",
+                  miga_hasta("Precios de relleno de una lista"))
         _dos = len(codigos_con_dos_precios_en_la_misma_lista())
         if _dos:
             sumar("medio", f"{miles(_dos)} código(s) vinieron dos veces en la lista con precios "
