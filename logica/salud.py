@@ -436,18 +436,17 @@ def diagnostico_de_salud():
             # Y lo que se puede hacer HOY, en dos toques: lo otro pide entrar a Streamlit o a
             # GitHub, y en 26 días no se hizo. Ver marcar_backup_bajado().
             _bajado = obtener_config("ultimo_backup_bajado", "")
+            # Corto y en el orden en que se lee en el celular: qué pasa, qué lo arregla, qué
+            # hacer hoy. Eran nueve renglones en una pantalla de 390 px (se vio con capturas).
             sumar_tecnico("alto", "🔓 La copia de tu base NO SE ESTÁ SUBIENDO: sin cifrar no va "
                           "a un repositorio público",
                   "Frenada desde el "
                   + fecha_legible(obtener_config("copia_frenada_sin_cifrar", "")[:19])
                   + (f"; la última copia que subió es del {_ultima_buena}" if _ultima_buena
                      else "") + ". Si la app se reinicia (también al publicar una versión "
-                  "nueva), arranca desde esa copia y lo cargado después se pierde. Agregá en los "
-                  "secretos clave_copia = \"una frase larga\" (en Backup y config está cómo) o "
-                  "poné el repositorio en privado. Las copias viejas siguen en el historial de la "
-                  "rama «copia-de-seguridad»: con el repositorio privado ya no se ven. "
-                  "Mientras tanto, lo único que protege lo cargado es un backup bajado a tu "
-                  "compu (🪶 sin fotos alcanza; si la app se reinicia, se restaura desde ahí): "
+                  "nueva), vuelve a esa copia y se pierde lo cargado después. **Lo arregla** "
+                  "clave_copia en los secretos (en Backup y config está cómo) o el repositorio "
+                  "en privado. **Hoy**: bajá un backup con el botón de abajo; "
                   + (f"el último que bajaste es del {fecha_legible(_bajado)}." if _bajado
                      else "no bajaste ninguno."),
                   miga_hasta("Backup y config"), accion="bajar_backup")

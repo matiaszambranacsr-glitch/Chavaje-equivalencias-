@@ -130,7 +130,7 @@ def probar(L):
     ns["guardar_config"]("copia_frenada_sin_cifrar", "2026-10-12 15:56:50")
 
     def _frenada():
-        return [p["detalle"].split("Mientras tanto")[-1] for p in ns["diagnostico_de_salud"]()
+        return [p["detalle"].split("**Hoy**")[-1] for p in ns["diagnostico_de_salud"]()
                 if "NO SE ESTÁ SUBIENDO" in p["titulo"]]
     esperar("frenada y sin backup bajado: lo dice", [("no bajaste ninguno" in d) for d in _frenada()],
             [True])
