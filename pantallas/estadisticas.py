@@ -1170,10 +1170,13 @@ a traer solas desde Administrar → Mantenimiento.
                 explicar(
                     "Cuando entran pendientes nuevos, la app descarta sola lo que el análisis da "
                     "🔴 casi seguro mal y los kits con su pieza. Nunca aprueba nada.",
-                    "Es lo más grande de la cola: en la copia de la base real, 4.187 de los 7.827 "
-                    "pendientes salen 🔴 y 241 son un kit con la pieza que trae adentro. Y el 🔴 "
-                    "es de fiar: de los 20.037 vínculos que se aprobaron a mano, el análisis pone "
-                    "en 🔴 a 10 (0,05 %).\n\n"
+                    "Es lo más grande de la cola: en la copia de la base del 12/10, 4.416 de los "
+                    "7.827 pendientes salen 🔴 y 285 son un kit con la pieza que trae adentro "
+                    "(«👀 Ver qué descartaría» dice los de hoy). Y el 🔴 es de fiar: de los "
+                    "20.037 vínculos que se aprobaron a mano, el análisis pone en 🔴 a 10 "
+                    "(0,05 %). El motivo más común, «cilindradas distintas», se miró de a uno: "
+                    "son juntas de tapa de otro motor y sensores de otro auto (el del Fiat Marea "
+                    "contra el del Audi A3).\n\n"
                     "Lo que descarta queda anotado como rechazado por «🤖 la app» —no vuelve con "
                     "la próxima lista— y no cuenta para lo que la app aprende de tus decisiones. "
                     "Se puede devolver todo a la cola con un toque. Prenderlo, apagarlo y "
