@@ -793,6 +793,18 @@ def probar(L):
              all(x.endswith(",pendiente: todavía no es una equivalencia")
                  for x in pend.splitlines()[1:]) and len(pend.splitlines()) > 1), (True, True))
     esperar("el LEEME lo explica", "solo\n«confirmada»" in leeme, True)
+    # Lo que una planilla tomaría por fórmula viaja como texto (ver celda_segura_para_planilla()):
+    # una descripción «=HYPERLINK(…)» de una lista ajena, con un apóstrofo; el «-», no.
+    _formula = producto("FORMULA1", '=HYPERLINK("http://x","ver")', fispa)
+    _negativo = producto("-030", "-1 MM SOBREMEDIDA", fispa)
+    conn.commit()
+    with zipfile.ZipFile(io.BytesIO(ns["exportar_catalogo_zip"]()[0])) as z:
+        _prods = {f["id"]: f for f in csv.DictReader(
+            io.StringIO(z.read("productos.csv").decode("utf-8-sig")))}
+    esperar("en el CSV, la fórmula como texto; el «-» como estaba",
+            (_prods[str(_formula)]["descripcion"], _prods[str(_negativo)]["descripcion"],
+             _prods[str(_negativo)]["codigo_raw"]),
+            ('\'=HYPERLINK("http://x","ver")', "-1 MM SOBREMEDIDA", "-030"))
 
     # 35. El tablero de calidad.
     tablero = ns["tablero_de_calidad"](minimo_por_grupo=1)

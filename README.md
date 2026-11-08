@@ -7035,6 +7035,10 @@ Con la app de verdad, la copia de la base del 12/10 y la lista del 18/08: tarda 
 
 `pruebas_de_la_sesion.py` (2d) y `pruebas_de_la_precision.py` (8) lo controlan.
 
+## 🔒 El CSV del catálogo no lleva fórmulas
+
+Excel, al abrir un CSV, calcula lo que empieza con «=», «+» o «@» —«=HYPERLINK(…)»—, y las descripciones y los códigos del catálogo exportado vienen de las listas de los proveedores. El Excel de los resultados ya lo protegía (lo que empieza con «=» se guarda como texto); el CSV del catálogo, no. Ahora esas celdas viajan con un apóstrofo adelante, que la planilla no muestra. En la base de hoy no hay ninguna; el «-» no se toca, porque así empiezan los números negativos y algún código de verdad. `pruebas_de_la_precision.py` (34) lo controla.
+
 ## 👀 Ver qué descartaría el descarte automático, antes de prenderlo
 
 «🤖 Que la app descarte sola lo casi seguro mal» está apagado desde que existe: se explicaba con números y nadie lo prendió. Ahora, apagado, trae «👀 Ver qué descartaría»: pasa cada lista de la cola por el mismo análisis que usa al descartar —sin tocar nada— y dice cuántos se irían, por qué y diez ejemplos. Con la copia de la base del 12/10, en 5 s: 4.416 🔴 y 285 kits con su pieza; los motivos más comunes, «cilindradas distintas» (1.397), «juegos distintos» (653), «modelos distintos» (596) y «los precios no cierran» (387); y ejemplos como «distinta cantidad de cilindros: 4 vs 3» o «largo de cable distinto (46 vs 68 cm)». `pruebas_de_la_precision.py` (80) lo controla: la vista previa ve lo que se iría y no saca nada de la cola.

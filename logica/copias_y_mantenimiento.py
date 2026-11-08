@@ -1690,6 +1690,20 @@ COLUMNAS_QUE_NUNCA_SE_EXPORTAN = {"password_hash", "salt", "imagen_url", "imagen
                                   "imagen_orb_blob", "busqueda", "imagen_data", "firma_blob"}
 
 
+# LO QUE UNA PLANILLA TOMARÍA POR FÓRMULA. Excel, al abrir un CSV, calcula lo que empieza con
+# «=», «+» o «@» («=HYPERLINK(…)», «@SUMA(…)»), y las descripciones y los códigos vienen de las
+# listas de los proveedores. En la base de hoy no hay ninguno; si una lista los trae, viajan
+# con un apóstrofo adelante, que la planilla no muestra y que deja el texto como texto. El «-»
+# no: así empiezan los números negativos y algún código de verdad.
+_EMPIEZAN_UNA_FORMULA = ("=", "+", "@")
+
+
+def celda_segura_para_planilla(valor):
+    if isinstance(valor, str) and valor.lstrip()[:1] in _EMPIEZAN_UNA_FORMULA:
+        return "'" + valor
+    return valor
+
+
 def exportar_catalogo_zip():
     """(bytes del ZIP, {archivo: filas}). Un CSV por tabla (UTF-8 con BOM, para que Excel lea
     los acentos), más un LEEME."""
@@ -1729,7 +1743,7 @@ def exportar_catalogo_zip():
                     extra = ["pendiente: todavía no es una equivalencia"]
                 else:
                     extra = []
-                escritor.writerow(list(fila) + extra)
+                escritor.writerow([celda_segura_para_planilla(v) for v in fila] + extra)
                 n += 1
             z.writestr(f"{archivo}.csv", "\ufeff" + texto.getvalue())
             cuantas[archivo] = n
@@ -1746,8 +1760,10 @@ def exportar_catalogo_zip():
         n = 0
         for r in c.fetchall():
             escritor.writerow([r["producto_a_id"], r["producto_b_id"],
-                               "rechazada: NO son equivalentes", r["motivo"] or "",
-                               r["revisado_por"] or "", r["fecha"] or ""])
+                               "rechazada: NO son equivalentes",
+                               celda_segura_para_planilla(r["motivo"] or ""),
+                               celda_segura_para_planilla(r["revisado_por"] or ""),
+                               r["fecha"] or ""])
             n += 1
         z.writestr("rechazadas.csv", "\ufeff" + texto.getvalue())
         cuantas["rechazadas"] = n
