@@ -499,7 +499,9 @@ LO_NUEVO = (
      "📁 Cargar Excel"),
     ("🧽 Los «códigos» que una lista vieja sacó de las descripciones (medidas, motores) y se "
      "aprobaron en bloque se pueden cortar: unen una batería con dos soldadoras.",
-     "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir"),
+     "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir → 🔗 Vínculos"),
+    ("🗂️ «Limpiar y corregir» está en tres solapas: vínculos, precios, y códigos y "
+     "descripciones.", "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir"),
     ("👀 Antes de prender el descarte automático, «Ver qué descartaría» muestra cuántos, por qué "
      "y ejemplos.", "📊 Estadísticas → 🔗 Equivalencias sugeridas"),
     ("📏 El coeficiente de la lista trae ejemplos de la misma pieza en otro proveedor (TARANTO: "
