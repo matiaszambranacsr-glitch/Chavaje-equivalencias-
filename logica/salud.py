@@ -504,6 +504,20 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
 
+    # LOS COBROS CORREGIDOS HOY, al administrador (ver «CORREGIR UN COBRO» en logica/ventas.py):
+    # cambiar «Efectivo» por «Transferencia» también tapa un faltante del cajón.
+    try:
+        _corregidos = cobros_corregidos()
+        if _corregidos:
+            sumar("bajo", f"✏️ Hoy se corrigieron {len(_corregidos)} cobro(s)",
+                  "; ".join(f"#{x['venta']}: {x['que']} ({x['quien']}, {x['hora']})"
+                            for x in _corregidos[:3])
+                  + (f" y {len(_corregidos) - 3} más" if len(_corregidos) > 3 else "")
+                  + ". Mirá que el arqueo cierre.",
+                  f"{miga_hasta('💵 Caja')} → 📋 Ventas y cierre de caja", solo_admin=True)
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/cobros", _err)
+
     # Los vínculos ya cargados con evidencia en contra. Va arriba porque es el único punto de
     # esta lista que describe algo que la búsqueda está devolviendo MAL ahora mismo: no es
     # trabajo pendiente, es un resultado equivocado que alguien ya puede estar leyendo. El

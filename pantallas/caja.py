@@ -235,13 +235,17 @@ if pagina == PAGINAS[11]:
                 _k2.caption("Por quién atendió:")
                 _k2.dataframe([{"Atendió": u, "Ventas": n, "Total": f"${miles(t, 0)}"}
                                for u, n, t in _caja["por_usuario"]], width="stretch", hide_index=True)
+                _corregidas = {int(x["venta"]) for x in cobros_corregidos(_dia_txt)
+                               if str(x["venta"]).isdigit()}
                 _filas_dia = [{"#": v["id"], "Hora": v["hora"], "Total": v["total"] or 0,
                                "Pago": como_se_pago(v) if v["cobrada"] else "⏳ en la caja",
                                "Para": v["cuenta"] or v["cliente"] or "",
                                "Patente": v["patente"] or "", "Km": v["km"] or "",
                                "Qué": ", ".join(f"{i['cantidad']}× {i['marca']} {i['codigo']}"
                                                 for i in v["items"]),
-                               "Estado": "🚫 anulada" if v["anulada"] else "",
+                               "Estado": ("🚫 anulada" if v["anulada"]
+                                          else "✏️ corregido" if v["id"] in _corregidas
+                                          else ""),
                                "Atendió": v["usuario"] or "",
                                "Cobró": v["cobrada_por"] or ""} for v in _del_dia]
                 if _filas_dia:
@@ -280,6 +284,68 @@ if pagina == PAGINAS[11]:
                         _ok_an, _texto_an = anular_venta(_anular)
                         avisar("success" if _ok_an else "warning", _texto_an)
                         st.rerun()
+                # CORREGIR UN COBRO (ver esa sección en logica/ventas.py): la cajera marcó otra
+                # forma de pago, cobró la venta equivocada o se equivocó en el descuento.
+                _cobradas = {v["id"]: v for v in _validas if v["cobrada"]}
+                if _cobradas:
+                    st.markdown("**✏️ Corregir un cobro**")
+                    _co1, _co2 = cols([3, 2])
+                    _corregir = _co1.selectbox(
+                        "Venta:", list(_cobradas), key="cobro_a_corregir",
+                        # Sin la forma de pago en el nombre: el navegador no le cambia el texto
+                        # a la opción elegida, y después de corregirla seguía diciendo la vieja
+                        # (se vio en una captura). Va abajo, al día.
+                        format_func=lambda i: (f"#{i} · {_cobradas[i]['hora']} · "
+                                               f"${miles(_cobradas[i]['total'] or 0, 0)}"
+                                               + (f" · {_cobradas[i]['cuenta'] or _cobradas[i]['cliente']}"
+                                                  if _cobradas[i]["cuenta"] or _cobradas[i]["cliente"]
+                                                  else "")))
+                    _que_corregir = _co2.radio("Qué hay que corregir:",
+                                               ["💳 Cómo pagó", "↩️ Volverla a la caja"],
+                                               key="cobro_que_corregir", horizontal=True)
+                    _la_c = _cobradas[_corregir]
+                    st.caption(f"Ahora dice: **{como_se_pago(_la_c) or 'sin decir'}**"
+                               + (f" · la cobró {_la_c['cobrada_por']}" if _la_c["cobrada_por"]
+                                  else ""))
+                    _puede_c, _por_que_c = puede_corregir_el_cobro(_corregir)
+                    if not _puede_c:
+                        st.caption(f"🔒 {_por_que_c}")
+                    elif _que_corregir == "💳 Cómo pagó":
+                        _f1, _f2, _f3 = cols([2, 1, 1])
+                        # Arranca en la que tiene: se ve qué se cambia. Una clave por venta, para
+                        # que al elegir otra arranque en la suya.
+                        _forma_c = _f1.selectbox(
+                            "Pagó con:", FORMAS_DE_PAGO, key=f"cobro_forma_nueva_{_corregir}",
+                            index=(FORMAS_DE_PAGO.index(_la_c["forma_de_pago"])
+                                   if _la_c["forma_de_pago"] in FORMAS_DE_PAGO else 0))
+                        _cuotas_c = _f2.selectbox("Cuotas:", CUOTAS_POSIBLES,
+                                                  key=f"cobro_cuotas_nuevas_{_corregir}",
+                                                  disabled=_forma_c != "Tarjeta de crédito")
+                        if candado("corregir cómo se pagó",
+                                   _f3.button("💾 Corregir", key="cobro_corregir_forma",
+                                              width="stretch"),
+                                   "cobro_corregir_forma_candado", nivel="empleado"):
+                            _ok_c, _texto_c = cambiar_como_se_pago(_corregir, _forma_c, _cuotas_c)
+                            avisar("success" if _ok_c else "warning", _texto_c)
+                            st.rerun()
+                    else:
+                        st.caption("Vuelve a esperar en la caja como antes de cobrarla: sin el "
+                                   "descuento y, si estaba a cuenta, sin el cargo de la cuenta. El "
+                                   "stock no se toca. Después se cobra como corresponde.")
+                        if candado("volver una venta a la caja",
+                                   st.button("↩️ Volverla a la caja", key="cobro_volver_a_la_caja"),
+                                   "cobro_volver_a_la_caja_candado", nivel="empleado"):
+                            _ok_c, _texto_c = volver_a_la_caja(_corregir)
+                            avisar("success" if _ok_c else "warning", _texto_c)
+                            st.rerun()
+                # Lo corregido, a la vista de quien cierra la caja: quién, cuándo y qué.
+                _corregidos = cobros_corregidos(_dia_txt)
+                if _corregidos:
+                    st.caption(f"✏️ Cobros corregidos ese día ({len(_corregidos)}), con quién y "
+                               "cuándo:")
+                    st.dataframe([{"Hora": x["hora"], "Venta": f"#{x['venta']}", "Qué": x["que"],
+                                   "Corrigió": x["quien"]} for x in _corregidos],
+                                 width="stretch", hide_index=True)
             # EL ARQUEO: lo que hay en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
             st.markdown("**🧮 Arqueo: ¿cuánto efectivo hay en el cajón?**")
             st.caption(f"Según las ventas en efectivo (menos lo devuelto), tendría que haber "

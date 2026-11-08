@@ -1485,3 +1485,160 @@ def deshacer_mi_venta(venta_id):
     anotar_cambio("deshizo su venta", "venta", venta_id, None, None,
                   "la grabó por error y la deshizo enseguida")
     return True, texto, items
+
+
+# ============================================================================================
+# CORREGIR UN COBRO
+# ============================================================================================
+# Lo pidió el dueño: «poder modificar si la cajera pasa algo mal, ya sea que se equivoca en el
+# medio de pago o demás». Cobrada, una venta no se tocaba más: si la cajera marcaba «Efectivo»
+# y era una transferencia, el cierre decía que en el cajón tenía que haber plata que no estaba,
+# y el arqueo daba un faltante que no era. Dos correcciones:
+#   - Cambiar cómo pagó (cambiar_como_se_pago()): no cambia el monto, solo por dónde entró.
+#   - Volverla a la caja (volver_a_la_caja()): cobró la venta equivocada, se equivocó en el
+#     descuento, o iba a cuenta y la cobró (o al revés). Vuelve a esperar como antes de
+#     cobrarla —sin el descuento y, si estaba a cuenta, con el cargo de la cuenta anulado— y se
+#     cobra bien.
+# El empleado corrige los cobros del día; el administrador, cualquiera. Con devoluciones, no:
+# la plata devuelta ya salió por esa forma de pago. Y cada corrección queda en el registro con
+# el antes y el después, y en el cierre de caja de ese día, a la vista: cambiar «Efectivo» por
+# «Transferencia» también es la forma de tapar un faltante del cajón.
+CORRECCIONES_DEL_COBRO = ("corrigió cómo se pagó", "volvió una venta a la caja")
+
+
+def puede_corregir_el_cobro(venta_id):
+    """(sí o no, por qué no)."""
+    c.execute("""SELECT COALESCE(cobrada, 1) AS cobrada, COALESCE(anulada, 0) AS anulada,
+                        substr(COALESCE(cobrada_en, fecha), 1, 10) AS dia
+                 FROM ventas WHERE id = ?""", (venta_id,))
+    v = c.fetchone()
+    if not v:
+        return False, "Esa venta no existe."
+    if v["anulada"]:
+        return False, "Esa venta está anulada."
+    if not v["cobrada"]:
+        return False, "Todavía espera en la caja: no hay cobro que corregir."
+    if c.execute("SELECT 1 FROM ventas_devoluciones WHERE venta_id = ? LIMIT 1",
+                 (venta_id,)).fetchone():
+        return False, ("Tiene devoluciones: la plata devuelta ya salió por esa forma de pago, y "
+                       "no se corrige.")
+    if es_admin():
+        return True, ""
+    if v["dia"] != date.today().isoformat():
+        return False, "Se cobró otro día: la corrige el administrador."
+    return True, ""
+
+
+def cambiar_como_se_pago(venta_id, forma_de_pago, cuotas=1):
+    """Corrige la forma de pago (y las cuotas) de una venta cobrada. El monto no cambia. A cuenta
+    no: eso es volverla a la caja y ponerla a cuenta, que mira el límite. (ok, texto)."""
+    exigir_nivel("empleado", "corregir cómo se pagó una venta")
+    if forma_de_pago not in FORMAS_DE_PAGO:
+        return False, "Elegí cómo pagó."
+    try:
+        cuotas = int(cuotas or 1) if forma_de_pago == "Tarjeta de crédito" else 1
+    except (TypeError, ValueError):
+        return False, "Las cuotas tienen que ser un número."
+    if cuotas not in CUOTAS_POSIBLES:
+        return False, "Esa cantidad de cuotas no está."
+    puede, por_que = puede_corregir_el_cobro(venta_id)
+    if not puede:
+        return False, por_que
+    with db_lock, transaccion():
+        c.execute("SELECT forma_de_pago, COALESCE(cuotas, 1) AS cuotas, movimiento_id "
+                  "FROM ventas WHERE id = ?", (venta_id,))
+        antes = c.fetchone()
+        if antes["movimiento_id"] or antes["forma_de_pago"] == A_CUENTA:
+            return False, ("Está a cuenta: volvela a la caja y cobrala como corresponde (así "
+                           "se anula el cargo de la cuenta).")
+        if antes["forma_de_pago"] == forma_de_pago and antes["cuotas"] == cuotas:
+            return False, "Ya estaba así: no se cambió nada."
+        c.execute("""UPDATE ventas SET forma_de_pago = ?, cuotas = ?
+                     WHERE id = ? AND COALESCE(cobrada, 1) = 1 AND anulada = 0""",
+                  (forma_de_pago, cuotas, venta_id))
+        anotar_cambio(CORRECCIONES_DEL_COBRO[0], "venta", venta_id,
+                      {"forma_de_pago": antes["forma_de_pago"], "cuotas": antes["cuotas"]},
+                      {"forma_de_pago": forma_de_pago, "cuotas": cuotas})
+    nuevo = como_se_pago({"forma_de_pago": forma_de_pago, "cuotas": cuotas})
+    viejo = como_se_pago(dict(antes)) or "sin decir"
+    return True, f"✏️ Venta #{venta_id}: ahora dice {nuevo} (antes, {viejo})."
+
+
+def volver_a_la_caja(venta_id):
+    """Deshace el cobro: la venta vuelve a esperar en la caja como antes de cobrarla, sin el
+    descuento y, si estaba a cuenta, con el cargo de la cuenta anulado. El stock no se toca: el
+    cliente igual se la llevó. (ok, texto)."""
+    exigir_nivel("empleado", "volver una venta a la caja")
+    puede, por_que = puede_corregir_el_cobro(venta_id)
+    if not puede:
+        return False, por_que
+    try:
+        antes = _volver_a_la_caja(venta_id)
+    except ValueError as e:
+        return False, str(e)
+    total = c.execute("SELECT total FROM ventas WHERE id = ?", (venta_id,)).fetchone()[0]
+    return True, (f"↩️ Venta #{venta_id} de nuevo en la caja, por ${miles(total, 0)}"
+                  + (" (sin el descuento)" if antes["descuento"] else "")
+                  + (" y sin el cargo de la cuenta" if antes["movimiento_id"] else "")
+                  + ": cobrala como corresponde.")
+
+
+def _volver_a_la_caja(venta_id):
+    """El cambio de volver_a_la_caja(), todo o nada. Devuelve cómo estaba."""
+    with db_lock, transaccion():
+        c.execute("""SELECT forma_de_pago, COALESCE(cuotas, 1) AS cuotas,
+                            COALESCE(descuento, 0) AS descuento, movimiento_id, cobrada_por,
+                            total
+                     FROM ventas WHERE id = ?""", (venta_id,))
+        antes = c.fetchone()
+        # El descuento se había aplicado al precio de cada cosa (ver _aplicar_el_descuento()):
+        # se deshace igual, renglón por renglón.
+        if antes["descuento"]:
+            c.execute("""UPDATE ventas_items SET precio = ROUND(precio / (1 - ? / 100.0), 2)
+                         WHERE venta_id = ?""", (antes["descuento"], venta_id))
+        if antes["movimiento_id"]:
+            c.execute("UPDATE movimientos_de_cuenta SET anulado = 1 WHERE id = ?",
+                      (antes["movimiento_id"],))
+        c.execute("SELECT COALESCE(SUM(cantidad * precio), 0) FROM ventas_items WHERE venta_id = ?",
+                  (venta_id,))
+        total = round(float(c.fetchone()[0]), 2)
+        c.execute("""UPDATE ventas SET cobrada = 0, forma_de_pago = '', cuotas = 1, descuento = 0,
+                            cobrada_por = NULL, cobrada_en = NULL, movimiento_id = NULL,
+                            total = ?
+                     WHERE id = ? AND COALESCE(cobrada, 1) = 1 AND anulada = 0""",
+                  (total, venta_id))
+        if c.rowcount != 1:
+            raise ValueError("Esa venta ya no está cobrada.")
+        anotar_cambio(CORRECCIONES_DEL_COBRO[1], "venta", venta_id,
+                      {"forma_de_pago": antes["forma_de_pago"], "cuotas": antes["cuotas"],
+                       "descuento": antes["descuento"], "total": antes["total"],
+                       "cobró": antes["cobrada_por"]},
+                      {"total": total})
+    return antes
+
+
+def cobros_corregidos(dia=None):
+    """Las correcciones de cobro de un día (hoy, si no se dice), la última primero: para el
+    cierre de caja. [{hora, venta, que, antes, despues, quien}]."""
+    dia = dia or date.today().isoformat()
+    huecos = ",".join("?" * len(CORRECCIONES_DEL_COBRO))
+    c.execute(f"""SELECT substr(cuando, 12, 5) AS hora, entidad_id AS venta, accion, antes,
+                         despues, usuario
+                  FROM registro_de_cambios
+                  WHERE entidad = 'venta' AND accion IN ({huecos}) AND substr(cuando, 1, 10) = ?
+                  ORDER BY id DESC""", (*CORRECCIONES_DEL_COBRO, dia))
+    salida = []
+    for r in c.fetchall():
+        try:
+            antes, despues = json.loads(r["antes"] or "{}"), json.loads(r["despues"] or "{}")
+        except ValueError:
+            antes, despues = {}, {}
+        if r["accion"] == CORRECCIONES_DEL_COBRO[0]:
+            que = (f"{como_se_pago(antes) or 'sin decir'} → {como_se_pago(despues)}")
+        else:
+            que = (f"volvió a la caja (estaba {como_se_pago(antes) or 'sin decir'}"
+                   + (f", con {como_porcentaje(antes.get('descuento'))}% de descuento"
+                      if antes.get("descuento") else "") + ")")
+        salida.append({"hora": r["hora"], "venta": r["venta"], "que": que,
+                       "quien": r["usuario"] or ""})
+    return salida

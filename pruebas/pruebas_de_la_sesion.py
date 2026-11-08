@@ -479,6 +479,28 @@ def probar():
     esperar("«Volver» no graba", (_de_rita() - _ventas_antes, len(_boton("venta_terminar"))), (1, 1))
     vta.session_state["venta_items"] = []
     vta.run()
+    # CORREGIR UN COBRO desde la caja (ver esa sección en logica/ventas.py): la cajera marcó
+    # «Efectivo» y era una transferencia.
+    _vc = c.execute("SELECT MAX(id) FROM ventas WHERE usuario = 'rita' AND anulada = 0").fetchone()[0]
+    c.execute("""UPDATE ventas SET cobrada = 1, forma_de_pago = 'Efectivo', cobrada_por = 'rita',
+                        cobrada_en = datetime('now', 'localtime') WHERE id = ?""", (_vc,))
+    conn.commit()
+    vta.session_state["pagina_actual"] = ns["PAGINAS"][11]
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.run()
+    vta.selectbox(key="cobro_a_corregir").set_value(_vc).run()
+    esperar("la forma de pago arranca en la que tiene",
+            vta.selectbox(key=f"cobro_forma_nueva_{_vc}").value, "Efectivo")
+    vta.selectbox(key=f"cobro_forma_nueva_{_vc}").set_value("Transferencia").run()
+    _boton("cobro_corregir_forma")[0].click().run()
+    esperar("desde la caja: la forma de pago corregida, y a la vista con quién",
+            (c.execute("SELECT forma_de_pago FROM ventas WHERE id = ?", (_vc,)).fetchone()[0],
+             any("Efectivo → Transferencia" in d.value.to_string() and "rita" in d.value.to_string()
+                 for d in vta.dataframe),
+             [e.value for e in vta.exception]), ("Transferencia", True, []))
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = False
+    vta.session_state["pagina_actual"] = ventas
+    vta.run()
     c.execute("""INSERT INTO ventas_a_medio_armar (usuario, items, cliente, guardada)
                  VALUES ('rita', ?, '', datetime('now', 'localtime', '-1 day'))""",
               (f'[{{"producto_id": {pid}, "cantidad": 1, "precio": 1}}]',))

@@ -7049,6 +7049,19 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## ✏️ Corregir un cobro
+
+Lo pidió el dueño: «poder modificar si la cajera pasa algo mal, ya sea que se equivoca en el medio de pago o demás». Cobrada, una venta no se tocaba más: si la cajera marcaba «Efectivo» y era una transferencia, el cierre decía que en el cajón tenía que haber plata que no estaba, y el arqueo daba un faltante que no era.
+
+En 💵 Caja → «📋 Ventas y cierre de caja» → **✏️ Corregir un cobro** (sección «CORREGIR UN COBRO» de `logica/ventas.py`), se elige la venta —abajo dice cómo figura ahora y quién la cobró— y qué hay que corregir:
+
+- **💳 Cómo pagó**: efectivo, débito, crédito (con las cuotas), transferencia u otra. Arranca en la que tiene. El monto no cambia: solo por dónde entró, y con eso el efectivo que tiene que haber en el cajón (`cambiar_como_se_pago()`). A cuenta no se elige acá: eso mira el límite de la cuenta.
+- **↩️ Volverla a la caja**: cobró la venta equivocada, se equivocó en el descuento, o iba a cuenta y la cobró (o al revés). Vuelve a esperar en la caja como antes de cobrarla —sin el descuento, que se deshace renglón por renglón, y si estaba a cuenta con el cargo de la cuenta anulado— y se cobra como corresponde. El stock no se toca: el cliente igual se la llevó (`volver_a_la_caja()`).
+
+**Quién y cuándo**: el empleado, los cobros del día; el administrador, cualquiera. Con devoluciones, nadie: la plata devuelta ya salió por esa forma de pago. **A la vista**: cada corrección queda en el registro de cambios con el antes y el después, en el cierre de caja de ese día («✏️ Cobros corregidos ese día», y la venta marcada «✏️ corregido» en la tabla) y en la campanita del administrador («✏️ Hoy se corrigieron 2 cobros… Mirá que el arqueo cierre»): cambiar «Efectivo» por «Transferencia» también es la forma de tapar un faltante del cajón.
+
+Visto con la app corriendo. `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py` lo controlan.
+
 ## 🛡️ Que una venta no se grabe por accidente
 
 Lo pidió el dueño: «que lo de ventas sea más seguro de que no se grabe por accidente una venta». Había tres agujeros, y cada uno tiene su arreglo (sección «QUE UNA VENTA NO SE GRABE POR ACCIDENTE» de `logica/ventas.py`):

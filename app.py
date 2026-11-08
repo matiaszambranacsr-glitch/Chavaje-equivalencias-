@@ -143,6 +143,7 @@ específico, y las pantallas quedan todas al final:
         · LO QUE LE AVISA LA APP A QUIEN VENDE
         · LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR, A SALVO DE UNA RECARGA
         · QUE UNA VENTA NO SE GRABE POR ACCIDENTE
+        · CORREGIR UN COBRO
     logica/mapa.py
         · EL MAPA DEL DEPÓSITO
         · DEPÓSITOS, PISOS Y ESTANTERÍAS

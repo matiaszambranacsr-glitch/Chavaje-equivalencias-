@@ -312,6 +312,63 @@ def probar(L):
             (False, False))
     st.session_state["nivel_usuario"] = "admin"
     esperar("el administrador, siempre", ns["puede_deshacer_su_venta"](v_v)[0], True)
+
+    # CORREGIR UN COBRO (ver esa sección en logica/ventas.py): la forma de pago equivocada, o la
+    # venta vuelta a la caja para cobrarla bien.
+    st.session_state["nivel_usuario"] = "operador"
+    _forma = lambda v: uno("SELECT forma_de_pago FROM ventas WHERE id = ?", v)
+    _efectivo_antes = ns["efectivo_esperado"]()
+    v_f, _ = ns["cerrar_venta"]([item("B1", 2)], a_la_caja=True)
+    ns["cobrar_venta"](v_f, "Efectivo")
+    ok_f, texto_f = ns["cambiar_como_se_pago"](v_f, "Transferencia")
+    esperar("cambió cómo pagó: el monto igual, y el cajón ya no la espera",
+            (ok_f, _forma(v_f), uno("SELECT total FROM ventas WHERE id = ?", v_f),
+             ns["efectivo_esperado"]() - _efectivo_antes, "antes, Efectivo" in texto_f),
+            (True, "Transferencia", 5000.0, 0.0, True))
+    esperar("lo mismo otra vez no hace nada, y a cuenta no se elige acá",
+            (ns["cambiar_como_se_pago"](v_f, "Transferencia")[0],
+             ns["cambiar_como_se_pago"](v_f, "A cuenta")[0]), (False, False))
+    ns["cambiar_como_se_pago"](v_f, "Tarjeta de crédito", 3)
+    esperar("con cuotas", (_forma(v_f), uno("SELECT cuotas FROM ventas WHERE id = ?", v_f)),
+            ("Tarjeta de crédito", 3))
+    # Cobrada con un descuento equivocado: vuelve a la caja como estaba, y se cobra bien.
+    v_d, _ = ns["cerrar_venta"]([item("A1", 3)], a_la_caja=True)
+    ns["cobrar_venta"](v_d, "Efectivo", descuento=10)
+    ok_d2, _ = ns["volver_a_la_caja"](v_d)
+    esperar("vuelta a la caja: esperando, sin descuento, con el total de antes",
+            (ok_d2, uno("SELECT cobrada FROM ventas WHERE id = ?", v_d),
+             uno("SELECT descuento FROM ventas WHERE id = ?", v_d),
+             uno("SELECT total FROM ventas WHERE id = ?", v_d),
+             uno("SELECT precio FROM ventas_items WHERE venta_id = ?", v_d)),
+            (True, 0, 0, 3000.0, 1000.0))
+    esperar("y se cobra bien", ns["cobrar_venta"](v_d, "Efectivo", descuento=5)[0], True)
+    # A cuenta por error: acá no se cambia la forma; vuelta a la caja, el cargo se anula.
+    v_k, _ = ns["cerrar_venta"]([item("A1")], mecanico_id=taller, a_la_caja=True)
+    _saldo_k = saldo()
+    ns["poner_a_cuenta"](v_k)
+    esperar("a cuenta: no se cambia la forma de pago desde acá",
+            ns["cambiar_como_se_pago"](v_k, "Efectivo")[0], False)
+    ns["volver_a_la_caja"](v_k)
+    esperar("vuelta a la caja: el cargo de la cuenta, anulado",
+            (saldo() - _saldo_k, uno("SELECT movimiento_id FROM ventas WHERE id = ?", v_k)),
+            (0.0, None))
+    # Lo de otro día, solo el administrador; con devoluciones, nadie.
+    c.execute("UPDATE ventas SET cobrada_en = datetime('now', 'localtime', '-2 days') WHERE id = ?",
+              (v_f,))
+    conn.commit()
+    _de_otro_dia = ns["puede_corregir_el_cobro"](v_f)
+    st.session_state["nivel_usuario"] = "admin"
+    esperar("de otro día: el empleado no, el administrador sí",
+            (_de_otro_dia[0], ns["puede_corregir_el_cobro"](v_f)[0]), (False, True))
+    ok_dv, _ = ns["devolver_de_una_venta"](
+        uno("SELECT id FROM ventas_items WHERE venta_id = ?", v_d), 1, "medida")
+    esperar("con devoluciones, nadie", (ok_dv, ns["puede_corregir_el_cobro"](v_d)[0]), (True, False))
+    esperar("lo corregido queda a la vista, con quién",
+            sorted((x["venta"], x["quien"]) for x in ns["cobros_corregidos"]()),
+            sorted([(str(v_f), "ana")] * 2 + [(str(v_d), "ana"), (str(v_k), "ana")]))
+    esperar("y la campanita se lo dice al administrador",
+            any("se corrigieron 4 cobro" in p["titulo"] and p.get("solo_admin")
+                for p in ns["diagnostico_de_salud"]()), True)
     for k in ("admin_nombre", "nivel_usuario"):
         st.session_state.pop(k, None)
     return fallas

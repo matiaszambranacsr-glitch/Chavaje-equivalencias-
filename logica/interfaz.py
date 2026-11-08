@@ -493,6 +493,10 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-08"
 LO_NUEVO = (
+    ("✏️ Si la cajera se equivoca, el cobro se corrige: cambiar cómo pagó, o volver la venta a "
+     "la caja (sin el descuento, sin el cargo de la cuenta) y cobrarla bien. Cada corrección "
+     "queda en el cierre con quién, y te avisa la campanita.",
+     "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🛡️ Una venta ya no se graba por accidente: el botón (y F9) pregunta con el total y graba "
      "con «Sí» (Enter); la misma venta dos veces seguidas pide confirmarlo; y quien se equivocó "
      "la deshace mientras espera en la caja, y vuelve armada.", "🧾 Ventas"),
