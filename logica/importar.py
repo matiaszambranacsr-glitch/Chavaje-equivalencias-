@@ -776,6 +776,99 @@ def precio_que_ya_tuvo(producto_id, precio, precio_actual, tope_salto, de_rellen
     return None
 
 
+# QUÉ HACE LA LISTA CON TUS PRECIOS, antes de importarla. El aumento se veía después: en
+# «📌 Para pedir» la variación de los últimos meses, en la salud el atraso. Pero el momento de
+# saber «esta lista sube 12%» o «esta lista baja la mitad de los precios» es antes de apretar
+# Procesar: si la lista vino mal (otra columna de precio, sin IVA, la de otra sucursal), lo que
+# se ve acá lo dice, y todavía no se tocó nada.
+CAMBIOS_DE_EJEMPLO = 5
+
+
+def lo_que_hace_la_lista_con_los_precios(filas, idx_prov, idx_precio, idx_desc, nombre_marca,
+                                         tope_salto):
+    """Sin tocar nada: cuántos precios sube y baja esta lista contra los que hay, la mediana del
+    cambio, cuántos frenaría el freno, cuántos productos son nuevos y cuántos renglones traen el
+    precio de relleno. Los códigos se resuelven como en la importación: con el coeficiente de la
+    lista, las variantes que ya entraron aparte y los que entrarían aparte (ver
+    es_otro_producto_con_el_mismo_codigo()). Devuelve un diccionario; «comparados» 0 si no hay
+    con qué comparar (una marca nueva, una lista sin precios)."""
+    def celda(f, i):
+        return f[i] if i is not None and i < len(f) else None
+
+    c.execute("SELECT id FROM marcas WHERE nombre = ?", (str(nombre_marca or "").strip().upper(),))
+    _m = c.fetchone()
+    marca_id = _m[0] if _m else None
+    coef = coeficiente_de_lista(marca_id) if marca_id else 1
+    precios = [(leer_numero(celda(f, idx_precio)), valor_o_vacio(celda(f, idx_desc)))
+               for f in filas]
+    de_relleno = set(precios_de_relleno_conocidos(marca_id)) if marca_id else set()
+    de_relleno |= {round(p * coef, 2) if coef != 1 else p for p in precios_de_relleno(precios)}
+    productos = {}
+    if marca_id:
+        c.execute("SELECT id, codigo_clean, codigo_raw, precio FROM productos WHERE marca_id = ?",
+                  (marca_id,))
+        productos = {r["codigo_clean"]: r for r in c.fetchall()}
+    celdas = [valor_codigo(celda(f, idx_prov)) for f in filas]
+    formas = como_se_escribe_cada_codigo(celdas)
+    salida = {"comparados": 0, "suben": 0, "bajan": 0, "iguales": 0, "frenaria": 0,
+              "nuevos": 0, "de_relleno": 0, "sin_precio_antes": 0, "mediana_pct": None,
+              "subas": [], "bajas": []}
+    vistos, nuevos, cambios = set(), set(), []
+    for celda_p, (precio, desc) in zip(celdas, precios):
+        if precio is not None and precio > 0 and coef != 1:
+            precio = round(precio * coef, 2)
+        for raw in codigos_del_proveedor(celda_p):
+            limpio = sanitizar(raw)
+            if not limpio:
+                continue
+            prod = productos.get(codigo_de_la_variante(raw))
+            if prod is None:
+                prod = productos.get(limpio)
+                de_la_lista = formas.get(limpio, ())
+                if (prod is not None and len(de_la_lista) >= 2
+                        and _escrito(raw) != _escrito(prod["codigo_raw"])
+                        and _escrito(prod["codigo_raw"]) in de_la_lista):
+                    prod = None          # entraría aparte: es otro producto
+            if prod is None:
+                nuevos.add(_escrito(raw))
+                continue
+            if prod["id"] in vistos:
+                continue
+            vistos.add(prod["id"])
+            if precio in de_relleno:
+                salida["de_relleno"] += 1
+                continue
+            if precio is None or precio <= 0:
+                continue
+            viejo = float(prod["precio"]) if prod["precio"] else None
+            if not viejo or viejo <= 0 or viejo in de_relleno:
+                salida["sin_precio_antes"] += 1
+                continue
+            if salto_de_precio_sospechoso(viejo, precio, tope_salto)[0]:
+                salida["frenaria"] += 1
+                continue
+            razon = precio / viejo
+            cambios.append((razon, raw, desc, viejo, precio))
+    salida["nuevos"] = len(nuevos)
+    salida["comparados"] = len(cambios)
+    if cambios:
+        razones = sorted(r for r, *_ in cambios)
+        salida["mediana_pct"] = (razones[len(razones) // 2] - 1) * 100
+        salida["suben"] = sum(1 for r in razones if r > 1.005)
+        salida["bajan"] = sum(1 for r in razones if r < 0.995)
+        salida["iguales"] = len(razones) - salida["suben"] - salida["bajan"]
+
+        def fila(x):
+            razon, raw, desc, viejo, precio = x
+            return {"Código": raw, "Descripción": str(desc or "")[:50],
+                    "Ahora": formato_precio(viejo), "Con la lista": formato_precio(precio),
+                    "Cambio": f"{(razon - 1) * 100:+.0f}%"}
+        cambios.sort(key=lambda x: x[0])
+        salida["subas"] = [fila(x) for x in reversed(cambios[-CAMBIOS_DE_EJEMPLO:]) if x[0] > 1.005]
+        salida["bajas"] = [fila(x) for x in cambios[:CAMBIOS_DE_EJEMPLO] if x[0] < 0.995]
+    return salida
+
+
 def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
     # Un producto nuevo de una familia a la que ya se le puso nombre entra con la pieza: ver «QUÉ
     # PIEZA ES CADA FAMILIA DE CÓDIGOS». Los que ya estaban no se tocan (la descripción no se

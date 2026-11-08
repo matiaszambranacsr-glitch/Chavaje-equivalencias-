@@ -498,6 +498,9 @@ LO_NUEVO = (
      "lista de IMPERIAL: entran los 210 que faltaban, y los 116 precios cruzados que frena "
      "vuelven al que tenían con un solo botón.",
      "📁 Cargar Excel"),
+    ("💲 Antes de importar una lista, «Qué hace esta lista con tus precios» dice cuántos suben y "
+     "bajan, el cambio del medio, cuántos frenaría y cuántos son nuevos, sin tocar nada.",
+     "📁 Cargar Excel"),
     ("🧹 La lista de IMPERIAL pone 999.999 donde no tiene precio, y entraba como precio (1.292 "
      "productos: una pipeta a 1.437.139). Ahora la importación no lo carga, y los que ya lo "
      "tienen se dejan sin precio con un botón.",

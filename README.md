@@ -7049,6 +7049,19 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 💲 Qué hace la lista con tus precios, antes de importarla
+
+El aumento de una lista se veía después: en «📌 Para pedir» la variación de los últimos meses, en la salud el atraso. Pero el momento de saber «esta lista sube 12%» o «esta lista baja la mitad de los precios» es antes de apretar «Procesar»: si vino mal (otra columna de precio, sin IVA, la de otra sucursal), todavía no se tocó nada.
+
+Ahora, en 📁 Cargar Excel, con la columna de precio elegida, el desplegable «💲 Qué hace esta lista con tus precios» (se calcula solo si se abre: leer la lista entera de IMPERIAL son 2 s, compararla 0,7 s) dice:
+
+- de los que ya tenían precio, cuántos suben, cuántos bajan, cuántos quedan igual y el cambio del medio;
+- cuántos frenaría el freno, cuántos productos son nuevos, cuántos que no tenían precio lo toman y cuántos traen el precio de relleno;
+- los cinco que más suben y los cinco que más bajan;
+- y si la mitad baja o el del medio cambia más de un tercio, «⚠️ Esto no parece un aumento».
+
+Los códigos se resuelven como en la importación de verdad (`lo_que_hace_la_lista_con_los_precios()`): con el coeficiente de la lista, las variantes que ya entraron aparte, los que entrarían aparte y los precios de relleno. Con la lista real de IMPERIAL sobre la copia del 12/10 da lo mismo que después hace la importación: 116 frenados, 254 nuevos, 1.291 de relleno. `pruebas_de_la_sesion.py` (2d) lo controla.
+
 ## 🔁 El precio frenado que vuelve al que el producto ya tenía
 
 Reimportando la lista de IMPERIAL sobre la copia del 12/10, el freno de saltos para 116 precios, y **los 116 son el mismo caso**: la junta de ½" valía $643, un choque de código le pisó los $48.209 de la de 12" (ver «Dos productos que sin los signos se escriben igual»), y la lista trae $643 de nuevo. El freno compara contra el precio de ahora, que es justo el equivocado.

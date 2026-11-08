@@ -222,6 +222,25 @@ def probar():
              ns["c"].execute("SELECT precio FROM productos WHERE codigo_clean = 'OTRA3'").fetchone()[0]),
             ([("TUERCA ZINC 5/32", 987.0)], ["OTRA-3"], 100.0))
     at.session_state["precios_frenados_de_la_carga"] = None
+    # Antes de importar, qué hace la lista con los precios (ver
+    # lo_que_hace_la_lista_con_los_precios()): sin tocar nada.
+    with open("previa.csv", "w", encoding="utf-8") as _f:
+        _f.write("Codigo;Descripcion;Precio;Stock\nCAMBA111.4;TUERCA ZINC 5/32;1100;1\n"
+                 "CAMBA11.14;TUERCA NAT 9/16;1873;1\nOTRA-3;JUNTA;5000;1\nNUEVO-9;ARANDELA;10;1\n")
+    [t for t in at.text_input if "Ruta completa" in t.label][0].set_value(
+        os.path.abspath("previa.csv")).run()
+    at.text_input(key="nombre_prov_carga").set_value("PRUEBACHOQUE").run()
+    at.session_state["exp_lo_que_hace_la_lista"] = True
+    at.run()
+    _vp = at.session_state["_lo_que_hace_la_lista"][1]
+    esperar("la vista previa: uno sube, uno igual, uno frenado, uno nuevo",
+            ({k: _vp[k] for k in ("comparados", "suben", "iguales", "frenaria", "nuevos")},
+             [x["Cambio"] for x in _vp["subas"]]),
+            ({"comparados": 2, "suben": 1, "iguales": 1, "frenaria": 1, "nuevos": 1}, ["+11%"]))
+    esperar("y lo dice", any("**1 suben**" in m.value for m in at.markdown), True)
+    esperar("sin tocar nada", _precio("CAMBA1114"), [("TUERCA ZINC 5/32", 987.0)])
+    at.session_state["exp_lo_que_hace_la_lista"] = False
+    at.run()
     # Y en el buscador: escrito con sus signos trae la de 9/16; sin ellos, la de 5/32, y avisa
     # que hay otra que se escribe igual.
     at.session_state["pagina_actual"] = "🔍 Buscador"

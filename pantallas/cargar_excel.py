@@ -627,6 +627,62 @@ if pagina == PAGINAS[2]:
                 elif buscar_oem_en_desc and idx_desc is None:
                     st.warning("Para buscar códigos en la descripción, elegí primero la columna de descripción.")
 
+        # QUÉ HACE ESTA LISTA CON TUS PRECIOS, antes de tocar nada (ver
+        # lo_que_hace_la_lista_con_los_precios()). Perezoso: leer la lista entera son 2 s con la
+        # de IMPERIAL, y se recuerda mientras no cambie el archivo ni el mapeo.
+        if todas_filas and idx_precio is not None and nombre_prov.strip():
+            _exp_lista = st.expander("💲 Qué hace esta lista con tus precios",
+                                     key="exp_lo_que_hace_la_lista", on_change="rerun")
+            if _exp_lista.open:
+                with _exp_lista:
+                    _clave_vp = (getattr(archivo, "name", str(archivo)),
+                                 getattr(archivo, "size", None)
+                                 or (os.path.getmtime(archivo) if isinstance(archivo, str)
+                                     and os.path.exists(archivo) else None),
+                                 hoja_elegida, header_row, idx_prov, idx_precio, idx_desc,
+                                 nombre_prov.strip().upper(), tope_salto)
+                    _guardado_vp = st.session_state.get("_lo_que_hace_la_lista")
+                    if not _guardado_vp or _guardado_vp[0] != _clave_vp:
+                        with st.spinner("Comparando la lista entera con tus precios…"):
+                            _guardado_vp = (_clave_vp, lo_que_hace_la_lista_con_los_precios(
+                                leer_excel(archivo, hoja=hoja_elegida)[header_row + 1:],
+                                idx_prov, idx_precio, idx_desc, nombre_prov, tope_salto))
+                        st.session_state["_lo_que_hace_la_lista"] = _guardado_vp
+                    _vp = _guardado_vp[1]
+                    if _vp["comparados"]:
+                        _med = _vp["mediana_pct"]
+                        st.markdown(
+                            f"De {miles(_vp['comparados'])} producto(s) que ya tenían precio, "
+                            f"**{miles(_vp['suben'])} suben** y **{miles(_vp['bajan'])} bajan** "
+                            f"({miles(_vp['iguales'])} quedan igual). El cambio del medio: "
+                            f"**{'+' if _med > 0 else ''}{miles(_med, 1)}%**.")
+                    else:
+                        st.markdown("Ningún producto de esta lista tiene hoy un precio con qué "
+                                    "compararlo.")
+                    _otros_vp = [t for n, t in (
+                        (_vp["frenaria"], f"🛑 {miles(_vp['frenaria'])} los frenaría el freno"),
+                        (_vp["nuevos"], f"🆕 {miles(_vp['nuevos'])} producto(s) nuevos"),
+                        (_vp["sin_precio_antes"],
+                         f"💲 {miles(_vp['sin_precio_antes'])} que no tenían precio lo toman"),
+                        (_vp["de_relleno"],
+                         f"🧹 {miles(_vp['de_relleno'])} traen el precio de relleno y quedan "
+                         "sin precio")) if n]
+                    if _otros_vp:
+                        st.markdown(" · ".join(_otros_vp))
+                    # Si la mitad baja, o el del medio cambia más de un tercio, la lista vino
+                    # rara: otra columna de precio, sin IVA, la de otra sucursal.
+                    if _vp["comparados"] and (_vp["bajan"] > _vp["comparados"] / 2
+                                              or abs(_vp["mediana_pct"]) > 33):
+                        st.warning("⚠️ Esto no parece un aumento: revisá que la columna de "
+                                   "precio sea la que usás (con o sin IVA, de lista o de costo) "
+                                   "antes de importar.")
+                    if _vp["subas"]:
+                        st.caption("Los que más suben (sin los que frenaría):")
+                        st.dataframe(_vp["subas"], width="stretch", hide_index=True)
+                    if _vp["bajas"]:
+                        st.caption("Los que más bajan (sin los que frenaría):")
+                        st.dataframe(_vp["bajas"], width="stretch", hide_index=True)
+
         st.markdown("**🔒 Antes de importar: ¿qué hacemos con las equivalencias?**")
         cargar_directo = st.radio(
             "Equivalencias de esta lista:",
