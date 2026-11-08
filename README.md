@@ -7049,6 +7049,23 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 🧾 La factura electrónica de ARCA, cuando la cajera la pide
+
+Lo pidió el dueño: «vamos a hacer lo de ARCA pero sin que sea en todas las ventas automáticamente, que sean en las que la chica encargada de la caja quiera hacerlas». Nada se factura solo (`logica/facturas.py`):
+
+- **Al cobrar**, en el diálogo de 💳 Cobrar, el interruptor **«🧾 Con factura electrónica»** arranca apagado. Prendido, pide el cliente: consumidor final (puede ir sin documento, o con DNI o CUIT), responsable inscripto, monotributista o exento (con CUIT), y un nombre si se quiere.
+- **Después**, si no se hizo al cobrar: en el comprobante de la venta recién cobrada («🧾 ¿Le hacés factura?») o en el cierre de caja («🧾 Facturas electrónicas»: las del día, y la factura de cualquier venta cobrada).
+- **El tipo** sale de la condición del negocio y del cliente: el monotributista hace C; el responsable inscripto, A a otro inscripto y B a los demás. En A y B el IVA (21%) se separa del total, que es el precio final.
+- **El número** es el que sigue al último que autorizó ARCA para ese punto de venta y tipo. La factura queda **pendiente antes de pedir el CAE**: si se corta en el medio, no se sabe si ARCA la hizo, y pedirla de nuevo podía dejar dos facturas por la misma venta. Una pendiente se resuelve con **«🔄 Consultar en ARCA»**: si ARCA la tiene, queda autorizada con su CAE; si no, rechazada, y se puede volver a facturar (el número queda libre).
+- **El PDF** lleva lo que pide ARCA: el negocio (razón social, domicilio, CUIT, condición, ingresos brutos, inicio de actividades), la letra y el código, el punto de venta y el número, el cliente, lo vendido, el CAE con su vencimiento y **el QR** (RG 4892). En homologación dice «DE PRUEBA: no tiene validez fiscal».
+- **La nota de crédito** anula una factura por el total, al mismo cliente y asociada a ella. Una venta con factura vigente no se vuelve a la caja ni se anula hasta su nota de crédito (cambiar cómo pagó sí: la factura no lo dice).
+
+**Cómo habla con ARCA**: con el WSAA —el pedido de acceso firmado con el certificado del negocio, que da un permiso de 12 horas— y el WSFEv1 —el último número autorizado y el CAE del siguiente—. El permiso se guarda en la base: mientras uno esté vigente ARCA no da otro, y si la app se reiniciara y lo perdiera no se podría facturar hasta que venza.
+
+**Lo que hace falta** va en los secretos de Streamlit (Settings → Secrets), nunca en el repositorio: una sección `[arca]` con `cuit`, `punto_de_venta` (uno dado de alta para Web Services), `condicion` («monotributo» o «responsable_inscripto»), `ambiente` («homologacion» primero, «produccion» cuando ande), `certificado` y `clave_privada` (el certificado se saca en el sitio de ARCA con clave fiscal nivel 3), y para el PDF `razon_social`, `domicilio`, `inicio_de_actividades` e `ingresos_brutos`. En **Administrar → 💬 Mensajería y cobros** se ve qué falta y **«🔌 Probar la conexión con ARCA»** prueba los secretos, el permiso y el último número sin facturar nada.
+
+`pruebas_de_las_facturas.py` lo controla contra un ARCA simulado (con un certificado hecho en el momento): el tipo, los importes, el cliente, el CAE, el número que sigue, el permiso que se reusa, la pendiente que se resuelve (las dos maneras), la nota de crédito, lo que no se puede hacer con una venta facturada, el QR, el PDF, y la pantalla de la caja y de Administrar. Falta probarlo contra el ARCA de prueba de verdad, con el certificado de homologación del negocio.
+
 ## 🕒 La hora de acá: se guarda en UTC y se muestra en la de Argentina
 
 Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:50» y GitHub la recibió a las **12:56:59 de Argentina**. Streamlit Cloud corre en UTC: **cada hora que mostraba la app estaba tres horas adelantada** (la venta de las 10:05 decía 13:05) y **lo vendido o cobrado después de las 21 caía en la caja del día siguiente**.

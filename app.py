@@ -145,6 +145,8 @@ específico, y las pantallas quedan todas al final:
         · LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR, A SALVO DE UNA RECARGA
         · QUE UNA VENTA NO SE GRABE POR ACCIDENTE
         · CORREGIR UN COBRO
+    logica/facturas.py
+        · LA FACTURA ELECTRÓNICA (ARCA)
     logica/mapa.py
         · EL MAPA DEL DEPÓSITO
         · DEPÓSITOS, PISOS Y ESTANTERÍAS

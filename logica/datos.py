@@ -3073,6 +3073,39 @@ def _esquema_ventas(c):
         usuario TEXT,
         fecha TEXT DEFAULT (datetime('now', 'localtime'))
     )""")
+    # LA FACTURA ELECTRÓNICA, a pedido de la caja: ver «LA FACTURA ELECTRÓNICA (ARCA)» en
+    # logica/facturas.py. Una por comprobante —factura o nota de crédito—, y la nota apunta a la
+    # factura que anula. «pendiente» es la que se pidió y no se supo si ARCA la autorizó (un
+    # corte en el medio): se resuelve consultándola, nunca pidiéndola de nuevo.
+    c.execute("""CREATE TABLE IF NOT EXISTS facturas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        venta_id INTEGER REFERENCES ventas(id) ON DELETE SET NULL,
+        tipo INTEGER NOT NULL,
+        punto_de_venta INTEGER NOT NULL,
+        numero INTEGER NOT NULL,
+        fecha TEXT NOT NULL,
+        doc_tipo INTEGER NOT NULL,
+        doc_nro INTEGER NOT NULL,
+        condicion_receptor INTEGER NOT NULL,
+        nombre_receptor TEXT,
+        total REAL NOT NULL,
+        neto REAL NOT NULL,
+        iva REAL NOT NULL,
+        estado TEXT NOT NULL,
+        cae TEXT,
+        cae_vence TEXT,
+        observaciones TEXT,
+        ambiente TEXT NOT NULL,
+        asociada_a INTEGER REFERENCES facturas(id),
+        usuario TEXT,
+        creada_en TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_facturas_venta ON facturas(venta_id)")
+    # Un número, un comprobante: entre los autorizados y los pendientes. Uno rechazado (ARCA no
+    # lo hizo) deja el número libre, y la próxima vez ARCA da ese mismo.
+    c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_numero_vigente
+                 ON facturas(ambiente, punto_de_venta, tipo, numero)
+                 WHERE estado IN ('autorizada', 'pendiente')""")
     # LA CAJA APARTE: la venta que arma el vendedor queda esperando en la caja hasta que el
     # cajero la cobra (con la forma de pago, las cuotas y el descuento) o la pone a cuenta. Ver
     # «LA CAJA APARTE» en logica/ventas.py. Una por una y escritas enteras: el auditor lee las

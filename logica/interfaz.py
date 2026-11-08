@@ -493,6 +493,10 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-08"
 LO_NUEVO = (
+    ("🧾 Factura electrónica de ARCA, solo cuando la cajera la pide: «Con factura» al cobrar, o "
+     "después desde el comprobante o el cierre; con nota de crédito para anularla. Falta cargar el "
+     "certificado de ARCA en los secretos: ver Administrar → Mensajería y cobros.",
+     "💵 Caja"),
     ("🕒 Las horas ahora son las de Argentina: antes estaban tres horas adelantadas, y lo cobrado "
      "después de las 21 caía en la caja del día siguiente.", "💵 Caja"),
     ("✏️ Si la cajera se equivoca, el cobro se corrige: cambiar cómo pagó, o volver la venta a "

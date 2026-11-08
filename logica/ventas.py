@@ -409,6 +409,11 @@ def anular_venta(venta_id):
     avisar» y el link del cliente contaban desde un cambio que no pasó. Lo anotado antes de que
     cada pieza supiera de qué venta salió se reconoce por la nota «Venta #N» en ese auto."""
     exigir_nivel("admin", "anular una venta")
+    # Con factura electrónica, primero la nota de crédito: si no, ARCA sigue teniendo una venta
+    # que en la caja ya no está (ver «LA FACTURA ELECTRÓNICA (ARCA)» en logica/facturas.py).
+    if factura_vigente_de(venta_id):
+        return False, (f"La venta #{venta_id} tiene factura electrónica: primero anulala con la "
+                       "nota de crédito (en el cierre de caja).")
     return _anular_la_venta(venta_id)
 
 
@@ -1582,6 +1587,11 @@ def volver_a_la_caja(venta_id):
     puede, por_que = puede_corregir_el_cobro(venta_id)
     if not puede:
         return False, por_que
+    # Con factura, el total ya está en ARCA: primero la nota de crédito. Cambiar cómo pagó sí se
+    # puede, la factura no lo dice.
+    if factura_vigente_de(venta_id):
+        return False, ("Tiene factura electrónica: para volverla a la caja, primero anulá la "
+                       "factura con la nota de crédito.")
     try:
         antes = _volver_a_la_caja(venta_id)
     except ValueError as e:

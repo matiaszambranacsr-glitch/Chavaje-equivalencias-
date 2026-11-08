@@ -880,6 +880,34 @@ if pagina == PAGINAS[3]:
                     st.info("Sin resultados para esa marca.")
 
     if sub_admin == SUB_ADMIN[2]:
+        # LA FACTURA ELECTRÓNICA (ver esa sección en logica/facturas.py): qué falta para
+        # hacerlas y probar la conexión con ARCA, sin facturar nada.
+        st.markdown("**🧾 Factura electrónica (ARCA)**")
+        _falta_arca = lo_que_falta_para_facturar()
+        if _falta_arca:
+            st.info("Para que la caja pueda hacer facturas, en los secretos de Streamlit "
+                    "(Settings → Secrets) va una sección `[arca]` con: " + ", ".join(_falta_arca)
+                    + ". Primero con `ambiente = \"homologacion\"` (de prueba) y, cuando ande, "
+                      "`\"produccion\"`.")
+            explicar("Qué es cada dato y de dónde sale.",
+                     "El **certificado** se saca en el sitio de ARCA con clave fiscal nivel 3 "
+                     "(«Administración de certificados digitales»), con la clave privada que se "
+                     "genera para pedirlo; el **punto de venta** es uno dado de alta para «Web "
+                     "Services»; la **condición** es «monotributo» (hace facturas C) o "
+                     "«responsable_inscripto» (A y B). Para el PDF también: `razon_social`, "
+                     "`domicilio`, `inicio_de_actividades` e `ingresos_brutos`. Nada de esto va "
+                     "en el repositorio.")
+        else:
+            _cfg_arca = configuracion_de_arca()
+            st.caption(f"Lista: CUIT ···{_cfg_arca['cuit'][-4:]}, punto de venta "
+                       f"{_cfg_arca['punto_de_venta']}, {_cfg_arca['condicion'].replace('_', ' ')}, "
+                       + ("**producción** (con validez fiscal)." if _cfg_arca["ambiente"] == "produccion"
+                          else "**de prueba** (homologación: sin validez fiscal)."))
+            if st.button("🔌 Probar la conexión con ARCA", key="arca_probar"):
+                st.session_state["_arca_prueba"] = probar_la_conexion_con_arca()
+            for _que, _ok, _detalle in st.session_state.get("_arca_prueba") or []:
+                (st.success if _ok else st.error)(f"{'✅' if _ok else '❌'} {_que}: {_detalle}")
+        st.markdown("---")
         st.markdown("**💬 Texto del mensaje de WhatsApp**",
                     help="Personalizá el encabezado y el pie del mensaje que se arma en 'Lista "
                          "WhatsApp' — por ejemplo para poner el nombre real de tu local, un teléfono "

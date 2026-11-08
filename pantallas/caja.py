@@ -67,11 +67,23 @@ if pagina == PAGINAS[11]:
             if _paga:
                 st.markdown(f"**Vuelto: ${miles(_paga - _total, 0)}**" if _paga >= _total
                             else f"⚠️ Faltan ${miles(_total - _paga, 0)}.")
+        # LA FACTURA, SI LA CAJERA QUIERE (ver «LA FACTURA ELECTRÓNICA (ARCA)» en
+        # logica/facturas.py): apagada de entrada, nada se factura solo.
+        _con_factura = False
+        if configuracion_de_arca():
+            _con_factura = st.toggle("🧾 Con factura electrónica", key=f"cobro_con_factura_{venta_id}",
+                                     help="La hace en ARCA al cobrar. Si no, se puede hacer "
+                                          "después, desde el comprobante o el cierre de caja.")
+            if _con_factura:
+                _cond_f, _doc_f, _nom_f = elegir_cliente_de_la_factura(f"cobro_{venta_id}")
         if st.button(f"✅ Cobrar ${miles(_total, 0)}", type="primary", key=f"cobro_ok_{venta_id}",
                      width="stretch"):
             _ok_c, _texto_c = cobrar_venta(venta_id, _forma, _cuotas, _desc)
             if _ok_c:
                 avisar("success", _texto_c)
+                if _con_factura:
+                    _ok_f, _texto_f = facturar_venta(venta_id, _cond_f, _doc_f, _nom_f)
+                    avisar("success" if _ok_f else "warning", _texto_f)
                 st.session_state["caja_recien"] = venta_id
                 st.rerun()
             st.error(_texto_c)
@@ -193,6 +205,7 @@ if pagina == PAGINAS[11]:
             if _cc3.button("Listo", key="caja_comprobante_listo", width="stretch"):
                 st.session_state.pop("caja_recien", None)
                 st.rerun()
+            mostrar_la_factura_de(_recien, "caja_recien")
 
     # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija. Lo cobrado cuenta
     # el día que se cobró; lo que espera, aparte.
@@ -337,6 +350,34 @@ if pagina == PAGINAS[11]:
                                    "cobro_volver_a_la_caja_candado", nivel="empleado"):
                             _ok_c, _texto_c = volver_a_la_caja(_corregir)
                             avisar("success" if _ok_c else "warning", _texto_c)
+                            st.rerun()
+                # LAS FACTURAS DEL DÍA (ver «LA FACTURA ELECTRÓNICA (ARCA)» en logica/facturas.py):
+                # las hechas, y hacerle la factura a una venta ya cobrada o anularla con la nota
+                # de crédito.
+                _facturas_dia = facturas_del_dia(_dia_txt)
+                if _facturas_dia or (configuracion_de_arca() and _cobradas):
+                    st.markdown("**🧾 Facturas electrónicas**")
+                if _facturas_dia:
+                    st.dataframe([{"Comprobante": nombre_del_comprobante(f["tipo"], f["punto_de_venta"],
+                                                                         f["numero"]),
+                                   "Venta": f"#{f['venta_id']}" if f["venta_id"] else "",
+                                   "Cliente": f["nombre_receptor"] or "", "Total": formato_precio(f["total"]),
+                                   "CAE": f["cae"] or "", "Estado": f["estado"]
+                                   + ("" if f["ambiente"] == "produccion" else " (prueba)")}
+                                  for f in _facturas_dia], width="stretch", hide_index=True)
+                if _cobradas and (configuracion_de_arca() or _facturas_dia):
+                    _fv = st.selectbox("Factura de la venta:", list(_cobradas), key="factura_de_la_venta",
+                                       format_func=lambda i: (f"#{i} · {_cobradas[i]['hora']} · "
+                                                              f"${miles(_cobradas[i]['total'] or 0, 0)}"))
+                    mostrar_la_factura_de(_fv, f"cierre_{_fv}")
+                    _vig = factura_vigente_de(_fv)
+                    if _vig and _vig["estado"] == "autorizada" and configuracion_de_arca():
+                        if candado("anular una factura",
+                                   st.button("🧾 Anularla con nota de crédito",
+                                             key="factura_nota_de_credito"),
+                                   "factura_nota_de_credito_candado", nivel="empleado"):
+                            _ok_n, _texto_n = nota_de_credito(_vig["id"])
+                            avisar("success" if _ok_n else "warning", _texto_n)
                             st.rerun()
                 # Lo corregido, a la vista de quien cierra la caja: quién, cuándo y qué.
                 _corregidos = cobros_corregidos(_dia_txt)

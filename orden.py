@@ -44,6 +44,7 @@ PARTES_DE_LA_LOGICA = [
     "mecanico.py",
     "deposito.py",
     "ventas.py",
+    "facturas.py",
     "mapa.py",
 ]
 
