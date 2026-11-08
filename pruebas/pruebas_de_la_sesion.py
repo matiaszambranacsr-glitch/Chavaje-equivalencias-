@@ -244,6 +244,16 @@ def probar():
                 [x.value for x in at.caption if "está en otra escala" in x.value],
                 ["⚠️ La lista de PRUEBACHOQUE está en otra escala: cuesta 15 veces menos que lo "
                  "mismo en otras marcas. Revisá el precio antes de cobrar."])
+        # Y en el presupuesto del buscador, de donde sale la venta o el WhatsApp.
+        at.session_state["carrito"] = {_id_vta: {"codigo": "CAMBA11.14", "marca": "PRUEBACHOQUE",
+                                                 "descripcion": "TUERCA", "precio": 1873,
+                                                 "cantidad": 1}}
+        at.session_state["pagina_actual"] = "🔍 Buscador"
+        at.run()
+        esperar("en el presupuesto también",
+                any("PRUEBACHOQUE" in w.value and "otra escala" in w.value for w in at.warning),
+                True)
+        at.session_state["carrito"] = {}
     finally:
         _gv["marcas_con_precios_fuera_de_escala"] = _fuera_real
         _gv["escala_de_precios_por_marca"] = _escala_real

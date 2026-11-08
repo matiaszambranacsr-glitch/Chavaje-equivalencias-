@@ -110,6 +110,14 @@ if pagina == PAGINAS[0]:
                        "y queda en el presupuesto.")
             pista_del_click_derecho("presupuesto", "Click derecho sobre un ítem: pedirlo al "
                                                    "depósito, dónde está o quitarlo.")
+            # La lista en otra escala, como en la venta (ver escala_de_precios_por_marca()):
+            # de acá sale la venta o el mensaje de WhatsApp con esos precios.
+            _fuera_cart = sorted({x["marca"] for x in _cart.values()}
+                                 & marcas_con_precios_fuera_de_escala())
+            if _fuera_cart:
+                st.warning(f"⚠️ Los precios de **{', '.join(_fuera_cart)}** están en otra escala "
+                           "que los de las demás marcas: revisalos antes de pasar el "
+                           "presupuesto.")
             for _pid, _item in list(_cart.items()):
                 with renglon_con_menu(f"presupuesto_{_pid}"):
                     ci0, ci1, ci2, ci3 = st.columns([0.4, 5, 2, 2 if _pedir_de_a_uno else 1])
@@ -1271,9 +1279,12 @@ if pagina == PAGINAS[0]:
                                     f"⚠️ Los precios de **{', '.join(_fuera_aca)}** están en "
                                     "otra escala que los de las demás marcas (unas "
                                     + ", ".join(
-                                        f"{miles(1 / escala_de_precios_por_marca()[_m]['factor'], 0)}"
-                                        f" veces {'menos' if escala_de_precios_por_marca()[_m]['factor'] < 1 else 'más'}"
-                                        for _m in _fuera_aca)
+                                        # Más cara o más barata: decía «0 veces más» si la
+                                        # lista estaba por encima (dividía al revés).
+                                        (f"{miles(1 / _fx, 0)} veces menos" if _fx < 1
+                                         else f"{miles(_fx, 0)} veces más")
+                                        for _m in _fuera_aca
+                                        for _fx in [escala_de_precios_por_marca()[_m]['factor']])
                                     + "): revisalos antes de cotizar. Se corrige con el "
                                     "coeficiente de la lista, en "
                                     f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista.")
