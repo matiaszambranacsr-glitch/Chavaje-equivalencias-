@@ -311,7 +311,8 @@ def probar(ns, gh, carpeta):
             (_r["atrasada"], _r["fecha_semilla"][:10], "🔓" in _r["por_que"]),
             (True, f"{_ultima_buena[8:10]}/{_ultima_buena[5:7]}/{_ultima_buena[:4]}", True))
     esperar("y la salud dice de cuándo es la última copia buena",
-            [f"la última copia que subió es del {_ultima_buena[:16]}" in p["detalle"]
+            [f"la última copia que subió es del {ns['fecha_legible'](_ultima_buena[:19])}"
+             in p["detalle"]
              for p in ns["diagnostico_de_salud"]() if "NO SE ESTÁ SUBIENDO" in p["titulo"]], [True])
     # «Frenada desde»: la primera vez, no la última vuelta del vigía.
     ns["guardar_config"]("copia_frenada_sin_cifrar", "2026-10-12 15:56:00")
