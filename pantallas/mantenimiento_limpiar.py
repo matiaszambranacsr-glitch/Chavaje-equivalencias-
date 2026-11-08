@@ -567,9 +567,17 @@ if pagina == PAGINAS[3]:
                                + (f"; le quedan {miles(len(_cortaria))} por cortar en la próxima "
                                   "pasada." if _cortaria else "."))
                 elif _cortaria:
+                    # Con el porqué, no solo los códigos: «F00099C015 ↔ FR 6 DC» no dice nada;
+                    # «un kit de cables y bujías contra la bujía que trae adentro», sí.
+                    _motivos_corte = collections.Counter(
+                        str(x.get("por_que") or "").split(":")[0].strip() or "otra pieza"
+                        for x in _cortaria)
                     st.caption(f"Apagado. Prendido, cortaría {miles(len(_cortaria))}: "
                                + ", ".join(f"{x['cod_a']} ↔ {x['cod_b']}" for x in _cortaria[:4])
-                               + ("…" if len(_cortaria) > 4 else "") + ".")
+                               + ("…" if len(_cortaria) > 4 else "") + ". Por qué: "
+                               + "; ".join(f"{_m} ({miles(_n)})"
+                                           for _m, _n in _motivos_corte.most_common(3))
+                               + ".")
                 _ca1, _ca2 = st.columns(2)
                 if candado("prender o apagar el corte automático",
                            _ca1.button("⏸️ Apagarlo" if _corte_auto else "🤖 Prenderlo",
