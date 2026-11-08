@@ -134,10 +134,18 @@ def probar(L):
                 if "NO SE ESTÁ SUBIENDO" in p["titulo"]]
     esperar("frenada y sin backup bajado: lo dice", [("no bajaste ninguno" in d) for d in _frenada()],
             [True])
+    # Y no hay un segundo aviso rojo por lo mismo («Backup atrasado»): hace 20 días.
+    ns["guardar_config"]("ultimo_backup_fecha", f"{datetime.now() - timedelta(days=20):%Y-%m-%d %H:%M:%S}")
+    esperar("con la copia frenada, un solo aviso de la copia",
+            [p["titulo"] for p in ns["diagnostico_de_salud"]() if p["titulo"] == "Backup atrasado"], [])
     ns["marcar_backup_bajado"]()
     esperar("bajado uno: dice de cuándo", [f"del {datetime.now():%d/%m/%Y}" in d for d in _frenada()],
             [True])
     ns["guardar_config"]("copia_frenada_sin_cifrar", "")
+    ns["guardar_config"]("ultimo_backup_fecha", f"{datetime.now() - timedelta(days=20):%Y-%m-%d %H:%M:%S}")
+    esperar("sin la copia frenada, el atraso sí se avisa",
+            [p["titulo"] for p in ns["diagnostico_de_salud"]() if p["titulo"] == "Backup atrasado"],
+            ["Backup atrasado"])
     return fallas
 
 

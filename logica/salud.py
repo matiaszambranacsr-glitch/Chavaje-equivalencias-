@@ -987,7 +987,9 @@ def diagnostico_de_salud():
         pass
 
     bk = estado_del_backup()
-    if bk["urgente"]:
+    # Con la copia frenada, «Backup atrasado» era un segundo aviso rojo por lo mismo: el de la
+    # copia frenada ya dice desde cuándo y de cuándo es el último backup bajado.
+    if bk["urgente"] and not obtener_config("copia_frenada_sin_cifrar", ""):
         if not bk["hay_backup"]:
             sumar_tecnico("alto", "Nunca se bajó un backup",
                   "El servidor borra el disco al reiniciar y restaura desde la última copia. "
