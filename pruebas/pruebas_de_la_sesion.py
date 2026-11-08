@@ -569,7 +569,7 @@ def probar():
     ns["guardar_config"]("lo_nuevo_visto", "")
 
     def _lo_nuevo(sesion):
-        return any(m.value == "**🆕 Lo nuevo**" for m in sesion.markdown)
+        return any(m.value.startswith("**🆕 Lo nuevo**") for m in sesion.markdown)
     _adm_n = sesion_nueva("clave-duenio-1")
     esperar("el administrador ve lo nuevo", _lo_nuevo(_adm_n), True)
     _rita_n = sesion_nueva("clave-rita-1")

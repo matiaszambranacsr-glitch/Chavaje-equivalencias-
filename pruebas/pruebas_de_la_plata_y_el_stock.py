@@ -11,6 +11,7 @@ su resumen, y el presupuesto del mecánico.
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -437,6 +438,14 @@ def probar(L):
              set(ns["SOLAPA_DE_LA_HERRAMIENTA"]) - _de_limpiar), (set(), set()))
     esperar("y la miga la nombra", "→ 💲 Precios →" in ns["miga_hasta"](
         "Precios que no cierran entre equivalentes"), True)
+    # Los textos fijos que van a la pantalla como markdown: dos «$» sin escapar se leen como una
+    # fórmula. El auditor mira los st.markdown escritos ahí mismo, no estas tablas: la de «📏
+    # Precios que no siguen la medida» salía con «424 entre dos de» en verde, como código.
+    _textos14 = ([t for h in ns["HERRAMIENTAS_MANTENIMIENTO"] for t in (h[0], h[2])]
+                 + [t for t, _ in ns["LO_NUEVO"]] + list(ns["PARA_QUE_SIRVE"].values())
+                 + list(ns["PARA_QUE_SIRVE_LA_SOLAPA"].values()))
+    esperar("ningún texto fijo trae dos «$» sin escapar",
+            [t for t in _textos14 if len(re.findall(r"(?<!\\)\$", str(t))) >= 2], [])
 
     # 15. EL PRECIO DE RELLENO (ver precios_de_relleno()): IMPERIAL pone 999.999 donde no tiene
     # precio, en micrómetros, carretillas y tuercas. Un precio repetido de verdad (el 930 de

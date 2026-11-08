@@ -1996,7 +1996,8 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "El $999.999 con que una lista dice «sin precio», cargado como si fuera un precio.",
      "precio relleno 999999 sin precio consultar absurdo carisimo mentira"),
     ("📏 Precios que no siguen la medida", 1,
-     "La llave de 1.1/4 a $424 entre dos de $40.000: el que se sale de su familia de medidas.",
+     "La llave de 1.1/4 que cuesta cien veces menos que las de al lado: el precio que se sale "
+     "de su familia de medidas.",
      "precio medida familia pulgada milimetro barato caro error lista ceros caja unidad"),
 
     ("🎯 Puntuar los vínculos para el buscador", 2,

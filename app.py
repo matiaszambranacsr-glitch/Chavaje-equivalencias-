@@ -298,6 +298,9 @@ if es_celular():
     .stRadio [role="radiogroup"] label p { font-size: 0.82rem !important; }
     /* En el celular los botones de cada producto se ven: lo del click derecho no va. */
     [data-testid="stLayoutWrapper"]:has(> [class*="st-key-pista_del_menu_"]) { display: none !important; }
+    /* «Enter para confirmar» se pisaba con el ejemplo de la caja («filtro aceite gol»), y en el
+       teléfono no hay Enter: el teclado tiene su propio «Ir». Se vio en una captura a 390 px. */
+    [data-testid="InputInstructions"] { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 else:
@@ -731,9 +734,12 @@ if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
     try:
         if obtener_config("lo_nuevo_visto", "") != VERSION_DE_LO_NUEVO:
             with st.container(border=True):
-                st.markdown("**🆕 Lo nuevo**")
-                for _nuevo, _donde in LO_NUEVO:
-                    st.markdown(f"- {_nuevo} *({_donde})*")
+                st.markdown(f"**🆕 Lo nuevo** ({len(LO_NUEVO)})")
+                # En una caja con su propia barra: con diez novedades ocupaba la primera pantalla
+                # entera de cada sección, hasta tocar «Entendido» (se vio en una captura).
+                with st.container(height=240 if len(LO_NUEVO) > 4 else "content", border=False):
+                    for _nuevo, _donde in LO_NUEVO:
+                        st.markdown(f"- {_nuevo} *({_donde})*")
                 if st.button("👍 Entendido", key="lo_nuevo_entendido"):
                     guardar_config("lo_nuevo_visto", VERSION_DE_LO_NUEVO)
                     st.rerun()

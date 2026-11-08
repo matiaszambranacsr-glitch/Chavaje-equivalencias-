@@ -7049,6 +7049,14 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 🖼️ Lo que mostraron las capturas de las pantallas nuevas
+
+Con la app corriendo sobre la copia de la base, en la computadora y en un iPhone emulado:
+
+- **«📏 Precios que no siguen la medida»** decía «La llave de 1.1/4 a $424 entre dos de $40.000»: los dos «$» se leían como una fórmula y salía «424 entre dos de» en verde, como código. El auditor mira los `st.markdown` escritos ahí mismo, no las tablas de textos: ahora `pruebas_de_la_plata_y_el_stock.py` (14) revisa todos los textos fijos que van a la pantalla (las herramientas, «🆕 Lo nuevo», para qué sirve cada sección y cada solapa).
+- **«🆕 Lo nuevo»**, con diez novedades, ocupaba la primera pantalla entera de cada sección hasta tocar «Entendido». Ahora va en una caja de 240 px con su propia barra, y la caja de búsqueda de la venta se ve sin bajar.
+- **En el celular**, «Enter para confirmar» se pisaba con el ejemplo de la caja de búsqueda («filtro aceite gol»), y en el teléfono no hay Enter: el teclado tiene su «Ir». Se esconde en la vista de celular.
+
 ## 💲 Qué hace la lista con tus precios, antes de importarla
 
 El aumento de una lista se veía después: en «📌 Para pedir» la variación de los últimos meses, en la salud el atraso. Pero el momento de saber «esta lista sube 12%» o «esta lista baja la mitad de los precios» es antes de apretar «Procesar»: si vino mal (otra columna de precio, sin IVA, la de otra sucursal), todavía no se tocó nada.
