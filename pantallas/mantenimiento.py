@@ -18,7 +18,7 @@ if pagina == PAGINAS[3]:
         if texto_prod_borrar.strip():
             res_borrar = buscar_por_texto(texto_prod_borrar)
             if not res_borrar:
-                clean_borrar = sanitizar(texto_prod_borrar)
+                clean_borrar = codigo_para_buscar(texto_prod_borrar)
                 if clean_borrar:
                     res_borrar = buscar_por_codigo(clean_borrar)
             if res_borrar:

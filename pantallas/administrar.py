@@ -594,7 +594,7 @@ if pagina == PAGINAS[3]:
         if texto_prod.strip():
             res_admin = buscar_por_texto(texto_prod)
             if not res_admin:
-                clean_admin = sanitizar(texto_prod)
+                clean_admin = codigo_para_buscar(texto_prod)
                 if clean_admin:
                     res_admin = buscar_por_codigo(clean_admin)
             if res_admin:

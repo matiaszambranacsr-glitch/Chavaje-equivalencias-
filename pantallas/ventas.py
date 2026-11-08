@@ -146,7 +146,8 @@ if pagina == PAGINAS[9]:
             st.session_state.pop("venta_resultados", None)
             st.rerun()
         if _buscar_vta and _texto_vta.strip():
-            _clean_vta = sanitizar(_texto_vta)
+            # Escrito con sus signos, el que entró aparte (ver codigo_para_buscar()).
+            _clean_vta = codigo_para_buscar(_texto_vta)
             _res_vta = buscar_con_variantes_del_cero(_clean_vta, "Todas", 3)[0] if _clean_vta else []
             # Por código, los resultados son lo buscado y sus equivalencias: cada uno con el
             # veredicto del buscador (🟢🟡🟠🔴), que viaja con lo vendido. Por descripción
@@ -158,10 +159,15 @@ if pagina == PAGINAS[9]:
             if not _res_vta:
                 _filas_vta = [dict(f) for f in buscar_por_texto(_texto_vta)[:15]]
             st.session_state["venta_resultados"] = (_filas_vta, _texto_vta.strip())
+            # Y el otro que sin los signos se escribe igual, para no vender uno por el otro.
+            st.session_state["venta_iguales"] = (aviso_de_los_que_se_escriben_igual(_clean_vta)
+                                                 if _clean_vta and _res_vta else "")
             st.session_state.pop("venta_a_confirmar", None)
         _resultados_vta, _pedido_vta = st.session_state.get("venta_resultados", ([], ""))
         if _resultados_vta:
             st.caption(f"{len(_resultados_vta)} resultado(s) para «{_pedido_vta}».")
+            if st.session_state.get("venta_iguales"):
+                st.info(st.session_state["venta_iguales"])
             # Cada renglón con su menú: en la computadora los botones salen con el click
             # derecho (ver «EL CLICK DERECHO» en logica/interfaz.py); en el celular, se ven.
             pista_del_click_derecho(

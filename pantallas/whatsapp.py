@@ -30,7 +30,7 @@ if pagina == PAGINAS[5]:
     if _sumar and _pedido.strip():
         _no_estan = []
         for _cod in [x.strip() for x in re.split(r"[,;\n]+", _pedido) if x.strip()]:
-            _clean = sanitizar(_cod)
+            _clean = codigo_para_buscar(_cod)
             _res = []
             if _clean:
                 _res, _ = buscar_con_variantes_del_cero(_clean, "Todas", 3)

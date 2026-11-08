@@ -218,6 +218,17 @@ def probar():
     _cod, _aviso = _buscar("CAMBA1114")
     esperar("sin los signos, la de 5/32, y avisa de la de 9/16",
             (_cod, ["CAMBA11.14" in x for x in _aviso]), (["CAMBA111.4"], [True]))
+    # Y en la venta, igual: antes traía la de 5/32 escribiendo la de 9/16.
+    at.session_state["pagina_actual"] = ns["PAGINAS"][9]
+    at.run()
+    at.text_input(key="venta_buscar").set_value("CAMBA11.14")
+    [b for b in at.button if "Buscar" in b.label and b.key != "refrescar_salud"][0].click().run()
+    _vta = at.session_state["venta_resultados"][0] if "venta_resultados" in at.session_state else []
+    esperar("en la venta, con los signos, la de 9/16 primero, y avisa de la otra",
+            ([f.get("Codigo") for f in _vta][:1],
+             "CAMBA111.4" in (at.session_state["venta_iguales"]
+                              if "venta_iguales" in at.session_state else "")),
+            (["CAMBA11.14"], True))
     at.session_state["pagina_actual"] = "📁 Cargar Excel"
     at.run()
     esperar("sin errores con los choques", [e.value for e in at.exception], [])

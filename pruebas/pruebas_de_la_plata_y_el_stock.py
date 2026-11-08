@@ -422,6 +422,12 @@ def probar(L):
     esperar("el que está escrito igual sin los signos, en la lista del otro",
             [x["Código"] for x in ns["los_que_se_escriben_igual"](
                 ns["codigo_de_la_variante"]("CAM-A1781-030"))], ["CAM-A1781+030"])
+    # Lo que escribe la gente en cualquier buscador (ver codigo_para_buscar()): con los signos
+    # del que entró aparte, ese; con los del otro o sin signos, el de siempre.
+    esperar("qué se busca según cómo se escribe",
+            [ns["codigo_para_buscar"](x) for x in ("CAM-A1781-030", "cam-a1781-030",
+                                                    "CAM-A1781+030", "CAMA1781030")],
+            [ns["codigo_de_la_variante"]("CAM-A1781-030")] * 2 + ["CAMA1781030"] * 2)
     return fallas
 
 

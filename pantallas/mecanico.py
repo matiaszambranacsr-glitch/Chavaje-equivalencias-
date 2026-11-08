@@ -125,7 +125,7 @@ if pagina == PAGINAS[7]:
                         cp1.write(f"{etiqueta}{punto['nombre_pieza']}" + (f" — `{punto['codigo']}`" if punto.get("codigo") else ""))
                         if punto.get("codigo"):
                             if cp2.button("🔍 Buscar", key=f"buscar_punto_{punto['id']}"):
-                                clean_punto = sanitizar(punto["codigo"])
+                                clean_punto = codigo_para_buscar(punto["codigo"])
                                 res_punto = buscar_por_codigo(clean_punto) if clean_punto else []
                                 if not res_punto:
                                     res_punto = buscar_por_texto(punto["nombre_pieza"])

@@ -880,6 +880,35 @@ def los_que_se_escriben_igual(codigo_clean):
     return otros
 
 
+def codigo_para_buscar(texto):
+    """El código limpio con que se busca lo que alguien escribió: el de siempre, o —si lo
+    escribió con los signos de uno que entró aparte (ver codigo_de_la_variante())— el de ese.
+    Lo usan todos los lugares donde se escribe un código para buscarlo: el buscador, la venta,
+    la lista de WhatsApp, el mecánico. Con solo el buscador arreglado, la venta traía la
+    tuerca de 5/32 escribiendo la de 9/16 («CAMBA11.14»)."""
+    limpio = sanitizar(texto)
+    variante = codigo_de_la_variante(texto) if limpio else ""
+    if variante:
+        c.execute("SELECT 1 FROM productos WHERE codigo_clean = ? LIMIT 1", (variante,))
+        if c.fetchone():
+            return variante
+    return limpio
+
+
+def aviso_de_los_que_se_escriben_igual(codigo_clean):
+    """El aviso en markdown («🔀 Sin los signos se escribe igual que…») si hay otro producto
+    que sin los signos se escribe igual que este código, o "". Con los «$» escapados."""
+    iguales = los_que_se_escriben_igual(codigo_clean)
+    if not iguales:
+        return ""
+    return ("🔀 **Sin los signos se escribe igual que** " + "; ".join(
+        f"**{x['Código']}** de {x['Marca']} ({(x['Descripción'] or '')[:40]}"
+        + (f", {formato_precio(x['Precio'])}" if x.get("Precio") else "") + ")"
+        for x in iguales[:4])
+        + ": es otro producto. Para traerlo, escribí el código con sus signos.").replace(
+            "$", "\\$")
+
+
 def es_otro_producto_con_el_mismo_codigo(raw, producto_id, formas):
     """Si este código de la lista cae en un producto escrito distinto, y la lista trae también
     el código escrito como ese producto, es otro producto que sin los signos se escribe igual:
