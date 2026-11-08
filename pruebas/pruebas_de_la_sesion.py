@@ -257,6 +257,16 @@ def probar():
     finally:
         _gv["marcas_con_precios_fuera_de_escala"] = _fuera_real
         _gv["escala_de_precios_por_marca"] = _escala_real
+    # Sin precio (el 999.999 que la lista usa para decir que no lo tiene entra vacío: ver
+    # precios_de_relleno()): la venta lo dice en el renglón, en vez de cobrarlo en 0 callada.
+    ns["c"].execute("UPDATE productos SET precio = NULL WHERE id = ?", (_id_vta,))
+    ns["conn"].commit()
+    at.session_state["venta_items"] = [ns["item_de_venta"](_id_vta, 1, "CAMBA11.14")]
+    at.session_state["pagina_actual"] = ns["PAGINAS"][9]
+    at.run()
+    esperar("en la venta, el que no tiene precio se avisa en el renglón",
+            [x.value for x in at.caption if "Sin precio" in x.value],
+            ["⚠️ Sin precio: la lista no lo trae. Ponelo antes de cobrar."])
     at.session_state["venta_items"] = []
     at.session_state["pagina_actual"] = "📁 Cargar Excel"
     at.run()

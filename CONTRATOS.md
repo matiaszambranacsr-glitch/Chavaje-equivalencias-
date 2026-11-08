@@ -173,6 +173,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | La vista previa del descarte automático dice qué se iría, por qué y con ejemplos, sin sacar nada de la cola | `lo_que_descartaria()` | `pruebas_de_la_precision.py` (80) |
 | «🆕 Lo nuevo» sale al administrador una vez por versión, hasta «Entendido»; al operador, nunca | `LO_NUEVO`, `VERSION_DE_LO_NUEVO` | `pruebas_de_la_sesion.py` (10) |
 | En el CSV del catálogo exportado, lo que una planilla tomaría por fórmula («=», «+», «@») viaja como texto, con un apóstrofo; el «-» no se toca | `celda_segura_para_planilla()` | `pruebas_de_la_precision.py` (34) |
+| La venta avisa en el renglón cuando el producto no tiene precio | `pantallas/ventas.py` | `pruebas_de_la_sesion.py` (2d) |
 | La venta avisa en el renglón cuando la lista de la marca está en otra escala | `marcas_con_precios_fuera_de_escala()` (pantallas/ventas.py) | `pruebas_de_la_sesion.py` (2d) |
 | El coeficiente de una lista fuera de escala se muestra con ejemplos de la misma pieza en otro proveedor (los más cercanos a la mediana, uno por producto) | `ejemplos_de_la_escala()` | `pruebas_de_los_cambios.py` (9f) |
 | Los códigos adivinados de una lista que no los marca incluyen los aprobados en bloque que unen dos productos o más; nunca lo verificado ni lo aprobado de a uno | `codigos_adivinados_que_no_unen_nada()`, `pares_aprobados_sin_mirarlos()` | `pruebas_de_la_plata_y_el_stock.py` (12) |

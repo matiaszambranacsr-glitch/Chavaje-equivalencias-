@@ -280,6 +280,11 @@ if pagina == PAGINAS[9]:
                                        else f"{miles(_f_vta, 0)} veces más")
                                     + " que lo mismo en otras marcas. Revisá el precio antes de "
                                       "cobrar.")
+                    # Sin precio: la lista no lo trae (el 999.999 de IMPERIAL entra vacío, ver
+                    # precios_de_relleno()). Cobrarlo en 0 puede ser a propósito —una garantía, un
+                    # regalo—, pero entraba en 0 sin que nadie lo notara.
+                    if not _it["precio"]:
+                        _c1.caption("⚠️ Sin precio: la lista no lo trae. Ponelo antes de cobrar.")
                     with acciones_del_renglon(_c4, f"carrito_vta_{_k}"):
                         if not es_celular():
                             st.button("➕ Uno más", key=f"venta_mas_{_k}",

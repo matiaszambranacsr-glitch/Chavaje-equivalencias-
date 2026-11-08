@@ -7045,6 +7045,8 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 - **El freno de saltos** no compara contra él: el primer precio de verdad de la tuerca que estaba a $1.437.139 se frenaba por «333 veces más barato» y se quedaba el de mentira.
 - **Para los que ya están**: Mantenimiento → 🧹 Limpiar y corregir → 💲 Precios → «🧹 Precios de relleno de una lista», con la tabla y el botón «Dejarlos sin precio» (el número queda en el historial de cada producto). La salud lo avisa en rojo.
 
+- **En la venta**, el renglón de un producto sin precio dice «⚠️ Sin precio: la lista no lo trae. Ponelo antes de cobrar.». Se puede cobrar en 0 (una garantía, un regalo), pero entraba en 0 sin que nadie lo notara.
+
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
 ## 🗂️ «Limpiar y corregir», en tres solapas
