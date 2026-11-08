@@ -894,6 +894,12 @@ if pagina == PAGINAS[0]:
                 resultados_guardados = []
                 for codigo_individual in codigos_buscados:
                     clean = sanitizar(codigo_individual)
+                    # Escrito con sus signos, el que entró aparte por escribirse igual que otro
+                    # sin ellos: «CAM-A1781-030» es esa camisa, no la +030 (ver
+                    # codigo_de_la_variante()).
+                    _clean_v = codigo_de_la_variante(codigo_individual)
+                    if _clean_v and existe_el_codigo(_clean_v):
+                        clean = _clean_v
                     if not clean:
                         resultados_guardados.append(
                             {"codigo_individual": codigo_individual, "clean": None, "res": None}
@@ -924,7 +930,8 @@ if pagina == PAGINAS[0]:
                     # el tipeado no encontraban nada.
                     _buscada = next((f for f in res or []
                                      if f.get("Cadena") == "— el buscado"), None)
-                    if _buscada and sanitizar(_buscada["Codigo"]):
+                    if (_buscada and sanitizar(_buscada["Codigo"])
+                            and not es_codigo_de_variante(clean)):
                         clean = sanitizar(_buscada["Codigo"])
                     if res:
                         incrementar_veces_buscado(clean)
@@ -1018,6 +1025,18 @@ if pagina == PAGINAS[0]:
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1), key=f"exp_resultado_{clean}"):
                     if item.get("aviso"):
                         st.warning(item["aviso"])
+                    # EL OTRO QUE SIN LOS SIGNOS SE ESCRIBE IGUAL: la junta de ½" y la de 12" de
+                    # IMPERIAL, la camisa +030 y la -030. Una consulta por el índice del código.
+                    _iguales = los_que_se_escriben_igual(clean)
+                    if _iguales:
+                        st.info(
+                            ("🔀 **Sin los signos se escribe igual que** " + "; ".join(
+                                f"**{x['Código']}** de {x['Marca']} "
+                                f"({(x['Descripción'] or '')[:40]}"
+                                + (f", {formato_precio(x['Precio'])}" if x.get("Precio") else "")
+                                + ")" for x in _iguales[:4])
+                             + ": es otro producto. Para traerlo, escribí el código con sus "
+                               "signos.").replace("$", "\\$"))
                     # Una patente escrita en el buscador. Pasa: el cliente la dice y el que
                     # atiende la escribe donde está el cursor. En vez de «sin resultados», que
                     # es cierto pero no ayuda, se dice qué es y dónde se usa.

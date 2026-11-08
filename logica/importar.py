@@ -788,9 +788,10 @@ def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
 # PTFE HI-LON.2100 S150 1/2"» estaba a $48.209, 75 veces lo que vale, y la tuerca de 5/32 al
 # precio de la de 9/16. Y los vínculos del segundo renglón se le colgaban al primero.
 # Ahora el renglón escrito distinto que el producto —si la lista también trae el escrito como
-# él— es otro producto: no le toca el precio ni los vínculos, y va a las filas que no entraron
-# con el motivo. Volver a importar la lista corrige los precios que quedaron mal (los que bajan
-# mucho los para el freno, para mirarlos).
+# él— es otro producto: no le toca el precio ni los vínculos del primero, y entra APARTE, con un
+# código limpio propio (ver codigo_de_la_variante()). Volver a importar la lista corrige los
+# precios que quedaron mal (los que bajan mucho los para el freno, para mirarlos) y carga los
+# 210 que faltaban: buscar CAM-A1781-030 traía la camisa +030.
 # El mismo código escrito igual dos veces (la unidad y la caja) sigue como antes: queda el último
 # y se avisa (ver codigos_con_dos_precios_en_la_misma_lista()).
 
@@ -819,6 +820,64 @@ def como_se_escribe_cada_codigo(celdas):
             if limpio:
                 formas.setdefault(limpio, set()).add(_escrito(raw))
     return formas
+
+
+# EL CÓDIGO LIMPIO DEL OTRO. Sin los signos son iguales, así que el limpio de siempre no sirve:
+# lleva adelante ese mismo limpio —para encontrarlo al lado del primero— y después de MARCA_DE_
+# VARIANTE, ocho letras sacadas de cómo está escrito. sanitizar() nunca devuelve esa marca: no
+# puede chocar con ningún código de ninguna lista ni cruzarse con otra lista por el código.
+MARCA_DE_VARIANTE = "~"
+
+
+def codigo_de_la_variante(raw):
+    """El código limpio de un producto que sin los signos se escribe igual que otro de su
+    lista: «CAMA1781030~3F09A1C2». Siempre el mismo para la misma forma de escribirlo."""
+    limpio = sanitizar(raw)
+    if not limpio:
+        return ""
+    return (f"{limpio}{MARCA_DE_VARIANTE}"
+            f"{hashlib.sha1(_escrito(raw).encode('utf-8')).hexdigest()[:8].upper()}")
+
+
+def es_codigo_de_variante(codigo_clean):
+    return MARCA_DE_VARIANTE in str(codigo_clean or "")
+
+
+def variantes_cargadas(marca_id):
+    """Los códigos limpios de variante que ya tiene una lista: así, si la lista nueva trae
+    solo el segundo de un par, va a SU producto y no al primero."""
+    c.execute("SELECT codigo_clean FROM productos WHERE marca_id = ? AND codigo_clean LIKE ?",
+              (marca_id, f"%{MARCA_DE_VARIANTE}%"))
+    return {r[0] for r in c.fetchall()}
+
+
+def los_que_se_escriben_igual(codigo_clean):
+    """Los productos que sin los signos se escriben igual que este código (el primero y los
+    que entraron aparte), menos él mismo: para avisarlo en el buscador. Lista de filas con
+    ID, Código, Marca, Descripción, Precio y Stock."""
+    base = str(codigo_clean or "").split(MARCA_DE_VARIANTE)[0]
+    if not base:
+        return []
+    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Código", m.nombre AS "Marca",
+                        p.descripcion AS "Descripción", p.precio AS "Precio",
+                        p.stock AS "Stock", p.codigo_clean AS "_clean"
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.codigo_clean >= ? AND p.codigo_clean < ? AND p.codigo_clean <> ?""",
+              (base + MARCA_DE_VARIANTE, base + chr(ord(MARCA_DE_VARIANTE) + 1), codigo_clean))
+    otros = filas_a_listas(c)
+    if not otros and not es_codigo_de_variante(codigo_clean):
+        return []
+    if es_codigo_de_variante(codigo_clean):
+        # El primero del par (con el limpio de siempre), de la misma lista que la variante.
+        c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Código", m.nombre AS "Marca",
+                            p.descripcion AS "Descripción", p.precio AS "Precio",
+                            p.stock AS "Stock", p.codigo_clean AS "_clean"
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_clean = ? AND p.marca_id IN
+                           (SELECT marca_id FROM productos WHERE codigo_clean = ?)""",
+                  (base, codigo_clean))
+        otros = filas_a_listas(c) + otros
+    return otros
 
 
 def es_otro_producto_con_el_mismo_codigo(raw, producto_id, formas):

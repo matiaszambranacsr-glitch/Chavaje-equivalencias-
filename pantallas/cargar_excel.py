@@ -744,6 +744,9 @@ if pagina == PAGINAS[2]:
                         # guardar_coeficiente_de_lista(). Sin esto, corregir la escala una
                         # vez no alcanzaba: la lista siguiente volvía a traer los crudos.
                         _coef_lista = coeficiente_de_lista(prov_id)
+                        # Los que ya entraron aparte por escribirse igual que otro sin los
+                        # signos: ver codigo_de_la_variante().
+                        _variantes_de_la_lista = variantes_cargadas(prov_id)
 
                         for n, fila in enumerate(filas_datos):
                             def celda(idx):
@@ -825,25 +828,32 @@ if pagina == PAGINAS[2]:
                             # equivalencias con nada.
                             ids_prov = []
                             ids_prov_sin_digitos = set()
-                            _choco = False
+                            _variantes_de_la_fila = set()
                             for raw_p in codigos_prov:
                                 clean_p = sanitizar(raw_p)
                                 if clean_p:
-                                    pid_nuevo = get_or_create_producto(raw_p, clean_p, desc, prov_id)
-                                    # Otro producto que sin los signos se escribe igual: ni su
-                                    # precio ni sus vínculos van al que ya está (ver «DOS
+                                    # Otro producto que sin los signos se escribe igual que uno
+                                    # de la lista: entra aparte, con su código limpio propio, y
+                                    # ni su precio ni sus vínculos van al primero (ver «DOS
                                     # PRODUCTOS DE LA LISTA QUE SIN LOS SIGNOS SE ESCRIBEN IGUAL»).
-                                    _el_otro = es_otro_producto_con_el_mismo_codigo(
-                                        raw_p, pid_nuevo, _formas_de_la_lista)
-                                    if _el_otro:
-                                        _choco = True
-                                        choques_de_codigo.append(f"{raw_p} y {_el_otro}")
-                                        filas_omitidas.append({
-                                            "Proveedor": raw_p, "OEM": raw_o_cell,
-                                            "Descripcion": desc,
-                                            "Motivo": f"sin los signos se escribe igual que "
-                                                      f"{_el_otro}, que es otro producto"})
-                                        continue
+                                    # Si ya entró así antes, va directo al suyo: aunque esta
+                                    # lista no traiga el primero.
+                                    clean_v = codigo_de_la_variante(raw_p)
+                                    if clean_v in _variantes_de_la_lista:
+                                        pid_nuevo = get_or_create_producto(raw_p, clean_v, desc,
+                                                                           prov_id)
+                                        _variantes_de_la_fila.add(raw_p)
+                                    else:
+                                        pid_nuevo = get_or_create_producto(raw_p, clean_p, desc,
+                                                                           prov_id)
+                                        _el_otro = es_otro_producto_con_el_mismo_codigo(
+                                            raw_p, pid_nuevo, _formas_de_la_lista)
+                                        if _el_otro:
+                                            choques_de_codigo.append(f"{raw_p} y {_el_otro}")
+                                            pid_nuevo = get_or_create_producto(raw_p, clean_v, desc,
+                                                                               prov_id)
+                                            _variantes_de_la_lista.add(clean_v)
+                                            _variantes_de_la_fila.add(raw_p)
                                     ids_prov.append(pid_nuevo)
                                     # Lo que dice ESTA lista: ver fichas_que_cambiaron().
                                     if desc:
@@ -874,9 +884,8 @@ if pagina == PAGINAS[2]:
 
                             if not ids_prov:
                                 omitidos += 1
-                                if not _choco:      # ya está, con su motivo
-                                    filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell,
-                                                           "Descripcion": desc, "Motivo": "código de proveedor no válido"})
+                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell,
+                                                        "Descripcion": desc, "Motivo": "código de proveedor no válido"})
                                 if total and n % 25 == 0:
                                     progreso.progress(min((n + 1) / total, 1.0))
                                 continue
@@ -884,7 +893,10 @@ if pagina == PAGINAS[2]:
                             # El código del proveedor ES el de fábrica: se carga también como OEM
                             # para que enganche con las listas de otros proveedores.
                             if prov_es_oem:
-                                for raw_p in codigos_prov:
+                                # Menos el que entró aparte: su código, sin los signos, es el
+                                # del otro producto, y lo uniría con él.
+                                for raw_p in [x for x in codigos_prov
+                                              if x not in _variantes_de_la_fila]:
                                     clean_p = sanitizar(raw_p)
                                     if clean_p and clean_p not in {sanitizar(x) for x in codigos_oem}:
                                         codigos_oem.append(raw_p)
@@ -1212,9 +1224,10 @@ if pagina == PAGINAS[2]:
                         st.warning(
                             f"🔀 {miles(len(choques_de_codigo))} renglón(es) son **otro producto que, "
                             "sin los signos, se escribe igual** que uno de la lista (como la junta "
-                            "de ½\" y la de 12\" de IMPERIAL): el producto que ya estaba quedó con "
-                            "su precio, y esos renglones no entraron. Están en las filas omitidas, "
-                            "abajo. Ejemplos: " + ", ".join(choques_de_codigo[:5])
+                            "de ½\" y la de 12\" de IMPERIAL): cada uno entró aparte, con su "
+                            "precio, y el que ya estaba se quedó con el suyo. Para encontrarlo, "
+                            "escribí el código con sus signos. Ejemplos: "
+                            + ", ".join(choques_de_codigo[:5])
                         )
                     if precios_en_cero:
                         st.caption(
@@ -1242,14 +1255,11 @@ if pagina == PAGINAS[2]:
                         )
                     if omitidos:
                         # Por motivo: decía «porque no tenían código de proveedor» para todas, y
-                        # con la lista de IMPERIAL las 210 omitidas sí lo tenían (eran otro
-                        # producto que se escribe igual sin los signos: ver arriba).
+                        # no siempre era eso.
                         _motivos_omitidas = collections.Counter(
-                            "son otro producto que sin los signos se escribe igual"
-                            if f["Motivo"].startswith("sin los signos")
-                            else {"sin código de proveedor": "no tenían código de proveedor",
-                                  "código de proveedor no válido":
-                                      "el código de proveedor no es válido"}.get(
+                            {"sin código de proveedor": "no tenían código de proveedor",
+                             "código de proveedor no válido":
+                                 "el código de proveedor no es válido"}.get(
                                 f["Motivo"], f["Motivo"])
                             for f in filas_omitidas)
                         st.warning(f"Se omitieron {miles(omitidos)} filas: " + "; ".join(

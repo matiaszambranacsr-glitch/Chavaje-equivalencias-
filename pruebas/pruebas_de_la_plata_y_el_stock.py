@@ -398,6 +398,30 @@ def probar(L):
               for x in ns["codigos_adivinados_que_no_unen_nada"]() if x["Lista"] == "ADIVINA12"}
     esperar("aprobado en bloque y uniendo tres: aparece; de a uno, verificado o uno solo, no",
             _adv12, {"120Amp": (3, 3)})
+
+    # 13. EL QUE ENTRÓ APARTE POR ESCRIBIRSE IGUAL SIN LOS SIGNOS (ver codigo_de_la_variante()):
+    # su código limpio no es el que da sanitizar() a propósito. «Limpiar y corregir» no lo
+    # cuenta como desfasado ni lo «arregla»: lo fusionaría con el otro. Y el otro, que sí está
+    # desfasado, se sigue arreglando.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('VARIANTE13', 'PROVEEDOR')")
+    _m13 = c.lastrowid
+    _var13 = ns["get_or_create_producto"]("CAM-A1781-030", ns["codigo_de_la_variante"]("CAM-A1781-030"),
+                                          "CAMISA FIAT", _m13)
+    _base13 = ns["get_or_create_producto"]("CAM-A1781+030", ns["sanitizar"]("CAM-A1781+030"),
+                                           "CAMISA FIAT", _m13)
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('VIEJO-1', 'VIEJO1X', 'DESFASADO', ?)", (_m13,))
+    conn.commit()
+    _desf13 = {x["raw"] for x in ns["codigos_limpios_desfasados"]()
+               if x["marca_id"] == _m13}
+    esperar("desfasado el de verdad, no el que entró aparte", _desf13, {"VIEJO-1"})
+    ns["reparar_codigos_limpios"]()
+    esperar("arreglar no fusiona el que entró aparte",
+            c.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)",
+                      (_var13, _base13)).fetchone()[0], 2)
+    esperar("el que está escrito igual sin los signos, en la lista del otro",
+            [x["Código"] for x in ns["los_que_se_escriben_igual"](
+                ns["codigo_de_la_variante"]("CAM-A1781-030"))], ["CAM-A1781+030"])
     return fallas
 
 

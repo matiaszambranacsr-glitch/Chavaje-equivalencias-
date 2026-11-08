@@ -158,10 +158,11 @@ def probar():
     esperar("sin errores al importar", [e.value for e in at.exception], [])
 
     # 2d. Dos productos de la lista que sin los signos se escriben igual (la tuerca CAMBA111.4 de
-    # 5/32 y la CAMBA11.14 de 9/16, de IMPERIAL): el producto queda con SU precio y el otro
-    # renglón no entra, con el motivo. Antes quedaba con la descripción del primero y el precio
+    # 5/32 y la CAMBA11.14 de 9/16, de IMPERIAL): cada uno con SU precio, el segundo aparte, con
+    # su código limpio propio. Antes había uno solo, con la descripción del primero y el precio
     # del segundo. El mismo código escrito igual dos veces (la unidad y la caja) sigue como
-    # antes: se avisa como repetido. Ver es_otro_producto_con_el_mismo_codigo().
+    # antes: se avisa como repetido. Ver es_otro_producto_con_el_mismo_codigo() y
+    # codigo_de_la_variante().
     def _importar(nombre, renglones):
         with open(nombre, "w", encoding="utf-8") as f:
             f.write("Codigo;Descripcion;Precio;Stock\n" + "".join(r + "\n" for r in renglones))
@@ -181,11 +182,12 @@ def probar():
     _importar("choque.csv", _tuercas + ["DOBLE-1;JUNTA UNIDAD;100;1", "DOBLE-1;JUNTA CAJA;900;1"])
     esperar("choque: la tuerca de 5/32 con su precio, y una sola", _precio("CAMBA1114"),
             [("TUERCA ZINC 5/32", 987.0)])
+    esperar("y la de 9/16 entró aparte, con su precio", _precio(ns["codigo_de_la_variante"]("CAMBA11.14")),
+            [("TUERCA NAT 9/16", 1873.0)])
     esperar("y lo dice", any("otro producto que" in w.value and "CAMBA11.14" in w.value
-                             for w in at.warning), True)
-    esperar("las omitidas, con su motivo (no «sin código de proveedor»)",
-            [w.value for w in at.warning if w.value.startswith("Se omitieron")],
-            ["Se omitieron 1 filas: 1 son otro producto que sin los signos se escribe igual."])
+                             and "entró aparte" in w.value for w in at.warning), True)
+    esperar("ninguna fila omitida",
+            [w.value for w in at.warning if w.value.startswith("Se omitieron")], [])
     esperar("escrito igual dos veces: se avisa como repetido, como antes",
             any("más de una vez en la lista" in w.value and "DOBLE-1" in w.value
                 for w in at.warning), True)
@@ -195,6 +197,29 @@ def probar():
     _importar("choque2.csv", _tuercas + ["OTRA-1;JUNTA;50;1"])
     esperar("reimportada: la de 5/32 vuelve a su precio", _precio("CAMBA1114"),
             [("TUERCA ZINC 5/32", 987.0)])
+    esperar("y la de 9/16 sigue siendo una sola, aparte",
+            ns["c"].execute("SELECT COUNT(*) FROM productos WHERE codigo_raw = 'CAMBA11.14'")
+            .fetchone()[0], 1)
+    # Y en el buscador: escrito con sus signos trae la de 9/16; sin ellos, la de 5/32, y avisa
+    # que hay otra que se escribe igual.
+    at.session_state["pagina_actual"] = "🔍 Buscador"
+    at.run()
+
+    def _buscar(codigo):
+        at.text_input(key="busqueda_input").set_value(codigo)
+        [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+        _buscado = [f for x in at.session_state["ultima_busqueda_codigo"] for f in x["res"] or []
+                    if f.get("Cadena") == "— el buscado"]
+        return ([f["Codigo"] for f in _buscado],
+                [i.value for i in at.info if "Sin los signos se escribe igual" in i.value])
+    _cod, _aviso = _buscar("CAMBA11.14")
+    esperar("con los signos, la de 9/16, y avisa de la de 5/32",
+            (_cod, ["CAMBA111.4" in x for x in _aviso]), (["CAMBA11.14"], [True]))
+    _cod, _aviso = _buscar("CAMBA1114")
+    esperar("sin los signos, la de 5/32, y avisa de la de 9/16",
+            (_cod, ["CAMBA11.14" in x for x in _aviso]), (["CAMBA111.4"], [True]))
+    at.session_state["pagina_actual"] = "📁 Cargar Excel"
+    at.run()
     esperar("sin errores con los choques", [e.value for e in at.exception], [])
     # En la app de internet la ruta se leería en el servidor, no en el teléfono: no se ofrece.
     _en_la_nube = _g["corre_en_streamlit_cloud"]

@@ -647,8 +647,11 @@ _RE_DECIMAL_DE_EXCEL = re.compile(r"\d+\.0+")
 
 def _codigos_con_decimal_de_excel():
     """[(id, codigo_raw)] de los que tienen el «.0» de Excel. Ver _RE_DECIMAL_DE_EXCEL."""
+    # Menos el que entró aparte por escribirse igual que otro sin los signos (ver
+    # codigo_de_la_variante()): su «.0» puede ser lo único que lo distingue del otro.
     c.execute(r"""SELECT id, codigo_raw FROM productos
-                  WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'""")
+                  WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'
+                    AND INSTR(codigo_clean, ?) = 0""", (MARCA_DE_VARIANTE,))
     return [(r["id"], r["codigo_raw"]) for r in c.fetchall()
             if _RE_DECIMAL_DE_EXCEL.fullmatch(str(r["codigo_raw"]).strip())]
 
@@ -694,7 +697,9 @@ def codigos_limpios_desfasados(limite=None):
         correcto = memoria.get(raw)
         if correcto is None:
             correcto = memoria[raw] = sanitizar(raw)
-        if correcto and correcto != guardado:
+        # El que entró aparte por escribirse igual que otro sin los signos tiene a propósito
+        # otro limpio (ver codigo_de_la_variante()): «arreglarlo» lo fusionaría con el otro.
+        if correcto and correcto != guardado and not es_codigo_de_variante(guardado):
             salida.append({"id": int(pid), "marca_id": int(marca_id),
                            "raw": raw, "guardado": guardado,
                            "correcto": correcto})
