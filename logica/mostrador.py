@@ -998,6 +998,7 @@ def olvidar_la_escala_de_precios():
     # Los precios de relleno cambian con lo mismo: ver precios_de_relleno_en_la_base().
     del_proceso("precios_de_relleno_en_la_base",
                 lambda: {"cuando": 0.0, "datos": None}).update(cuando=0.0, datos=None)
+    _medidas_en_memoria().update(cuando=0.0, datos=None)
 
 
 def codigos_con_dos_precios_en_la_misma_lista(limite=500):
@@ -1100,6 +1101,174 @@ def cb_elegir_el_precio_doble(producto_id, precio, precio_mostrado):
 def cb_saltear_el_precio_doble(producto_id):
     """«⏭️ Después»: pasa al siguiente sin decidir, hasta que se den vuelta todos."""
     st.session_state.setdefault("dos_precios_salteados", []).append(producto_id)
+
+
+# ============================================================================================
+# PRECIOS QUE NO SIGUEN LA MEDIDA
+# ============================================================================================
+# En una familia que viene en varias medidas (la misma descripción y cambia el 1/4, el 5/16, el
+# 20 mm), el precio sube con la medida. En la lista de IMPERIAL del 18/08 hay quince que no: la
+# llave combinada acodada Stanley de 1.1/4 a $424 entre la de 30 mm a $38.760 y la siguiente a
+# $43.860 (le faltan dos ceros); la varilla roscada de 20 mm a $174.814, lo mismo que la de
+# 10 mm, entre la de 3/4 a $615.000 y la de 22 mm a $1.707.536; las tuercas WTH que van 1.409,
+# 14.000, 2.324, 21.537 (la unidad y la caja, mezcladas). Vendido así, o se regala o se espanta
+# al cliente. Medido sobre las 319 familias de la base con cuatro medidas o más: a «tres veces»
+# salen esos 15, todos de IMPERIAL; a «cuatro», 9 (se pierde la varilla de 20 mm).
+VECES_FUERA_DE_LA_MEDIDA = 3
+MEDIDAS_PARA_COMPARAR = 4
+PRECIOS_DE_MEDIDA_REVISADOS = "precios_de_medida_revisados"
+_DENOMINADORES_DE_PULGADA = {2, 4, 8, 16, 32, 64}
+# Una sola medida en la descripción: pulgadas con fracción («1.1/4», «5/16"», «3/4»), pulgadas
+# enteras con comillas («2"») o milímetros («20 mm», «63.0mm»). «PEUGEOT 404/504» no es una
+# medida: el de abajo tiene que ser de pulgada, y más grande que el de arriba.
+_RE_MEDIDA = re.compile(
+    r"(?<![\w./,])(?:(\d{1,2})[.\- ])?(\d{1,2})/(\d{1,2})(?:\"|'')?(?![\w/])"
+    r"|(?<![\w./,])(\d{1,3}(?:[.,]\d)?)\s*MM\b"
+    r"|(?<![\w./,])(\d{1,2})\"(?!\w)", re.I)
+
+
+def medida_de_la_descripcion(descripcion):
+    """(milímetros, la familia —la descripción con «#» donde estaba la medida—, la medida como
+    está escrita) o None si no hay una sola medida que se entienda."""
+    texto = " ".join(str(descripcion or "").upper().split())
+    encontradas = list(_RE_MEDIDA.finditer(texto))
+    if len(encontradas) != 1:
+        return None
+    m = encontradas[0]
+    if m.group(3):
+        arriba, abajo = int(m.group(2)), int(m.group(3))
+        if abajo not in _DENOMINADORES_DE_PULGADA or arriba >= abajo:
+            return None
+        mm = (int(m.group(1) or 0) + arriba / abajo) * 25.4
+    elif m.group(4):
+        mm = float(m.group(4).replace(",", "."))
+    else:
+        mm = int(m.group(5)) * 25.4
+    return round(mm, 3), (texto[:m.start()] + "#" + texto[m.end():]).strip(), m.group(0)
+
+
+def _revisados_de_medida():
+    """{id del producto (texto): el precio que tenía cuando alguien dijo «está bien así»}."""
+    try:
+        datos = json.loads(obtener_config(PRECIOS_DE_MEDIDA_REVISADOS, "") or "{}")
+    except ValueError:
+        return {}
+    return datos if isinstance(datos, dict) else {}
+
+
+def _medidas_en_memoria():
+    """Del proceso, como la escala de precios: olvidar_la_escala_de_precios() la olvida."""
+    return del_proceso("precios_que_no_siguen_la_medida", lambda: {"cuando": 0.0, "datos": None})
+
+
+def precios_que_no_siguen_la_medida(segundos_de_memoria=300):
+    """Los productos cuyo precio es tres veces más barato (o más caro) que el de las dos medidas
+    de al lado en su familia: [{ID, Marca, Código, Descripción, Precio, Qué pasa, La medida de
+    antes, La de después, _precio}]. Sin los que alguien ya dio por buenos con ese mismo precio
+    (si otra lista se lo cambia, vuelve), ni los precios de relleno. Se recuerda unos minutos:
+    mirar las 87.000 descripciones de la base real tarda."""
+    guardados = _medidas_en_memoria()
+    if (guardados["datos"] is None
+            or time.monotonic() - guardados["cuando"] >= segundos_de_memoria):
+        guardados.update(cuando=time.monotonic(), datos=_buscar_precios_que_no_siguen_la_medida())
+    revisados = _revisados_de_medida()
+    return [dict(x) for x in guardados["datos"]
+            if abs(float(revisados.get(str(x["ID"]), -1)) - x["_precio"]) >= 0.005]
+
+
+def _buscar_precios_que_no_siguen_la_medida():
+    de_relleno = collections.defaultdict(set)
+    for r in precios_de_relleno_en_la_base():
+        de_relleno[r["marca_id"]].add(r["precio"])
+    familias = collections.defaultdict(list)
+    c.execute("""SELECT p.id, p.marca_id, m.nombre AS marca, p.codigo_raw, p.descripcion, p.precio
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.precio > 0
+                   -- Solo las que pueden tener una medida: de 0,47 s a 0,25 s.
+                   AND (INSTR(p.descripcion, '/') > 0 OR INSTR(p.descripcion, '"') > 0
+                        OR p.descripcion LIKE '%mm%')""")
+    for r in c.fetchall():
+        precio = float(r["precio"])
+        if precio in de_relleno.get(r["marca_id"], ()):
+            continue
+        medida = medida_de_la_descripcion(r["descripcion"])
+        if medida:
+            familias[(r["marca_id"], medida[1])].append((medida[0], medida[2], precio, r))
+    salida = []
+    for filas in familias.values():
+        medidas = sorted({f[0] for f in filas})
+        if len(medidas) < MEDIDAS_PARA_COMPARAR:
+            continue
+        # Con dos productos de la misma medida (la unidad y la caja), el del medio.
+        por_medida, escrita = {}, {}
+        for mm in medidas:
+            precios = sorted(f[2] for f in filas if f[0] == mm)
+            por_medida[mm] = precios[len(precios) // 2]
+            escrita[mm] = next(f[1] for f in filas if f[0] == mm)
+        for mm, _escrita, precio, r in filas:
+            i = medidas.index(mm)
+            if i == 0 or i == len(medidas) - 1:
+                continue
+            antes, despues = medidas[i - 1], medidas[i + 1]
+            if precio * VECES_FUERA_DE_LA_MEDIDA < min(por_medida[antes], por_medida[despues]):
+                que = "🔻 mucho más barato que las medidas de al lado"
+            elif precio > VECES_FUERA_DE_LA_MEDIDA * max(por_medida[antes], por_medida[despues]):
+                que = "🔺 mucho más caro que las medidas de al lado"
+            else:
+                continue
+            salida.append({
+                "ID": r["id"], "Marca": r["marca"], "Código": r["codigo_raw"],
+                "Descripción": r["descripcion"], "Precio": formato_precio(precio), "Qué pasa": que,
+                "La medida de antes": f"{escrita[antes]} a {formato_precio(por_medida[antes])}",
+                "La de después": f"{escrita[despues]} a {formato_precio(por_medida[despues])}",
+                "_precio": precio})
+    salida.sort(key=lambda x: (x["Marca"], x["Código"]))
+    return salida
+
+
+def dar_por_bueno_el_precio_de_medida(producto_id, precio):
+    """«✅ Está bien así»: no vuelve a aparecer mientras tenga este precio."""
+    exigir_nivel("empleado", "dar por bueno un precio")
+    # Un candado propio y no db_lock, que no es reentrante: guardar_config() ya lo toma.
+    with del_proceso("candado_de_los_precios_de_medida", threading.Lock):
+        revisados = _revisados_de_medida()
+        revisados[str(producto_id)] = float(precio)
+        guardar_config(PRECIOS_DE_MEDIDA_REVISADOS, json.dumps(revisados))
+
+
+def corregir_el_precio_de_medida(producto_id, precio, precio_mostrado):
+    """Pone el precio a mano (con su renglón en el historial), solo si en la base sigue el que
+    se mostraba. (ok, texto)."""
+    exigir_nivel("empleado", "cambiar precios y stock")
+    precio = float(precio)
+    if precio <= 0:
+        return False, "El precio tiene que ser más que cero."
+    resultado = actualizar_precio_stock(producto_id, precio, 0, stock_mostrado=0,
+                                        precio_mostrado=precio_mostrado)
+    if resultado is False:
+        return False, "Ese producto ya no está."
+    if resultado is not True:
+        return False, "Otro cambió el precio mientras tanto: no se tocó. Fijate cuál quedó."
+    _medidas_en_memoria().update(cuando=0.0, datos=None)
+    return True, (f"Cambió a {formato_precio(precio, en_markdown=True)} "
+                  f"(antes {formato_precio(precio_mostrado, en_markdown=True)}).")
+
+
+def cb_dar_por_bueno_el_precio_de_medida(producto_id, precio):
+    dar_por_bueno_el_precio_de_medida(producto_id, precio)
+    st.session_state["_medidas_aviso"] = ("success", "Queda como está: no vuelve a aparecer "
+                                                     "mientras no le cambie el precio.")
+
+
+def cb_corregir_el_precio_de_medida(producto_id, clave, precio_mostrado):
+    ok, texto = corregir_el_precio_de_medida(producto_id, st.session_state.get(clave) or 0,
+                                             precio_mostrado)
+    st.session_state["_medidas_aviso"] = ("success" if ok else "warning", texto)
+
+
+def cb_saltear_el_precio_de_medida(producto_id):
+    """«⏭️ Después»: pasa al siguiente sin decidir, hasta que se den vuelta todos."""
+    st.session_state.setdefault("medidas_salteadas", []).append(producto_id)
 
 
 def lista_en_dolares(marca_id):

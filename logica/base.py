@@ -72,7 +72,8 @@ def del_proceso(nombre, crear):
 MEMORIAS_DE_LA_BASE = ("autos_contra_el_catalogo", "autos_del_motor", "cobertura_del_catalogo",
                        "cuenta_de_palabras", "indice_de_busqueda",
                        "escala_de_precios", "marca_del_modelo", "marcas_con_chas",
-                       "precios_de_relleno_en_la_base", "red_de_equivalencias",
+                       "precios_de_relleno_en_la_base", "precios_que_no_siguen_la_medida",
+                       "red_de_equivalencias",
                        "salud_compartida")
 MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     # Candados, sesiones con los sitios de afuera, lo bajado de internet y lo que se midió.
@@ -80,7 +81,7 @@ MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     "candado_de_la_tanda_de_fondo", "candado_de_las_tareas_del_dia",
     "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo",
     "candado_del_indice_de_busqueda", "candado_del_contexto_de_precios",
-    "candado_de_los_precios_dobles",
+    "candado_de_los_precios_dobles", "candado_de_los_precios_de_medida",
     "intentos_en_recuperacion",
     "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
     "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",

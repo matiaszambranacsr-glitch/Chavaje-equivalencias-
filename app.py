@@ -37,6 +37,7 @@ específico, y las pantallas quedan todas al final:
         · STOCK Y RESERVAS
         · PRECIOS Y MÁRGENES
         · FUSIONAR MARCAS Y PRODUCTOS DUPLICADOS
+        · PRECIOS QUE NO SIGUEN LA MEDIDA
     logica/equivalencias_descubiertas.py
         · EQUIVALENCIAS DESCUBIERTAS DESDE LAS VENTAS
         · APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL

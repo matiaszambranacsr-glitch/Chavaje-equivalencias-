@@ -865,6 +865,16 @@ def diagnostico_de_salud():
                   f"«{_rellenos[0]['ejemplo'][:40]}» sale {miles(_rellenos[0]['precio'], 0)}. "
                   "Se venden y se cotizan con ese número.",
                   miga_hasta("Precios de relleno de una lista"))
+        _medidas = precios_que_no_siguen_la_medida()
+        if _medidas:
+            _ej_md = _medidas[0]
+            sumar("medio", f"{miles(len(_medidas))} precio(s) que no siguen la medida",
+                  f"Cuestan tres veces menos (o más) que la medida de antes y la de después de su "
+                  f"familia: «{_ej_md['Descripción'][:40]}» está a "
+                  f"{_ej_md['Precio'].replace('$ ', '')}, y la medida de antes, "
+                  f"{_ej_md['La medida de antes'].replace('$ ', '')}. Casi siempre es la lista: "
+                  "le faltan ceros, o vino la unidad donde los demás son la caja.",
+                  miga_hasta("Precios que no siguen la medida"))
         _dos = len(codigos_con_dos_precios_en_la_misma_lista())
         if _dos:
             sumar("medio", f"{miles(_dos)} código(s) vinieron dos veces en la lista con precios "

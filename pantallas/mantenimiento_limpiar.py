@@ -917,3 +917,55 @@ if pagina == PAGINAS[3]:
                                        file_name="codigos_con_dos_precios.xlsx",
                                        mime="application/vnd.openxmlformats-officedocument."
                                             "spreadsheetml.sheet")
+
+                # PRECIOS QUE NO SIGUEN LA MEDIDA (ver precios_que_no_siguen_la_medida()): la
+                # llave de 1.1/4 a $424 entre dos de $40.000. De a uno, como los dos precios.
+                _medidas = precios_que_no_siguen_la_medida()
+                _aviso_md = st.session_state.pop("_medidas_aviso", None)
+                if _aviso_md and not _medidas:
+                    getattr(st, _aviso_md[0])("📏 " + _aviso_md[1] + " No queda ninguno para mirar.")
+                if _medidas:
+                    st.markdown("---")
+                    st.markdown("**📏 Precios que no siguen la medida**")
+                    if _aviso_md:
+                        getattr(st, _aviso_md[0])(_aviso_md[1])
+                    explicar(
+                        f"{miles(len(_medidas))} producto(s) cuestan tres veces menos (o más) que "
+                        "la medida de antes y la de después de su misma familia.",
+                        "En una familia que viene en varias medidas —la misma descripción, y "
+                        "cambia el 1/4, el 5/16, el 20 mm— el precio sube con la medida. Cuando "
+                        "uno se sale, casi siempre es la lista: le faltan ceros, o vino el precio "
+                        "de la unidad donde los demás son de la caja. Vendido así, se regala o se "
+                        "espanta al cliente.\n\nSi el precio está bien (otra calidad, otra "
+                        "presentación), «Está bien así» y no vuelve a aparecer mientras no "
+                        "cambie. Si no, poné el que va: queda en el historial como un cambio a "
+                        "mano.")
+                    _salteados_md = st.session_state.get("medidas_salteadas", [])
+                    _pend_md = [f for f in _medidas if f["ID"] not in _salteados_md]
+                    if not _pend_md:            # se dieron vuelta todos: de nuevo desde el primero
+                        st.session_state["medidas_salteadas"] = []
+                        _pend_md = _medidas
+                    _f_md = _pend_md[0]
+                    with st.container(border=True):
+                        st.markdown(f"**{texto_para_markdown(_f_md['Marca'])} "
+                                    f"{texto_para_markdown(_f_md['Código'])}** — "
+                                    f"{texto_para_markdown(_f_md['Descripción'])}")
+                        # Sin «$»: dos en el mismo texto se leen como una fórmula.
+                        st.caption(f"{_f_md['Qué pasa'][:2]} Está a "
+                                   f"{_f_md['Precio'].replace('$ ', '')}; la medida de antes, "
+                                   f"{_f_md['La medida de antes'].replace('$ ', '')}, y la de "
+                                   f"después, {_f_md['La de después'].replace('$ ', '')}. "
+                                   f"Quedan {miles(len(_medidas))} para mirar.")
+                        _m1, _m2, _m3, _m4 = st.columns([2, 2, 2, 1.4], vertical_alignment="bottom")
+                        _clave_md = f"precio_de_medida_{_f_md['ID']}"
+                        _m1.number_input("El precio que va:", min_value=0.0, step=100.0,
+                                         value=float(_f_md["_precio"]), key=_clave_md)
+                        _m2.button("💲 Poner ese precio", key="medidas_corregir", width="stretch",
+                                   on_click=cb_corregir_el_precio_de_medida,
+                                   args=(_f_md["ID"], _clave_md, _f_md["_precio"]))
+                        _m3.button("✅ Está bien así", key="medidas_bien", width="stretch",
+                                   on_click=cb_dar_por_bueno_el_precio_de_medida,
+                                   args=(_f_md["ID"], _f_md["_precio"]))
+                        _m4.button("⏭️ Después", key="medidas_despues", width="stretch",
+                                   on_click=cb_saltear_el_precio_de_medida, args=(_f_md["ID"],))
+                    st.dataframe(quitar_id(_medidas), width="stretch", hide_index=True)

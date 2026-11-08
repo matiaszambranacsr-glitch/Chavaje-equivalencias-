@@ -498,6 +498,57 @@ def probar(L):
     esperar("la salud lo nombra y lleva a Limpiar",
             "→ 💲 Precios → 🧹 Precios de relleno" in ns["miga_hasta"]("Precios de relleno de una lista"),
             True)
+
+    # 16. EL PRECIO QUE NO SIGUE LA MEDIDA (ver precios_que_no_siguen_la_medida()): la llave
+    # Stanley de 1.1/4 a $424 entre la de 30 mm a $38.760 y la de 32 mm a $43.860.
+    _med16 = ns["medida_de_la_descripcion"]
+    esperar("la medida de la descripción",
+            [_med16(d) for d in ("LLAVE COMBINADA ACODADA 1.1/4", "VARILLA ROSC. NAT. 20 mm",
+                                 "PEUGEOT 404/504 DIESEL", "FORD FALCON 82/90",
+                                 'DISCO FLAP Ø 4,5"', "JUNTA 1/2 Y 3/4",
+                                 'JTA ESPIR. SW S.900 3"')],
+            [(31.75, "LLAVE COMBINADA ACODADA #", "1.1/4"), (20.0, "VARILLA ROSC. NAT. #", "20 MM"),
+             None, None, None, None, (76.2, "JTA ESPIR. SW S.900 #", '3"')])
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('MEDIDA16', 'PROVEEDOR')")
+    _m16 = c.lastrowid
+    _ids16 = {}
+    for _cod, _desc, _p in (("LL-28", "LLAVE ACODADA 28MM", 34000), ("LL-30", "LLAVE ACODADA 30MM", 38760),
+                            ("LL-114", "LLAVE ACODADA 1.1/4", 423.7), ("LL-32", "LLAVE ACODADA 32MM", 43860),
+                            ("LL-34", "LLAVE ACODADA 34MM", 47000),
+                            # Otra familia que sube como corresponde, y una de tres medidas sola.
+                            ("TU-14", "TUERCA 1/4", 100), ("TU-516", "TUERCA 5/16", 140),
+                            ("TU-38", "TUERCA 3/8", 190), ("TU-716", "TUERCA 7/16", 250),
+                            ("AR-14", "ARANDELA 1/4", 10), ("AR-516", "ARANDELA 5/16", 1),
+                            ("AR-38", "ARANDELA 3/8", 12),
+                            # Y la varilla de 20 mm al precio de la de 10 mm.
+                            ("VA-18", "VARILLA 18 mm", 684671), ("VA-20", "VARILLA 20 mm", 174814),
+                            ("VA-22", "VARILLA 22 mm", 1707536), ("VA-24", "VARILLA 24 mm", 2500000)):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+                  "VALUES (?, ?, ?, ?, ?)", (_cod, _cod.replace("-", ""), _desc, _m16, _p))
+        _ids16[_cod] = c.lastrowid
+    conn.commit()
+
+    def _fuera16():
+        return sorted(x["Código"] for x in ns["precios_que_no_siguen_la_medida"](segundos_de_memoria=0)
+                      if x["Marca"] == "MEDIDA16")
+    esperar("salen la llave de 1.1/4 y la varilla de 20 mm, no la familia que sube ni la de tres",
+            _fuera16(), ["LL-114", "VA-20"])
+    ns["dar_por_bueno_el_precio_de_medida"](_ids16["VA-20"], 174814)
+    esperar("la que se dio por buena no vuelve", _fuera16(), ["LL-114"])
+    ns["corregir_el_precio_de_medida"](_ids16["LL-114"], 42370, 423.7)
+    esperar("corregida: con su precio nuevo, en el historial, y ya no aparece",
+            (uno("SELECT precio FROM productos WHERE id = ?", _ids16["LL-114"]),
+             uno("SELECT precio FROM historial_precios WHERE producto_id = ? ORDER BY id DESC",
+                 _ids16["LL-114"]), _fuera16()), (42370, 42370, []))
+    esperar("si otro lo cambió mientras tanto, no se pisa",
+            ns["corregir_el_precio_de_medida"](_ids16["LL-114"], 50000, 423.7)[0], False)
+    # La que se dio por buena vuelve si una lista le cambia el precio.
+    c.execute("UPDATE productos SET precio = 180000 WHERE id = ?", (_ids16["VA-20"],))
+    conn.commit()
+    esperar("con otro precio, vuelve", _fuera16(), ["VA-20"])
+    esperar("la salud lleva a la solapa de precios",
+            "→ 💲 Precios → 📏 Precios que no siguen" in ns["miga_hasta"]("Precios que no siguen la medida"),
+            True)
     return fallas
 
 

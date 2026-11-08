@@ -7049,6 +7049,19 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 📏 El precio que se sale de su familia de medidas
+
+En una familia que viene en varias medidas (la misma descripción, y cambia el 1/4, el 5/16, el 20 mm) el precio sube con la medida. En la lista de IMPERIAL del 18/08 hay quince que no:
+
+- la llave combinada acodada Stanley de **1.1/4 a $424**, entre la de 30 mm a $38.760 y la de 32 mm a $43.860 (le faltan dos ceros);
+- la varilla roscada de **20 mm a $174.814, lo mismo que la de 10 mm**, entre la de 3/4 a $615.000 y la de 22 mm a $1.707.536 (y la de 24 mm, igual);
+- las tuercas WTH, que van $1.409, $14.000, $2.324, $21.537 (la unidad y la caja, mezcladas);
+- las juntas PTFE de 3/4 entre la de 1/2 a $71.242 —que es el precio cruzado de la de 12": volviendo a importar la lista se arregla sola— y la de 1".
+
+**Cómo se reconoce** (`precios_que_no_siguen_la_medida()`): la medida sale de la descripción —una sola, en pulgadas con fracción de pulgada («1.1/4», «5/16"»), en pulgadas enteras con comillas («3"») o en milímetros («20 mm»); «FORD FALCON 82/90» y «PEUGEOT 404/504» no son medidas— y lo demás de la descripción es la familia. En las familias con cuatro medidas o más, se compara cada precio con el de la medida de antes y el de la de después: tres veces más barato que los dos, o tres veces más caro, sale. Sobre las 319 familias de la base del 12/10 con cuatro medidas o más: a «tres veces» salen esos 15, todos de IMPERIAL; a «cuatro», 9 (se pierde la varilla de 20 mm). Los precios de relleno no cuentan.
+
+**Dónde**: Mantenimiento → 🧹 Limpiar y corregir → 💲 Precios → «📏 Precios que no siguen la medida», de a uno: poner el precio que va (un cambio a mano, con su renglón en el historial, que no pisa un precio que otro cambió mientras tanto), «Está bien así» (no vuelve mientras tenga ese precio; si una lista se lo cambia, vuelve) o «Después». La salud lo avisa en amarillo. Mirar las 87.000 descripciones tarda 0,25 s; se recuerda cinco minutos y se olvida al importar. `pruebas_de_la_plata_y_el_stock.py` (16) lo controla.
+
 ## 🗂️ «Limpiar y corregir», en tres solapas
 
 Eran quince herramientas una debajo de la otra, y la que hacía falta podía estar al fondo («🧽 Códigos adivinados», «💲 Dos precios»). Ahora están en tres solapas por tema: **🔗 Vínculos** (puentes, códigos adivinados, unidos a piezas distintas, revisar lo cargado, corte automático…), **💲 Precios** (los que no cierran entre equivalentes y los que vinieron dos veces) y **🔢 Códigos y descripciones** (números sueltos, el «.0» de Excel, columnas pegadas…). Las migas de los avisos nombran la solapa («… → 🧹 Limpiar y corregir → 💲 Precios → …»). Ninguna herramienta cambió por dentro. `pruebas_de_la_plata_y_el_stock.py` (14) controla que cada una tenga su solapa.

@@ -501,6 +501,9 @@ LO_NUEVO = (
      "productos: una pipeta a 1.437.139). Ahora la importación no lo carga, y los que ya lo "
      "tienen se dejan sin precio con un botón.",
      "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir → 💲 Precios"),
+    ("📏 El precio que se sale de su familia de medidas (la llave Stanley de 1.1/4 a 424 entre dos "
+     "de 40.000, la varilla de 20 mm al precio de la de 10 mm) aparece para corregirlo de a uno.",
+     "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir → 💲 Precios"),
     ("🧽 Los «códigos» que una lista vieja sacó de las descripciones (medidas, motores) y se "
      "aprobaron en bloque se pueden cortar: unen una batería con dos soldadoras.",
      "🗂️ Administrar → 🧹 Mantenimiento → 🧹 Limpiar y corregir → 🔗 Vínculos"),
@@ -1988,6 +1991,9 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("🧹 Precios de relleno de una lista", 1,
      "El $999.999 con que una lista dice «sin precio», cargado como si fuera un precio.",
      "precio relleno 999999 sin precio consultar absurdo carisimo mentira"),
+    ("📏 Precios que no siguen la medida", 1,
+     "La llave de 1.1/4 a $424 entre dos de $40.000: el que se sale de su familia de medidas.",
+     "precio medida familia pulgada milimetro barato caro error lista ceros caja unidad"),
 
     ("🎯 Puntuar los vínculos para el buscador", 2,
      "Le pone nota a cada vínculo para que el buscador muestre primero los buenos.",
@@ -2056,7 +2062,7 @@ SOLAPA_DE_LA_HERRAMIENTA = {
     **{t: SOLAPAS_DE_LIMPIAR[1] for t in (
         "💲 Precios que no cierran entre equivalentes",
         "💲 Códigos que vinieron dos veces con precios distintos",
-        "🧹 Precios de relleno de una lista")},
+        "🧹 Precios de relleno de una lista", "📏 Precios que no siguen la medida")},
     **{t: SOLAPAS_DE_LIMPIAR[2] for t in (
         "🗑️ Códigos que son solo un número suelto", "🔎 Códigos que el buscador no encuentra",
         "🔢 Códigos que quedaron con '.0'", "🔢 Códigos con el '.0' de Excel",
