@@ -432,13 +432,14 @@ def diagnostico_de_salud():
         if obtener_config("copia_frenada_sin_cifrar", ""):
             # Ya no se sube (ver se_puede_subir_sin_cifrar()): lo grave ahora es que la copia
             # se va quedando vieja, y un reinicio arranca desde la última que subió.
-            _ultima_buena = obtener_config("ultimo_backup_github", "")[:16]
+            _ultima_buena = fecha_legible(obtener_config("ultimo_backup_github", "")[:19])
             # Y lo que se puede hacer HOY, en dos toques: lo otro pide entrar a Streamlit o a
             # GitHub, y en 26 días no se hizo. Ver marcar_backup_bajado().
             _bajado = obtener_config("ultimo_backup_bajado", "")
             sumar_tecnico("alto", "🔓 La copia de tu base NO SE ESTÁ SUBIENDO: sin cifrar no va "
                           "a un repositorio público",
-                  "Frenada desde el " + obtener_config("copia_frenada_sin_cifrar", "")[:16]
+                  "Frenada desde el "
+                  + fecha_legible(obtener_config("copia_frenada_sin_cifrar", "")[:19])
                   + (f"; la última copia que subió es del {_ultima_buena}" if _ultima_buena
                      else "") + ". Si la app se reinicia (también al publicar una versión "
                   "nueva), arranca desde esa copia y lo cargado después se pierde. Agregá en los "
