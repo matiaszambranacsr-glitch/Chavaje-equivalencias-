@@ -147,6 +147,17 @@ if pagina == PAGINAS[10]:
                                                 format_func=MOTIVOS_DE_DEVOLUCION.get)
                         _det_dev = st.text_input("Qué pasó (opcional):",
                                                  placeholder="Ej.: la rosca era más chica")
+                        # CON FACTURA, LA NOTA DE CRÉDITO POR LO DEVUELTO: si no, ARCA sigue
+                        # teniendo vendido lo que volvió (ver nota_de_credito()). Tildada de
+                        # entrada: la factura ya se hizo; destildarla es decidirlo a propósito.
+                        _fact_dev = factura_vigente_de(_v["id"]) if configuracion_de_arca() else None
+                        _con_nc = False
+                        if _fact_dev and _fact_dev["estado"] == "autorizada":
+                            _con_nc = st.checkbox(
+                                "🧾 Con nota de crédito por lo devuelto", value=True,
+                                help="La venta tiene la " + nombre_del_comprobante(
+                                    _fact_dev["tipo"], _fact_dev["punto_de_venta"],
+                                    _fact_dev["numero"]) + ": la nota anula esa parte en ARCA.")
                         st.caption("Vuelve al stock salvo que no se pueda volver a vender "
                                    "(fallada, dañada o modificada), y la plata sale de la caja "
                                    "de hoy. Si se vendió en lugar de otro código y no le iba, la "
@@ -157,6 +168,10 @@ if pagina == PAGINAS[10]:
                                                                    _det_dev)
                         if _ok_dev:
                             avisar("success", f"↩️ {_texto_dev}")
+                            if _con_nc:
+                                _ok_nc, _texto_nc = nota_de_credito(
+                                    _fact_dev["id"], _devolvibles[_it_dev]["precio"] * _cant_dev)
+                                avisar("success" if _ok_nc else "warning", _texto_nc)
                             st.rerun()
                         st.warning(_texto_dev)
 

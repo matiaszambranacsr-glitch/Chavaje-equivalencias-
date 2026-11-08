@@ -375,16 +375,29 @@ def _anotar_la_respuesta(factura_id, raiz):
     return False, f"ARCA no autorizó la {nombre}: {errores or 'sin detalle'}.", factura_id
 
 
+def lo_que_queda_de_la_factura(factura_id):
+    """Lo que todavía no anuló ninguna nota de crédito (autorizada o pendiente): el total, si no
+    tiene ninguna. Una devolución hace una nota parcial (ver nota_de_credito())."""
+    c.execute("""SELECT f.total - COALESCE((SELECT SUM(n.total) FROM facturas n
+                                            WHERE n.asociada_a = f.id
+                                              AND n.estado IN ('autorizada', 'pendiente')), 0)
+                 FROM facturas f WHERE f.id = ?""", (factura_id,))
+    fila = c.fetchone()
+    return round(float(fila[0]), 2) if fila and fila[0] is not None else 0.0
+
+
 def factura_vigente_de(venta_id):
-    """La factura autorizada (o pendiente) de una venta, sin nota de crédito: dict o None."""
+    """La factura autorizada (o pendiente) de una venta a la que le queda algo sin anular con
+    notas de crédito: dict (con «queda») o None."""
     c.execute("""SELECT f.* FROM facturas f
                  WHERE f.venta_id = ? AND f.tipo IN (1, 6, 11)
                    AND f.estado IN ('autorizada', 'pendiente')
-                   AND NOT EXISTS (SELECT 1 FROM facturas n WHERE n.asociada_a = f.id
-                                   AND n.estado = 'autorizada')
-                 ORDER BY f.id DESC LIMIT 1""", (venta_id,))
-    fila = c.fetchone()
-    return dict(fila) if fila else None
+                 ORDER BY f.id DESC""", (venta_id,))
+    for fila in c.fetchall():
+        queda = lo_que_queda_de_la_factura(fila["id"])
+        if queda > 0.005:
+            return dict(fila, queda=queda)
+    return None
 
 
 def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=""):
@@ -419,8 +432,9 @@ def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=
     return ok, texto
 
 
-def nota_de_credito(factura_id):
-    """Anula una factura con su nota de crédito, por el total y al mismo cliente. (ok, texto)."""
+def nota_de_credito(factura_id, importe=None):
+    """La nota de crédito de una factura, al mismo cliente: por lo que le queda (anularla), o
+    por `importe` (lo devuelto de una venta facturada). (ok, texto)."""
     exigir_nivel("empleado", "hacer una nota de crédito")
     cfg = configuracion_de_arca()
     if not cfg:
@@ -434,17 +448,30 @@ def nota_de_credito(factura_id):
         return False, "Solo se anula una factura autorizada."
     if factura["ambiente"] != cfg["ambiente"]:
         return False, "Esa factura es de otro ambiente de ARCA (prueba o real)."
-    if c.execute("SELECT 1 FROM facturas WHERE asociada_a = ? AND estado IN ('autorizada', "
-                 "'pendiente')", (factura_id,)).fetchone():
-        return False, "Esa factura ya tiene su nota de crédito."
+    queda = lo_que_queda_de_la_factura(factura_id)
+    if queda <= 0.005:
+        return False, "Esa factura ya está anulada entera con notas de crédito."
+    importe = queda if importe is None else round(float(importe), 2)
+    if not 0 < importe <= queda + 0.005:
+        return False, (f"La nota de crédito va de más de cero a {formato_precio(queda)}: es lo "
+                       "que le queda a la factura.")
+    tipo = NOTA_DE_CREDITO_DE[factura["tipo"]]
+    # Por lo que queda, los importes de la factura menos los de las notas que ya tiene (así el
+    # neto y el IVA cierran justo); por una parte, separados de nuevo.
+    importes = importes_de_la_factura(importe, tipo)
+    if abs(importe - queda) < 0.005:
+        c.execute("""SELECT COALESCE(SUM(neto), 0), COALESCE(SUM(iva), 0) FROM facturas
+                     WHERE asociada_a = ? AND estado IN ('autorizada', 'pendiente')""",
+                  (factura_id,))
+        neto_ya, iva_ya = c.fetchone()
+        importes = {"total": round(queda, 2), "neto": round(factura["neto"] - neto_ya, 2),
+                    "iva": round(factura["iva"] - iva_ya, 2)}
     condicion = next((k for k, v in CONDICIONES_DEL_CLIENTE.items()
                       if v == factura["condicion_receptor"]), "Consumidor final")
     cliente = {"condicion": condicion, "doc_tipo": factura["doc_tipo"],
                "doc_nro": factura["doc_nro"]}
-    ok, texto, _id = _emitir(cfg, NOTA_DE_CREDITO_DE[factura["tipo"]], cliente,
-                             {k: factura[k] for k in ("total", "neto", "iva")},
-                             factura["venta_id"], asociada=factura,
-                             nombre_cliente=factura["nombre_receptor"])
+    ok, texto, _id = _emitir(cfg, tipo, cliente, importes, factura["venta_id"],
+                             asociada=factura, nombre_cliente=factura["nombre_receptor"])
     return ok, texto
 
 

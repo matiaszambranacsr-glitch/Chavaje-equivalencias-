@@ -206,6 +206,9 @@ def probar(L):
                 (ok3, uno("SELECT estado FROM facturas WHERE id = ?", f3), "pendiente" in texto3,
                  "http" in texto3 or "afip.gov" in texto3), (False, "pendiente", True, False))
         esperar("pendiente no se pide de nuevo", ns["facturar_venta"](v3)[0], False)
+        esperar("y la campanita la avisa",
+                any("factura(s) pendiente(s)" in p["titulo"] for p in ns["diagnostico_de_salud"]()),
+                True)
         ok3b, _ = ns["consultar_factura_pendiente"](f3)
         esperar("ARCA la tenía: queda autorizada con su CAE",
                 (ok3b, uno("SELECT estado FROM facturas WHERE id = ?", f3),
@@ -235,6 +238,23 @@ def probar(L):
         esperar("anulada la factura: ya no está vigente, y no se anula dos veces",
                 (ns["factura_vigente_de"](v1), ns["nota_de_credito"](f1["id"])[0]), (None, False))
         esperar("con la nota de crédito, vuelve a la caja", ns["volver_a_la_caja"](v1)[0], True)
+
+        # 4b. La nota de crédito parcial: lo devuelto de una venta facturada. La factura sigue
+        # vigente por lo que le queda, y la última nota cierra justo el neto y el IVA.
+        v6, _ = ns["cerrar_venta"]([item(2)], a_la_caja=True)
+        ns["cobrar_venta"](v6, "Efectivo")
+        ns["facturar_venta"](v6)
+        f6 = ns["factura_vigente_de"](v6)
+        okp, textop = ns["nota_de_credito"](f6["id"], 12100)
+        esperar("parcial: hecha, y a la factura le queda la otra mitad",
+                (okp, ns["factura_vigente_de"](v6)["queda"], ns["volver_a_la_caja"](v6)[0]),
+                (True, 12100.0, False))
+        esperar("más de lo que queda, no", ns["nota_de_credito"](f6["id"], 20000)[0], False)
+        okr, _ = ns["nota_de_credito"](f6["id"])
+        esperar("la última por lo que queda: cierran el neto y el IVA, y deja de estar vigente",
+                (okr, uno("SELECT SUM(neto) FROM facturas WHERE asociada_a = ?", f6["id"]),
+                 uno("SELECT SUM(iva) FROM facturas WHERE asociada_a = ?", f6["id"]),
+                 ns["factura_vigente_de"](v6)), (True, f6["neto"], f6["iva"], None))
 
         # 5. El QR y el PDF.
         _fa = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v2,)).fetchone())
@@ -278,6 +298,41 @@ def probar(L):
                 (any("···1112" in x.value for x in at.caption),
                  sum(x.value.startswith(("Los datos", "El permiso", "El último"))
                      for x in at.success)), (True, 3))
+        # Una devolución de una venta facturada: la nota de crédito por lo devuelto, tildada de
+        # entrada.
+        v7, _ = ns["cerrar_venta"]([item(2)], a_la_caja=True)
+        ns["cobrar_venta"](v7, "Efectivo")
+        ns["facturar_venta"](v7)
+        f7 = ns["factura_vigente_de"](v7)["id"]
+        at.session_state["pagina_actual"] = ns["PAGINAS"][10]
+        at.session_state["sub_devoluciones"] = ns["SUB_DEVOLUCIONES"][1]
+        at.run()
+        at.text_input(key="venta_buscar_dev").set_value(str(v7)).run()
+        at.selectbox(key="venta_dev_sel").set_value(v7).run()
+        esperar("la casilla de la nota de crédito, tildada",
+                [x.value for x in at.checkbox if "nota de crédito" in x.label], [True])
+        [b for b in at.button if "Devolver" in b.label and b.type == "primary"
+         or getattr(b, "label", "") == "↩️ Devolver"][0].click().run()
+        esperar("devuelto uno: la nota de crédito por ese, y la factura con la otra mitad",
+                (uno("SELECT total FROM facturas WHERE asociada_a = ?", f7),
+                 ns["factura_vigente_de"](v7)["queda"], [e.value for e in at.exception]),
+                (12100.0, 12100.0, []))
+        # Sin la caja aparte cobra el vendedor: la factura, si la pide, desde la venta recién
+        # terminada.
+        ns["guardar_config"]("caja_aparte", "0")
+        at.session_state["pagina_actual"] = ns["PAGINAS"][9]
+        at.session_state["venta_recien_cerrada"] = None
+        at.session_state["venta_items"] = [item()]
+        at.run()
+        [b for b in at.button if b.key == "venta_terminar"][0].click().run()
+        [b for b in at.button if b.key == "venta_confirmar_cierre"][0].click().run()
+        v8 = uno("SELECT MAX(id) FROM ventas")
+        [b for b in at.button if b.key == "venta_recien_facturar"][0].click().run()
+        esperar("sin caja aparte: el vendedor la factura desde la venta terminada",
+                (uno("SELECT cobrada FROM ventas WHERE id = ?", v8),
+                 uno("SELECT estado FROM facturas WHERE venta_id = ?", v8),
+                 [e.value for e in at.exception]), (1, "autorizada", []))
+        ns["guardar_config"]("caja_aparte", "1")
     finally:
         g["_secretos_de_arca"], g["requests"] = _secretos_reales, _requests_reales
         for k in ("admin_nombre", "nivel_usuario"):

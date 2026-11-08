@@ -504,6 +504,20 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
 
+    # LAS FACTURAS PENDIENTES (ver «LA FACTURA ELECTRÓNICA (ARCA)» en logica/facturas.py): no se
+    # sabe si ARCA las hizo. Hasta consultarlas, esa venta no se puede volver a facturar.
+    try:
+        c.execute("SELECT COUNT(*), MIN(fecha) FROM facturas WHERE estado = 'pendiente'")
+        _pend_f, _desde_f = c.fetchone()
+        if _pend_f:
+            sumar("alto", f"🧾 {_pend_f} factura(s) pendiente(s) de ARCA",
+                  f"Se pidieron y no se supo si ARCA las hizo (desde el "
+                  f"{fecha_legible(_desde_f)}). Tocá «🔄 Consultar en ARCA» en la factura de "
+                  "esa venta: si ARCA la tiene queda autorizada; si no, se puede volver a hacer.",
+                  f"{miga_hasta('💵 Caja')} → 📋 Ventas y cierre de caja")
+    except sqlite3.Error as _err:
+        anotar_error("diagnostico_de_salud/facturas", _err)
+
     # LOS COBROS CORREGIDOS HOY, al administrador (ver «CORREGIR UN COBRO» en logica/ventas.py):
     # cambiar «Efectivo» por «Transferencia» también tapa un faltante del cajón.
     try:

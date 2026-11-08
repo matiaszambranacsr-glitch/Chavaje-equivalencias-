@@ -47,6 +47,9 @@ if pagina == PAGINAS[9]:
                        + ". La cobra la caja.")
         else:
             st.success(f"✅ Venta #{recien['id']} terminada: **${miles(recien['total'], 0)}**.")
+            # SIN LA CAJA APARTE cobra el vendedor: la factura, si la pide, acá (ver «LA FACTURA
+            # ELECTRÓNICA (ARCA)» en logica/facturas.py). Nada se factura solo.
+            mostrar_la_factura_de(recien["id"], "venta_recien")
         # ME EQUIVOQUÉ: la suya, mientras espera en la caja y por diez minutos (el
         # administrador, siempre). Vuelve armada, para corregirla. Ver deshacer_mi_venta().
         # Con el candado de empleado, como todo lo del mostrador: quien entró con «Continuar»
