@@ -7049,6 +7049,16 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 📱 El mostrador desde el celular, mirado con capturas
+
+Recorrido con un iPhone emulado sobre la copia de la base: venta, buscador, caja, depósito y devoluciones.
+
+- **La venta mostraba los códigos de fábrica como productos.** Buscando «304FISPA» salían 9 renglones: el bulbo, siete códigos de VW a $0 —cada uno con su ➕— y recién al final, tres pantallas más abajo, el otro bulbo que sí se vende. Los códigos de fábrica no se venden: son la referencia que une a las marcas. Y entraban en el corte de 15: en 54 de 1.500 búsquedas de la base real dejaban afuera productos para vender, y en 417 había un código de fábrica entre los tres primeros con más de un producto para vender. Ahora van en una línea aparte («🏭 Código de fábrica: 60506902, 60750986…»), el corte cuenta solo lo que se vende, y buscando un código de fábrica salen las marcas que lo tienen (o «Ninguna marca de las que vendés lo tiene cargado»).
+- **En el carrito, «1» y «2979.00» sin rótulo**: en el celular las columnas quedan una abajo de la otra y no se sabía cuál era la cantidad y cuál el precio. En el celular llevan su rótulo.
+- **En la caja, los cuatro números iban de a uno por renglón** y ocupaban la primera pantalla entera. La regla del CSS del celular que deja las métricas de a dos mira las columnas, y `cols()` en el celular apila en contenedores: no llegaba nunca. `fila_de_numeros()` arma esas filas con columnas (caja, el diagnóstico de la importación y los dos resúmenes de cuenta de la venta). Y «Tarjeta y transferencia», de a dos, se cortaba: ahora «Tarjeta y transf.», con la explicación en la ayuda.
+
+`pruebas_de_la_sesion.py` (2d) controla lo de la venta.
+
 ## 🖼️ Lo que mostraron las capturas de las pantallas nuevas
 
 Con la app corriendo sobre la copia de la base, en la computadora y en un iPhone emulado:

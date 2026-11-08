@@ -152,18 +152,34 @@ if pagina == PAGINAS[9]:
             # Por código, los resultados son lo buscado y sus equivalencias: cada uno con el
             # veredicto del buscador (🟢🟡🟠🔴), que viaja con lo vendido. Por descripción
             # no hay nada pedido en lugar de qué: cada uno es lo que es.
-            _filas_vta = [dict(f) for f in _res_vta[:15]]
+            # LOS CÓDIGOS DE FÁBRICA NO SE VENDEN: son la referencia que une a las marcas, sin
+            # precio. Ocupaban renglones con su ➕ a $0 —buscando «304FISPA» desde el celular,
+            # siete códigos de VW antes del otro bulbo que sí se vende— y entraban en el corte
+            # de 15: en 54 de 1.500 búsquedas de la base real dejaban afuera productos para
+            # vender. Ahora van en una línea aparte, y el corte cuenta solo lo que se vende.
+            _de_fabrica_vta = [f["Codigo"] for f in _res_vta if f.get("Tipo") == "OEM"]
+            _filas_vta = [dict(f) for f in _res_vta if f.get("Tipo") != "OEM"][:15]
             for _f in _filas_vta:
                 _f["_veredicto"] = veredicto_de_la_equivalencia(_f)
                 _f["_evidencia"] = evidencia_de_la_fila(_f)
             if not _res_vta:
-                _filas_vta = [dict(f) for f in buscar_por_texto(_texto_vta)[:15]]
+                _filas_vta = [dict(f) for f in buscar_por_texto(_texto_vta)
+                              if f.get("Tipo") != "OEM"][:15]
             st.session_state["venta_resultados"] = (_filas_vta, _texto_vta.strip())
+            st.session_state["venta_de_fabrica"] = _de_fabrica_vta
             # Y el otro que sin los signos se escribe igual, para no vender uno por el otro.
             st.session_state["venta_iguales"] = (aviso_de_los_que_se_escriben_igual(_clean_vta)
                                                  if _clean_vta and _res_vta else "")
             st.session_state.pop("venta_a_confirmar", None)
         _resultados_vta, _pedido_vta = st.session_state.get("venta_resultados", ([], ""))
+        _de_fabrica_vta = st.session_state.get("venta_de_fabrica") or []
+        if _de_fabrica_vta and _pedido_vta:
+            st.caption(f"🏭 Código de fábrica: {', '.join(_de_fabrica_vta[:8])}"
+                       + (f" y {miles(len(_de_fabrica_vta) - 8)} más" if len(_de_fabrica_vta) > 8
+                          else "")
+                       + ". No se venden: son la referencia que une a las marcas."
+                       + ("" if _resultados_vta else " **Ninguna marca de las que vendés lo "
+                                                     "tiene cargado.**"))
         if _resultados_vta:
             st.caption(f"{len(_resultados_vta)} resultado(s) para «{_pedido_vta}».")
             if st.session_state.get("venta_iguales"):
@@ -220,7 +236,7 @@ if pagina == PAGINAS[9]:
                         st.session_state.pop("venta_a_confirmar", None)
                         st.rerun()
             mostrar_lo_anotado("venta")
-        elif _buscar_vta:
+        elif _buscar_vta and not _de_fabrica_vta:
             st.info("No encontré ese código ni esa descripción.")
 
         st.markdown("---")
@@ -256,15 +272,19 @@ if pagina == PAGINAS[9]:
                 _k = _it["producto_id"]
                 with renglon_con_menu(f"carrito_vta_{_k}"):
                     _c1, _c2, _c3, _c4 = cols([4, 1.2, 1.6, 0.7], apilar_en_celular=False)
+                    # En el celular las columnas quedan una abajo de la otra, y sin rótulo «1» y
+                    # «2979.00» no decían cuál era la cantidad y cuál el precio (se vio en una
+                    # captura a 390 px).
+                    _rotulo_del_renglon = "visible" if es_celular() else "collapsed"
                     _c1.write(f"**{_it['marca']} {_it['codigo']}** — {(_it['descripcion'] or '')[:50]}")
                     # Lo que cambió por atrás (escanear o «➕» otra vez): ver valor_del_campo().
                     _it["cantidad"] = int(_c2.number_input(
                         "Cant.", min_value=1, max_value=CANTIDAD_MAXIMA_POR_PEDIDO, step=1,
                         value=valor_del_campo(f"venta_cant_{_k}", int(_it["cantidad"])),
-                        key=f"venta_cant_{_k}", label_visibility="collapsed"))
+                        key=f"venta_cant_{_k}", label_visibility=_rotulo_del_renglon))
                     _it["precio"] = float(_c3.number_input(
                         "Precio", min_value=0.0, value=float(_it["precio"]), step=100.0,
-                        key=f"venta_precio_{_k}", label_visibility="collapsed"))
+                        key=f"venta_precio_{_k}", label_visibility=_rotulo_del_renglon))
                     if _tengo_por_producto.get(_k):
                         _c1.caption(f"📦 Tenés {_tengo_por_producto[_k]} del depósito: no se "
                                     "descuentan del stock otra vez.")
@@ -460,7 +480,7 @@ if pagina == PAGINAS[9]:
             _, _persona_cta, _taller_cta = _cuentas[_cual]
             _cta = resumen_de_la_cuenta(persona=_persona_cta, mecanico_id=_taller_cta, dias=_dias_cta)
             if _taller_cta is None:
-                _q = cols([1, 1, 1])
+                _q = fila_de_numeros(3)
                 _q[0].metric("Ventas", miles(len(_cta["ventas"])))
                 _q[1].metric("Vendió", f"${miles(_cta['total'], 0)}")
                 _q[2].metric("Le devolvieron", f"${miles(_cta['devuelto'], 0)}")
@@ -471,7 +491,7 @@ if pagina == PAGINAS[9]:
                                    "Total": f"${miles(v['total'] or 0, 0)}"} for v in _cta["ventas"]],
                                  width="stretch", hide_index=True)
             else:
-                _q = cols([1, 1, 1])
+                _q = fila_de_numeros(3)
                 _q[0].metric("Retiros", miles(len(_cta["entregas"])))
                 _q[1].metric("Se llevó", f"${miles(_cta['total'], 0)}")
                 _q[2].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")

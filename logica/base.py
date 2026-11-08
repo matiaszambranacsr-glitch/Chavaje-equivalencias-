@@ -377,6 +377,14 @@ def cols(pesos, apilar_en_celular=True):
     return st.columns(pesos)
 
 
+def fila_de_numeros(cantidad):
+    """Las columnas de una fila de st.metric. En el celular, cols() apila cada una en su propio
+    contenedor a lo ancho, y la regla del CSS del celular que las deja de a dos («Las métricas
+    de a dos por renglón», que mira las columnas) no llegaba nunca: en 💵 Caja los cuatro
+    números ocupaban la primera pantalla entera (se vio en una captura a 390 px)."""
+    return st.columns(cantidad)
+
+
 CSS_CUSTOM = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');

@@ -519,6 +519,8 @@ LO_NUEVO = (
      "una bobina a 1.670 contra 25.537 en FISPA).", "🗂️ Administrar → 🏷️ Marcas"),
     ("⚠️ La venta y el presupuesto avisan cuando la lista de una marca está en otra escala.",
      "🧾 Ventas"),
+    ("🏭 En la venta, los códigos de fábrica ya no salen como productos a $0: van en una línea "
+     "aparte, y lo que se vende queda arriba.", "🧾 Ventas"),
     ("⬇️ Con la copia frenada, el backup se baja desde la campanita, y si la app arranca desde "
      "una copia vieja lo avisa con las fechas.", "🔔 la campanita"),
 )

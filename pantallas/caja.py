@@ -131,11 +131,14 @@ if pagina == PAGINAS[11]:
         # EL DÍA, DE UN VISTAZO: lo que tiene que haber en el cajón, lo que entró por otros
         # medios, lo puesto a cuenta y lo que espera. Ver resumen_de_la_caja().
         _r = resumen_de_la_caja()
-        _m = cols([1, 1, 1, 1])
+        _m = fila_de_numeros(4)
         _m[0].metric("💵 En el cajón", f"${miles(_r['efectivo'], 0)}",
                      help="Lo cobrado hoy en efectivo, menos lo devuelto: lo que tiene que haber "
                           "(sin el cambio con el que se abrió).")
-        _m[1].metric("💳 Tarjeta y transferencia", f"${miles(_r['otros_medios'], 0)}")
+        # Corto: de a dos en el celular, «Tarjeta y transferencia» se cortaba en «transferen…».
+        _m[1].metric("💳 Tarjeta y transf.", f"${miles(_r['otros_medios'], 0)}",
+                     help="Lo cobrado hoy con tarjeta, transferencia o cualquier medio que no "
+                          "sea efectivo.")
         _m[2].metric("📒 A cuenta hoy", f"${miles(_r['a_cuenta'], 0)}")
         _m[3].metric("⏳ Esperando", f"{_r['esperando']} · ${miles(_r['total_esperando'], 0)}")
         _pendientes = ventas_a_cobrar()

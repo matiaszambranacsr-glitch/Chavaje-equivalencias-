@@ -270,6 +270,30 @@ def probar():
              "CAMBA111.4" in (at.session_state["venta_iguales"]
                               if "venta_iguales" in at.session_state else "")),
             (["CAMBA11.14"], True))
+    # Los códigos de fábrica no se venden (ver «LOS CÓDIGOS DE FÁBRICA NO SE VENDEN» en
+    # pantallas/ventas.py): van en una línea aparte, sin renglón ni ➕ a $0.
+    _oem_v = ns["get_or_create_marca"]("OEM / FABRICA", "OEM")
+    ns["c"].execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                    "VALUES ('VW-0269', 'VW0269', 'TUERCA', ?)", (_oem_v,))
+    _vw_v = ns["c"].lastrowid
+    _cam_v = ns["c"].execute("SELECT id FROM productos WHERE codigo_clean = 'CAMBA1114'").fetchone()[0]
+    ns["c"].execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)",
+                    (min(_vw_v, _cam_v), max(_vw_v, _cam_v)))
+    ns["conn"].commit()
+
+    def _vender_buscando(texto):
+        at.text_input(key="venta_buscar").set_value(texto)
+        [b for b in at.button if "Buscar" in b.label and b.key != "refrescar_salud"][0].click().run()
+        return ([f["Codigo"] for f in at.session_state["venta_resultados"][0]],
+                at.session_state["venta_de_fabrica"],
+                [x.value for x in at.caption if x.value.startswith("🏭 Código de fábrica")])
+    esperar("en la venta, el código de fábrica no es un renglón: va aparte",
+            _vender_buscando("CAMBA111.4"),
+            (["CAMBA111.4"], ["VW-0269"],
+             ["🏭 Código de fábrica: VW-0269. No se venden: son la referencia que une a las "
+              "marcas."]))
+    esperar("y buscando el de fábrica, salen las marcas que lo tienen",
+            _vender_buscando("VW-0269")[:2], (["CAMBA111.4"], ["VW-0269"]))
     # La lista en otra escala, avisada en la venta, que es donde se cobra (ver
     # escala_de_precios_por_marca()). Antes lo avisaban el buscador y WhatsApp, la venta no.
     _gv = ns["poner_precio_y_stock_de_la_lista"].__globals__

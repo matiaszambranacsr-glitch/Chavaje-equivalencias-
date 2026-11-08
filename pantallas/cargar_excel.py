@@ -394,7 +394,7 @@ if pagina == PAGINAS[2]:
                         })
                     st.dataframe(resumen, width="stretch", hide_index=True)
 
-                    d1, d2, d3 = cols(3)
+                    d1, d2, d3 = fila_de_numeros(3)
                     d1.metric("Filas que entran", miles(diag["ok"]))
                     d2.metric("Sin código", miles(diag["sin_codigo"] + diag["codigo_basura"]))
                     d3.metric("Con código de fábrica", miles(diag["con_oem"]))
