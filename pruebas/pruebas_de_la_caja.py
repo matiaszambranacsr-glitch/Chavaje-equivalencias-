@@ -312,6 +312,29 @@ def probar(L):
             (False, False))
     st.session_state["nivel_usuario"] = "admin"
     esperar("el administrador, siempre", ns["puede_deshacer_su_venta"](v_v)[0], True)
+    # Anotada «en el futuro» (si cambia el reloj del servidor): ni reciente ni para deshacer.
+    st.session_state["nivel_usuario"] = "operador"
+    v_fut, _ = ns["cerrar_venta"]([item("C1", 2)], a_la_caja=True)
+    c.execute("UPDATE ventas SET fecha = datetime('now', 'localtime', '+3 hours') WHERE id = ?",
+              (v_fut,))
+    conn.commit()
+    esperar("del futuro: ni repetida ni para deshacer",
+            (ns["venta_igual_reciente"]([item("C1", 2)]), ns["puede_deshacer_su_venta"](v_fut)[0]),
+            (None, False))
+    st.session_state["nivel_usuario"] = "admin"
+
+    # El freno de las contraseñas no traba la entrada si el último intento quedó «adelante» (si
+    # cambia el reloj del servidor).
+    _g_b = ns["_segundos_de_espera_por_intentos"].__globals__
+    _cfg_antes = (ns["obtener_config"]("login_fallidos", "0"),
+                  ns["obtener_config"]("login_ultimo_fallo", ""))
+    ns["guardar_config"]("login_fallidos", "9")
+    ns["guardar_config"]("login_ultimo_fallo", (ns["datetime"].now() + ns["timedelta"](hours=3))
+                         .strftime("%Y-%m-%d %H:%M:%S"))
+    esperar("el freno nunca espera más que su máximo",
+            ns["_segundos_de_espera_por_intentos"]() <= _g_b["ESPERA_MAXIMA_POR_INTENTOS"] + 1, True)
+    ns["guardar_config"]("login_fallidos", _cfg_antes[0])
+    ns["guardar_config"]("login_ultimo_fallo", _cfg_antes[1])
 
     # CORREGIR UN COBRO (ver esa sección en logica/ventas.py): la forma de pago equivocada, o la
     # venta vuelta a la caja para cobrarla bien.

@@ -1395,7 +1395,10 @@ def _segundos_de_espera_por_intentos():
             return 0
         cuando = datetime.strptime(ultimo[:19], "%Y-%m-%d %H:%M:%S")
         espera = min(2 ** (fallidos - INTENTOS_ANTES_DE_FRENAR), ESPERA_MAXIMA_POR_INTENTOS)
-        faltan = espera - (datetime.now() - cuando).total_seconds()
+        # Nunca más que la espera, aunque el último intento parezca del futuro: pasa si cambia
+        # el reloj del servidor (la app corre en UTC: si un día se pone la hora de acá, lo
+        # anotado antes queda tres horas adelante, y sin esto la entrada se trababa tres horas).
+        faltan = espera - max(0.0, (datetime.now() - cuando).total_seconds())
         return int(faltan) + 1 if faltan > 0 else 0
     except (ValueError, TypeError) as _err:
         anotar_error("_segundos_de_espera_por_intentos", _err)

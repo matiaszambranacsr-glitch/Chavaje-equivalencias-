@@ -1408,6 +1408,9 @@ def venta_igual_reciente(items, usuario=None, mecanico_id=None,
                  WHERE usuario = ? AND COALESCE(anulada, 0) = 0
                    AND COALESCE(mecanico_id, 0) = ?
                    AND fecha >= datetime('now', 'localtime', ?)
+                   -- Lo «del futuro» no es reciente: pasa si cambia el reloj del servidor (la
+                   -- app corre en UTC; con la hora de acá, lo de antes quedaría adelante).
+                   AND fecha <= datetime('now', 'localtime', '+5 seconds')
                  ORDER BY id DESC""", (usuario, mecanico_id or 0, f"-{int(segundos)} seconds"))
     for v in c.fetchall():
         c.execute("SELECT producto_id, cantidad, precio FROM ventas_items WHERE venta_id = ?",
@@ -1437,7 +1440,8 @@ def puede_deshacer_su_venta(venta_id):
     if v["cobrada"] or v["movimiento_id"]:
         return False, ("Ya está cobrada o puesta a cuenta: para anularla, pedíselo al "
                        "administrador.")
-    if (v["minutos"] or 0) > MINUTOS_PARA_DESHACER_LA_PROPIA:
+    # Negativo es una venta anotada con otro reloj (si cambia el del servidor): no se sabe cuándo.
+    if not 0 <= (v["minutos"] or 0) <= MINUTOS_PARA_DESHACER_LA_PROPIA:
         return False, (f"Pasaron más de {MINUTOS_PARA_DESHACER_LA_PROPIA} minutos: la anula el "
                        "administrador.")
     return True, ""

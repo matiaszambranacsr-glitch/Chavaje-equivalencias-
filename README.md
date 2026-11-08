@@ -7049,6 +7049,16 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 🕒 La app corre en hora UTC (tres horas adelantada)
+
+Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:50» y GitHub la recibió a las **12:56:59 de Argentina**. Streamlit Cloud corre en UTC, así que **cada hora que muestra la app está tres horas adelantada** (la venta de las 10:05 dice 13:05) y **lo que se vende o se cobra después de las 21 cae en la caja del día siguiente**.
+
+**No se arregló poniendo la hora de acá en el servidor**, y a propósito: se probó, y unas 40 tablas guardan su hora con `datetime('now')` de SQLite, que es siempre UTC y no se puede cambiar en una tabla que ya existe. Con el servidor en hora de Argentina, esas columnas quedarían en UTC y las de `'localtime'` y `datetime.now()` en hora de acá: cualquier cuenta entre las dos (el tiempo del depósito entre que se pide y se entrega, por ejemplo) daría tres horas de error. Hoy todo es UTC, y aunque la hora que se ve esté corrida, las cuentas cierran.
+
+**El arreglo correcto** es guardar todo en UTC, como ahora, y convertir a la hora de acá solo al mostrar (119 lugares) y al decidir de qué día es cada cosa (31 cortes por día), con un ayudante para cada cosa y una prueba que lo controle. Queda como primer paso de lo que sigue, porque una factura electrónica no puede salir con la fecha de mañana.
+
+Mientras tanto quedaron blindados contra un salto del reloj: el freno de contraseñas nunca espera más que su máximo (sin esto, un intento fallido anotado «en el futuro» trababa la entrada hasta tres horas), y una venta anotada «en el futuro» no cuenta como repetida ni se deja deshacer. `pruebas_de_la_caja.py` lo controla.
+
 ## ✏️ Corregir un cobro
 
 Lo pidió el dueño: «poder modificar si la cajera pasa algo mal, ya sea que se equivoca en el medio de pago o demás». Cobrada, una venta no se tocaba más: si la cajera marcaba «Efectivo» y era una transferencia, el cierre decía que en el cajón tenía que haber plata que no estaba, y el arqueo daba un faltante que no era.
