@@ -436,9 +436,49 @@ def probar():
             ([(pid, 3, 900.0)], "Juan"))
     otro = sesion_nueva("clave-beto-1", ventas)
     esperar("a otro no se le ofrece", ofrecida(otro), ([], []))
-    [b for b in vta.button if b.label in ("✅ Terminar la venta", "📤 Mandar a la caja")][0] \
-        .click().run()
+    # QUE NO SE GRABE POR ACCIDENTE (ver esa sección en logica/ventas.py): el botón —o F9—
+    # pregunta con el total, y graba recién el «Sí».
+    def _de_rita():
+        return c.execute("SELECT COUNT(*) FROM ventas WHERE usuario = 'rita' AND anulada = 0"
+                         ).fetchone()[0]
+
+    def _boton(clave):
+        return [b for b in vta.button if b.key == clave]
+    _ventas_antes = _de_rita()
+    _boton("venta_terminar")[0].click().run()
+    esperar("el botón solo pregunta: no graba nada",
+            (_de_rita() - _ventas_antes, len(_boton("venta_confirmar_cierre")),
+             any("$2.700" in m.value for m in vta.markdown)), (0, 1, True))
+    # Si cambia algo mientras pregunta, vuelve a preguntar.
+    vta.number_input(key=f"venta_cant_{pid}").set_value(2).run()
+    esperar("cambió la cantidad: deja de preguntar", (len(_boton("venta_confirmar_cierre")),
+                                                      len(_boton("venta_terminar"))), (0, 1))
+    _boton("venta_terminar")[0].click().run()
+    _boton("venta_confirmar_cierre")[0].click().run()
+    esperar("con el «Sí», grabada", _de_rita() - _ventas_antes, 1)
     esperar("terminada, no queda guardada", guardada("rita"), None)
+    # Me equivoqué: la suya, esperando en la caja, se deshace y vuelve armada.
+    _boton("venta_deshacer_la_recien")[0].click().run()
+    esperar("deshecha: vuelve armada como estaba, con el cliente",
+            (_de_rita() - _ventas_antes,
+             [(x["producto_id"], x["cantidad"], x["precio"]) for x in vta.session_state["venta_items"]],
+             vta.session_state["venta_cliente"]), (0, [(pid, 2, 900.0)], "Juan"))
+    _boton("venta_terminar")[0].click().run()
+    _boton("venta_confirmar_cierre")[0].click().run()
+    # La misma venta otra vez, enseguida (un doble toque, la página recargada): pide decir que
+    # es otra.
+    vta.session_state["venta_recien_cerrada"] = None
+    vta.session_state["venta_items"] = [dict(ns["item_de_venta"](pid, 2), precio=900.0)]
+    vta.run()
+    _boton("venta_terminar")[0].click().run()
+    esperar("la misma venta enseguida: lo dice y pide confirmarlo",
+            ([b.label for b in _boton("venta_confirmar_cierre")],
+             any("grabaste esta misma venta" in w.value for w in vta.warning)),
+            (["🔁 Sí, es otra venta igual"], True))
+    _boton("venta_volver_al_armado")[0].click().run()
+    esperar("«Volver» no graba", (_de_rita() - _ventas_antes, len(_boton("venta_terminar"))), (1, 1))
+    vta.session_state["venta_items"] = []
+    vta.run()
     c.execute("""INSERT INTO ventas_a_medio_armar (usuario, items, cliente, guardada)
                  VALUES ('rita', ?, '', datetime('now', 'localtime', '-1 day'))""",
               (f'[{{"producto_id": {pid}, "cantidad": 1, "precio": 1}}]',))

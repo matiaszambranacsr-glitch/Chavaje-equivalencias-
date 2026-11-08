@@ -7049,6 +7049,16 @@ La lista de IMPERIAL (43.101 renglones) marca con un número inventado lo que no
 
 Volviendo a importar la lista real de IMPERIAL sobre la copia: 1.292 renglones de relleno, 1.291 productos quedan sin precio, y los precios frenados para «Aplicar igual» bajan de 117 a 116. `pruebas_de_la_plata_y_el_stock.py` (15) lo controla.
 
+## 🛡️ Que una venta no se grabe por accidente
+
+Lo pidió el dueño: «que lo de ventas sea más seguro de que no se grabe por accidente una venta». Había tres agujeros, y cada uno tiene su arreglo (sección «QUE UNA VENTA NO SE GRABE POR ACCIDENTE» de `logica/ventas.py`):
+
+- **F9, o el botón grande y naranja del celular tocado al pasar, la grababa de un saque.** Ahora el botón —y F9— pregunta «¿Mandarla a la caja? 1 unidad(es) · $2.979», con la forma de pago, la cuenta y el cliente, y graba recién con «✅ Sí» (Enter en la computadora; «Volver» con Esc). Si mientras pregunta cambia algo —una cantidad, un precio, el cliente—, deja de preguntar y hay que volver a pedirlo: la pregunta es por esa venta y no por otra (`huella_de_la_venta()`).
+- **Nada frenaba grabar dos veces la misma**: un doble toque, o la página recargada con la venta recuperada. Ahora la misma venta —mismos productos, cantidades y precios— de la misma persona, para la misma cuenta y dentro de dos minutos dice «🔁 Hace 40 segundos grabaste esta misma venta (#1234). ¿Es otra venta igual, de otro cliente?», y el botón pasa a ser «Sí, es otra venta igual» (`venta_igual_reciente()`). Está en la pantalla y no adentro de `cerrar_venta()`: dos ventas iguales seguidas son legítimas (dos clientes que llevan la misma lata de aceite), y quien decide es el que está vendiendo.
+- **El vendedor que se equivocaba no podía deshacerla**: anular es del administrador. Ahora, en el cartel de la venta recién grabada, «↩️ Me equivoqué: deshacer esta venta» la anula —el stock vuelve, la ficha del auto y lo aprendido se van, y queda a la vista como anulada, con quién— y **la vuelve a armar como estaba** (con su cantidad, su precio, el cliente y lo 🔴 ya confirmado), para corregirla y terminarla. Solo la suya, mientras espera en la caja (sin cobrar ni puesta a cuenta) y por diez minutos: todavía no entró plata. Cobrada o puesta a cuenta sigue siendo del administrador, que puede siempre: deshacer una venta cobrada es sacar plata del cierre.
+
+Visto con la app corriendo, en la computadora (F9 abre la pregunta) y en un iPhone emulado (la misma venta a los 119 segundos pidió confirmarlo). `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py` lo controlan.
+
 ## 📱 El mostrador desde el celular, mirado con capturas
 
 Recorrido con un iPhone emulado sobre la copia de la base: venta, buscador, caja, depósito y devoluciones.

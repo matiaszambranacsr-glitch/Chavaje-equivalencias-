@@ -493,6 +493,9 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-08"
 LO_NUEVO = (
+    ("🛡️ Una venta ya no se graba por accidente: el botón (y F9) pregunta con el total y graba "
+     "con «Sí» (Enter); la misma venta dos veces seguidas pide confirmarlo; y quien se equivocó "
+     "la deshace mientras espera en la caja, y vuelve armada.", "🧾 Ventas"),
     ("🔀 Los productos que sin los signos se escriben igual (la junta de ½\" y la de 12\", la "
      "camisa +030 y la -030) ahora entran aparte, cada uno con su precio. Volvé a importar la "
      "lista de IMPERIAL: entran los 210 que faltaban, y los 116 precios cruzados que frena "

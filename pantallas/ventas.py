@@ -47,6 +47,27 @@ if pagina == PAGINAS[9]:
                        + ". La cobra la caja.")
         else:
             st.success(f"✅ Venta #{recien['id']} terminada: **${miles(recien['total'], 0)}**.")
+        # ME EQUIVOQUÉ: la suya, mientras espera en la caja y por diez minutos (el
+        # administrador, siempre). Vuelve armada, para corregirla. Ver deshacer_mi_venta().
+        # Con el candado de empleado, como todo lo del mostrador: quien entró con «Continuar»
+        # mira, no toca (ver candado()).
+        if puede_deshacer_su_venta(recien["id"])[0]:
+            if candado("deshacer una venta",
+                       st.button("↩️ Me equivoqué: deshacer esta venta",
+                                 key="venta_deshacer_la_recien",
+                                 help="La anula —el stock vuelve, no queda cobrada ni en la caja— "
+                                      "y la vuelve a armar como estaba, para corregirla."),
+                       "venta_deshacer_la_recien_candado", nivel="empleado"):
+                _ok_d, _texto_d, _items_d = deshacer_mi_venta(recien["id"])
+                if _ok_d:
+                    st.session_state.pop("venta_recien_cerrada", None)
+                    st.session_state["venta_items"] = _items_d
+                    st.session_state["venta_cliente"] = recien.get("cliente") or ""
+                    avisar("success", f"↩️ {_texto_d} Quedó armada de nuevo: corregila y "
+                                      "terminala.")
+                else:
+                    avisar("warning", _texto_d)
+                st.rerun()
         # EL COMPROBANTE para el cliente: por WhatsApp (a su número, si ya se anotó en la
         # ficha) o en PDF para imprimir. No es una factura y lo dice.
         _tel_comp = re.sub(r"\D", "", (buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"])
@@ -343,13 +364,49 @@ if pagina == PAGINAS[9]:
                     key="venta_forma",
                     format_func=lambda f: (f"📒 A la cuenta de {_cuenta_vta['nombre']}"
                                            if f == A_CUENTA else f))
-            if st.button("📤 Mandar a la caja" if _con_caja else "✅ Terminar la venta",
-                         type="primary", key="venta_terminar", width="stretch",
-                         shortcut=None if es_celular() else "F9"):
+            # QUE NO SE GRABE POR ACCIDENTE (ver «QUE UNA VENTA NO SE GRABE POR ACCIDENTE» en
+            # logica/ventas.py): el botón —y F9— pregunta, con el total a la vista, y graba
+            # recién el «Sí» (Enter en la computadora). Si algo cambia mientras pregunta, la
+            # huella ya no es la misma y vuelve a preguntar.
+            _mecanico_vta = _cuenta_vta["id"] if _cuenta_vta else None
+            _huella_vta = huella_de_la_venta(venta_items, _cliente_vta, _forma_vta, _mecanico_vta)
+            _cerrar_ya = False
+            if st.session_state.get("venta_por_cerrar") != _huella_vta:
+                if st.button("📤 Mandar a la caja" if _con_caja else "✅ Terminar la venta",
+                             type="primary", key="venta_terminar", width="stretch",
+                             shortcut=None if es_celular() else "F9"):
+                    st.session_state["venta_por_cerrar"] = _huella_vta
+                    st.rerun()
+            else:
+                _repetida_vta = venta_igual_reciente(venta_items, mecanico_id=_mecanico_vta)
+                with st.container(border=True, key="venta_por_cerrar_caja"):
+                    _unidades_vta = sum(int(x["cantidad"]) for x in venta_items)
+                    st.markdown(
+                        f"**¿{'Mandarla a la caja' if _con_caja else 'Terminar la venta'}?** "
+                        f"{miles(_unidades_vta)} unidad(es) · **${miles(_total_vta, 0)}**"
+                        + (f" · {_forma_vta}" if _forma_vta and _forma_vta != A_CUENTA else "")
+                        + (f" · a la cuenta de {_cuenta_vta['nombre']}" if _cuenta_vta else "")
+                        + (f" · {texto_para_markdown(_cliente_vta.strip())}"
+                           if _cliente_vta.strip() else ""))
+                    if _repetida_vta:
+                        st.warning(f"🔁 Hace {miles(_repetida_vta['hace'])} segundos grabaste esta "
+                                   f"misma venta (#{_repetida_vta['id']}). ¿Es otra venta igual, "
+                                   "de otro cliente? Si no, tocá «Volver».")
+                    _s1, _s2 = cols([2, 1], apilar_en_celular=False)
+                    _cerrar_ya = _s1.button(
+                        "🔁 Sí, es otra venta igual" if _repetida_vta
+                        else ("📤 Sí, mandarla" if _con_caja else "✅ Sí, terminarla"),
+                        type="primary", key="venta_confirmar_cierre", width="stretch",
+                        shortcut=None if es_celular() else "Enter")
+                    if _s2.button("✏️ Volver", key="venta_volver_al_armado", width="stretch",
+                                  shortcut=None if es_celular() else "Esc"):
+                        st.session_state.pop("venta_por_cerrar", None)
+                        st.rerun()
+            if _cerrar_ya:
+                st.session_state.pop("venta_por_cerrar", None)
                 try:
                     _id_vta, _avisos_vta = cerrar_venta(
-                        venta_items, _cliente_vta, _forma_vta,
-                        mecanico_id=_cuenta_vta["id"] if _cuenta_vta else None,
+                        venta_items, _cliente_vta, _forma_vta, mecanico_id=_mecanico_vta,
                         a_la_caja=_con_caja or _forma_vta == A_CUENTA)
                 except (ValueError, PermissionError) as _err:
                     st.error(el_error_en_castellano(_err))

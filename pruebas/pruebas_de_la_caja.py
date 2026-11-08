@@ -276,6 +276,42 @@ def probar(L):
                     [empleado, empleado, admin])
     finally:
         g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = originales
+
+    # QUE UNA VENTA NO SE GRABE POR ACCIDENTE (ver esa sección en logica/ventas.py): la misma
+    # venta enseguida se reconoce, y la suya sin cobrar se deshace y vuelve armada.
+    st.session_state["admin_nombre"], st.session_state["nivel_usuario"] = "ana", "operador"
+    _it = [item("A1", 2)]
+    _stock_a = stock("A1")
+    v_r, _ = ns["cerrar_venta"](_it, a_la_caja=True)
+    esperar("la misma venta, enseguida, se reconoce",
+            (ns["venta_igual_reciente"](_it) or {}).get("id"), v_r)
+    esperar("con otra cantidad, otra cuenta u otra persona, no",
+            (ns["venta_igual_reciente"]([item("A1", 3)]),
+             ns["venta_igual_reciente"](_it, mecanico_id=taller),
+             ns["venta_igual_reciente"](_it, usuario="pepe")), (None, None, None))
+    esperar("la suya, esperando en la caja: la puede deshacer",
+            ns["puede_deshacer_su_venta"](v_r)[0], True)
+    st.session_state["admin_nombre"] = "beto"
+    esperar("la de otro, no", (ns["puede_deshacer_su_venta"](v_r)[0],
+                               ns["deshacer_mi_venta"](v_r)[0]), (False, False))
+    st.session_state["admin_nombre"] = "ana"
+    ok_d, _, items_d = ns["deshacer_mi_venta"](v_r)
+    esperar("deshecha: anulada, el stock vuelve, y vuelve armada con su cantidad",
+            (ok_d, uno("SELECT anulada FROM ventas WHERE id = ?", v_r), stock("A1") - _stock_a,
+             [(x["producto_id"], x["cantidad"], x["precio"]) for x in items_d]),
+            (True, 1, 0, [(ids["A1"], 2, 1000.0)]))
+    esperar("anulada, ya no cuenta como repetida", ns["venta_igual_reciente"](_it), None)
+    # Cobrada no: deshacerla es sacar plata del cierre. De hace más de diez minutos, tampoco.
+    v_c, _ = ns["cerrar_venta"](_it, forma_de_pago="Efectivo")
+    v_v, _ = ns["cerrar_venta"]([item("B1")], a_la_caja=True)
+    c.execute("UPDATE ventas SET fecha = datetime('now', 'localtime', '-11 minutes') WHERE id = ?",
+              (v_v,))
+    conn.commit()
+    esperar("cobrada o vieja, la deshace solo el administrador",
+            (ns["puede_deshacer_su_venta"](v_c)[0], ns["puede_deshacer_su_venta"](v_v)[0]),
+            (False, False))
+    st.session_state["nivel_usuario"] = "admin"
+    esperar("el administrador, siempre", ns["puede_deshacer_su_venta"](v_v)[0], True)
     for k in ("admin_nombre", "nivel_usuario"):
         st.session_state.pop(k, None)
     return fallas

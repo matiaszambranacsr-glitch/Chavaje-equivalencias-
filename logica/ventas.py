@@ -409,6 +409,12 @@ def anular_venta(venta_id):
     avisar» y el link del cliente contaban desde un cambio que no pasó. Lo anotado antes de que
     cada pieza supiera de qué venta salió se reconoce por la nota «Venta #N» en ese auto."""
     exigir_nivel("admin", "anular una venta")
+    return _anular_la_venta(venta_id)
+
+
+def _anular_la_venta(venta_id):
+    """El cuerpo de anular_venta(), sin mirar el permiso: lo usa también deshacer_mi_venta(),
+    que mira el suyo."""
     with db_lock, transaccion():
         # Con algo ya devuelto no: la plata de esa devolución ya salió de la caja de otro día,
         # y anularla la sacaría dos veces. Se devuelve lo que queda.
@@ -1356,3 +1362,126 @@ def descartar_el_presupuesto_a_medio_armar():
     with db_lock, transaccion():
         c.execute("DELETE FROM presupuestos_a_medio_armar WHERE usuario = ?",
                   (obtener_usuario_actual(),))
+
+
+# ============================================================================================
+# QUE UNA VENTA NO SE GRABE POR ACCIDENTE
+# ============================================================================================
+# Lo pidió el dueño: «que lo de ventas sea más seguro de que no se grabe por accidente una
+# venta». Había tres agujeros:
+#   - F9 —o el botón grande y naranja del celular, tocado al pasar— la grababa de un saque.
+#     Ahora el botón (y F9) pregunta «¿Terminar la venta?» con el total, y se graba recién con
+#     «Sí». Si mientras tanto cambia algo (una cantidad, un precio, el cliente), vuelve a
+#     preguntar: ver huella_de_la_venta().
+#   - Nada frenaba grabar dos veces la misma: un doble toque, o la página recargada con la
+#     venta recuperada (ver «LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR»). Ahora la misma venta de
+#     la misma persona, para la misma cuenta, dentro de dos minutos, pide decir que es otra:
+#     ver venta_igual_reciente(). Está acá y no adentro de cerrar_venta(): dos ventas iguales
+#     seguidas son legítimas (dos clientes que llevan la misma lata de aceite), y quien decide
+#     es el que está vendiendo.
+#   - El vendedor que se equivocaba no podía deshacerla: anular es del administrador. Ahora
+#     puede deshacer la suya mientras espera en la caja y por diez minutos: todavía no entró
+#     plata. Cobrada o puesta a cuenta, sigue siendo del administrador: deshacer una venta
+#     cobrada es sacar plata del cierre. Ver deshacer_mi_venta().
+SEGUNDOS_PARA_VENTA_REPETIDA = 120
+MINUTOS_PARA_DESHACER_LA_PROPIA = 10
+
+
+def huella_de_la_venta(items, cliente="", forma_de_pago="", mecanico_id=None):
+    """Lo que, si cambia, hay que volver a confirmar: cada producto con su cantidad y su precio,
+    el cliente, cómo paga y a qué cuenta."""
+    return (tuple(sorted((int(it["producto_id"]), int(it.get("cantidad") or 0),
+                          round(float(it.get("precio") or 0), 2)) for it in items)),
+            (cliente or "").strip(), forma_de_pago or "", mecanico_id or None)
+
+
+def venta_igual_reciente(items, usuario=None, mecanico_id=None,
+                         segundos=SEGUNDOS_PARA_VENTA_REPETIDA):
+    """La venta de esta misma persona, con los mismos productos, cantidades y precios y para la
+    misma cuenta, grabada hace menos de `segundos` y no anulada: {"id", "hace"} (segundos), o
+    None."""
+    usuario = usuario or obtener_usuario_actual()
+    lo_de_ahora = huella_de_la_venta(items)[0]
+    c.execute("""SELECT id, CAST(strftime('%s', 'now', 'localtime') - strftime('%s', fecha)
+                                 AS INTEGER) AS hace
+                 FROM ventas
+                 WHERE usuario = ? AND COALESCE(anulada, 0) = 0
+                   AND COALESCE(mecanico_id, 0) = ?
+                   AND fecha >= datetime('now', 'localtime', ?)
+                 ORDER BY id DESC""", (usuario, mecanico_id or 0, f"-{int(segundos)} seconds"))
+    for v in c.fetchall():
+        c.execute("SELECT producto_id, cantidad, precio FROM ventas_items WHERE venta_id = ?",
+                  (v["id"],))
+        if tuple(sorted((r[0], r[1], round(r[2], 2)) for r in c.fetchall())) == lo_de_ahora:
+            return {"id": v["id"], "hace": max(0, v["hace"] or 0)}
+    return None
+
+
+def puede_deshacer_su_venta(venta_id):
+    """(sí o no, por qué no) para el botón «↩️ Me equivoqué: deshacerla». El administrador
+    siempre (anular_venta() mira lo demás); el resto, solo la suya, sin cobrar, sin poner a
+    cuenta y de hace menos de diez minutos."""
+    c.execute("""SELECT usuario, COALESCE(cobrada, 1) AS cobrada, COALESCE(anulada, 0) AS anulada,
+                        movimiento_id,
+                        (julianday('now', 'localtime') - julianday(fecha)) * 1440 AS minutos
+                 FROM ventas WHERE id = ?""", (venta_id,))
+    v = c.fetchone()
+    if not v:
+        return False, "Esa venta no existe."
+    if v["anulada"]:
+        return False, "Esa venta ya está anulada."
+    if es_admin():
+        return True, ""
+    if v["usuario"] != obtener_usuario_actual():
+        return False, "Es una venta de otra persona: la anula el administrador."
+    if v["cobrada"] or v["movimiento_id"]:
+        return False, ("Ya está cobrada o puesta a cuenta: para anularla, pedíselo al "
+                       "administrador.")
+    if (v["minutos"] or 0) > MINUTOS_PARA_DESHACER_LA_PROPIA:
+        return False, (f"Pasaron más de {MINUTOS_PARA_DESHACER_LA_PROPIA} minutos: la anula el "
+                       "administrador.")
+    return True, ""
+
+
+def _los_items_para_rearmar(venta_id):
+    """Los ítems de una venta como los arma la pantalla (ver item_de_venta()), con la cantidad,
+    el precio y el veredicto con que se vendieron: lo 🔴 ya se había confirmado al venderlo, y
+    vuelve confirmado. Se leen ANTES de anularla: anular se lleva lo aprendido."""
+    c.execute("""SELECT vi.producto_id, vi.cantidad, vi.precio, vi.pedido,
+                        (SELECT vr.veredicto FROM ventas_registradas vr
+                          WHERE vr.venta_id = vi.venta_id AND vr.producto_id = vi.producto_id
+                          LIMIT 1) AS veredicto,
+                        (SELECT vr.evidencia FROM ventas_registradas vr
+                          WHERE vr.venta_id = vi.venta_id AND vr.producto_id = vi.producto_id
+                          LIMIT 1) AS evidencia
+                 FROM ventas_items vi
+                 WHERE vi.venta_id = ? AND vi.producto_id IS NOT NULL ORDER BY vi.id""",
+              (venta_id,))
+    items = []
+    for f in c.fetchall():
+        it = item_de_venta(f["producto_id"], f["cantidad"], f["pedido"] or "")
+        if it:
+            it["precio"] = float(f["precio"] or 0)
+            if f["veredicto"]:
+                it.update(veredicto=f["veredicto"], evidencia=f["evidencia"],
+                          confirmado=str(f["veredicto"]).startswith("🔴"))
+            items.append(it)
+    return items
+
+
+def deshacer_mi_venta(venta_id):
+    """«↩️ Me equivoqué»: anula la venta recién grabada si puede_deshacer_su_venta() lo deja.
+    Como anular_venta(): el stock vuelve, la ficha del auto y lo aprendido se van, y la venta
+    queda a la vista, marcada anulada y por quién. (ok, texto, los ítems para volver a armarla:
+    lo más común es una cantidad o un precio mal puesto)."""
+    exigir_nivel("empleado", "deshacer una venta")
+    puede, por_que = puede_deshacer_su_venta(venta_id)
+    if not puede:
+        return False, por_que, []
+    items = _los_items_para_rearmar(venta_id)
+    ok, texto = _anular_la_venta(venta_id)
+    if not ok:
+        return False, texto, []
+    anotar_cambio("deshizo su venta", "venta", venta_id, None, None,
+                  "la grabó por error y la deshizo enseguida")
+    return True, texto, items
