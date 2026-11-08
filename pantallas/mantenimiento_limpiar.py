@@ -815,9 +815,12 @@ if pagina == PAGINAS[3]:
                     "lista con dos precios distintos, y quedó el último sin que nadie eligiera.",
                     "Puede ser la unidad y la caja, o —más seguido cuando la diferencia es "
                     "enorme— dos productos que se escriben casi igual y que, sin los signos, "
-                    "quedan en el mismo código. Mirá la descripción y elegí abajo, de a uno, el "
-                    "precio que vendés. Lo elegido no vuelve a aparecer, salvo que otra lista "
-                    "lo traiga doble de nuevo.")
+                    "quedan en el mismo código (la junta de ½\" y la de 12\" de IMPERIAL). "
+                    "**Si son dos productos, no elijas: volvé a importar la lista.** Ahora "
+                    "entran separados, cada uno con su precio, y desaparecen de esta lista. "
+                    "Si es la unidad y la caja, elegí abajo, de a uno, el precio que vendés. Lo "
+                    "elegido no vuelve a aparecer, salvo que otra lista lo traiga doble de "
+                    "nuevo.")
                 # De a uno, con un botón por precio (ver elegir_el_precio_doble()).
                 _salteados_dp = st.session_state.get("dos_precios_salteados", [])
                 _pend_dp = [f for f in _dos_precios if f["ID"] not in _salteados_dp]
@@ -838,7 +841,12 @@ if pagina == PAGINAS[3]:
                         "el más barato" if _veces_dp else "")
                     st.caption(f"Quedó {formato_precio(_f_dp['Precio que quedó'])}"
                                f"{_cuantas_veces_dp}. "
-                               f"Quedan {miles(len(_dos_precios))} para decidir.")
+                               f"Quedan {miles(len(_dos_precios))} para decidir."
+                               # Con tres veces o más, casi siempre son dos productos (en la
+                               # lista de IMPERIAL del 18/08 lo eran los 149 de la base).
+                               + (" Con esa diferencia suelen ser dos productos: mejor volver "
+                                  "a importar la lista." if _veces_dp and _veces_dp >= 3
+                                  else ""))
                     _cols_dp = st.columns(len(_f_dp["_precios"]) + 1)
                     for _k_dp, _p_dp in enumerate(_f_dp["_precios"]):
                         _es_el_que_quedo = (_f_dp["Precio que quedó"] is not None and abs(
