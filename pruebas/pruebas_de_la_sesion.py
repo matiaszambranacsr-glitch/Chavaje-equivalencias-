@@ -229,6 +229,25 @@ def probar():
              "CAMBA111.4" in (at.session_state["venta_iguales"]
                               if "venta_iguales" in at.session_state else "")),
             (["CAMBA11.14"], True))
+    # La lista en otra escala, avisada en la venta, que es donde se cobra (ver
+    # escala_de_precios_por_marca()). Antes lo avisaban el buscador y WhatsApp, la venta no.
+    _gv = ns["poner_precio_y_stock_de_la_lista"].__globals__
+    _fuera_real, _escala_real = (_gv["marcas_con_precios_fuera_de_escala"],
+                                 _gv["escala_de_precios_por_marca"])
+    _gv["marcas_con_precios_fuera_de_escala"] = lambda: {"PRUEBACHOQUE"}
+    _gv["escala_de_precios_por_marca"] = lambda *a, **k: {"PRUEBACHOQUE": {"factor": 1 / 15}}
+    try:
+        _id_vta = _vta[0]["ID"]
+        at.session_state["venta_items"] = [ns["item_de_venta"](_id_vta, 1, "CAMBA11.14")]
+        at.run()
+        esperar("en la venta, la marca en otra escala se avisa en el renglón",
+                [x.value for x in at.caption if "está en otra escala" in x.value],
+                ["⚠️ La lista de PRUEBACHOQUE está en otra escala: cuesta 15 veces menos que lo "
+                 "mismo en otras marcas. Revisá el precio antes de cobrar."])
+    finally:
+        _gv["marcas_con_precios_fuera_de_escala"] = _fuera_real
+        _gv["escala_de_precios_por_marca"] = _escala_real
+    at.session_state["venta_items"] = []
     at.session_state["pagina_actual"] = "📁 Cargar Excel"
     at.run()
     esperar("sin errores con los choques", [e.value for e in at.exception], [])

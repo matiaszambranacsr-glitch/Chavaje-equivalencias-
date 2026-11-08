@@ -247,6 +247,11 @@ if pagina == PAGINAS[9]:
             st.markdown(f"**🧾 La venta ({len(venta_items)} ítem(s))**")
             pista_del_click_derecho("carrito_vta", "Click derecho sobre un ítem: uno más, uno "
                                                    "menos, dónde está o quitarlo.")
+            # LA LISTA EN OTRA ESCALA (ver escala_de_precios_por_marca()): con TARANTO sin
+            # coeficiente, una bobina salía a $1.670 cuando la misma de FISPA vale $25.537. El
+            # buscador y WhatsApp ya lo avisaban; la venta, que es donde se cobra, no.
+            _fuera_vta = marcas_con_precios_fuera_de_escala()
+            _escala_vta = escala_de_precios_por_marca() if _fuera_vta else {}
             for _it in list(venta_items):
                 _k = _it["producto_id"]
                 with renglon_con_menu(f"carrito_vta_{_k}"):
@@ -268,6 +273,13 @@ if pagina == PAGINAS[9]:
                     if _it.get("costo") and _it["precio"] < float(_it["costo"]):
                         _c1.caption("⚠️ Por debajo del costo" + (
                             f" (${miles(_it['costo'], 0)})" if es_admin() else "") + ".")
+                    if _it.get("marca") in _fuera_vta:
+                        _f_vta = (_escala_vta.get(_it["marca"]) or {}).get("factor") or 1
+                        _c1.caption(f"⚠️ La lista de {_it['marca']} está en otra escala: cuesta "
+                                    + (f"{miles(1 / _f_vta, 0)} veces menos" if _f_vta < 1
+                                       else f"{miles(_f_vta, 0)} veces más")
+                                    + " que lo mismo en otras marcas. Revisá el precio antes de "
+                                      "cobrar.")
                     with acciones_del_renglon(_c4, f"carrito_vta_{_k}"):
                         if not es_celular():
                             st.button("➕ Uno más", key=f"venta_mas_{_k}",
