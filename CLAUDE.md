@@ -52,6 +52,8 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - El JavaScript del navegador (click derecho, teclas, pitido, textos de Streamlit en castellano)
   está en `AYUDAS_DEL_NAVEGADOR` (texto crudo `r"""…"""`) en `logica/interfaz.py`.
 - Cambios: en la rama de trabajo, commit, push, y main por avance directo; después mirar el CI.
+- Si lo que se publica le cambia algo al administrador, sumarlo a `LO_NUEVO` y cambiar
+  `VERSION_DE_LO_NUEVO` (en `logica/interfaz.py`): sale una vez arriba, con dónde está.
 - Nunca escribir claves (de Gemini, de administrador, `clave_copia`) en archivos ni commits, ni
   mandar datos de la base o de clientes a servicios de afuera. No tocar la rama de la copia.
 
