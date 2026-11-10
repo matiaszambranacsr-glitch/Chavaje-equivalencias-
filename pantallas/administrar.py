@@ -897,6 +897,54 @@ if pagina == PAGINAS[3]:
                      "«responsable_inscripto» (A y B). Para el PDF también: `razon_social`, "
                      "`domicilio`, `inicio_de_actividades` e `ingresos_brutos`. Nada de esto va "
                      "en el repositorio.")
+            # EL CERTIFICADO, SIN OPENSSL: ver pedido_de_certificado().
+            _exp_cert = st.expander("🔑 No tengo el certificado: armarlo paso a paso",
+                                    key="exp_certificado_de_arca", on_change="rerun")
+            if _exp_cert.open:
+                with _exp_cert:
+                    st.markdown("**Primero**, completá los datos de más abajo y tocá «🔑 Generar la "
+                                "clave y el pedido»: te da el pedido para subir a ARCA y el bloque "
+                                "con la clave para los secretos. Después, en ARCA:")
+                    st.markdown(PASOS_DEL_CERTIFICADO_DE_ARCA)
+                    _k1, _k2 = cols([1, 1])
+                    _cuit_cert = _k1.text_input("CUIT del negocio:", key="arca_cert_cuit",
+                                                placeholder="Ej: 20-12345678-9")
+                    _razon_cert = _k2.text_input("Nombre del negocio (razón social):",
+                                                 key="arca_cert_razon")
+                    _k3, _k4 = cols([1, 1])
+                    _cond_cert = _k3.selectbox("Condición frente al IVA:", CONDICIONES_DEL_NEGOCIO,
+                                               key="arca_cert_condicion",
+                                               format_func=lambda x: x.replace("_", " ").capitalize())
+                    _alias_cert = _k4.text_input("Alias (un nombre corto, sin espacios):",
+                                                 value="chavaje", key="arca_cert_alias")
+                    if candado("generar la clave del certificado de ARCA",
+                               st.button("🔑 Generar la clave y el pedido", key="arca_cert_generar"),
+                               "arca_cert_generar_candado"):
+                        try:
+                            _clave_cert, _pedido_cert = pedido_de_certificado(
+                                _cuit_cert, _razon_cert, _alias_cert)
+                            # Solo en la memoria de esta sesión: nunca en la base ni en un archivo.
+                            st.session_state["_arca_pedido"] = {
+                                "pedido": _pedido_cert,
+                                "secretos": secretos_de_arca_para_pegar(
+                                    _cuit_cert, _razon_cert, _cond_cert, _clave_cert)}
+                        except ValueError as _err:
+                            st.warning(el_error_en_castellano(_err))
+                    _hecho_cert = st.session_state.get("_arca_pedido")
+                    if _hecho_cert:
+                        st.success("Listo. Hacé las dos cosas ahora: esta clave no se guarda en "
+                                   "ningún lado, y si salís sin copiarla hay que empezar de nuevo.")
+                        st.download_button("⬇️ 1. Bajar el pedido (pedido.csr) para subir a ARCA",
+                                           data=_hecho_cert["pedido"], file_name="pedido.csr",
+                                           mime="application/pkcs10", key="arca_cert_bajar")
+                        st.markdown("**2. Copiá este bloque y pegalo en Settings → Secrets** "
+                                    "(lleva la clave privada: no lo mandes por WhatsApp ni lo "
+                                    "guardes en otro lado):")
+                        st.code(_hecho_cert["secretos"], language="toml")
+                        if st.button("🧹 Ya lo copié: sacarlo de la pantalla",
+                                     key="arca_cert_limpiar"):
+                            st.session_state["_arca_pedido"] = None
+                            st.rerun()
         else:
             _cfg_arca = configuracion_de_arca()
             st.caption(f"Lista: CUIT ···{_cfg_arca['cuit'][-4:]}, punto de venta "

@@ -250,8 +250,12 @@ if pagina == PAGINAS[11]:
                                for u, n, t in _caja["por_usuario"]], width="stretch", hide_index=True)
                 _corregidas = {int(x["venta"]) for x in cobros_corregidos(_dia_txt)
                                if str(x["venta"]).isdigit()}
+                # Cuáles ya tienen factura, a la vista (la columna, solo si hay alguna).
+                _facturadas = facturas_de_las_ventas(v["id"] for v in _del_dia)
                 _filas_dia = [{"#": v["id"], "Hora": v["hora"], "Total": v["total"] or 0,
                                "Pago": como_se_pago(v) if v["cobrada"] else "⏳ en la caja",
+                               **({"Factura": _facturadas.get(v["id"], "")} if _facturadas
+                                  else {}),
                                "Para": v["cuenta"] or v["cliente"] or "",
                                "Patente": v["patente"] or "", "Km": v["km"] or "",
                                "Qué": ", ".join(f"{i['cantidad']}× {i['marca']} {i['codigo']}"
@@ -358,12 +362,17 @@ if pagina == PAGINAS[11]:
                 if _facturas_dia or (configuracion_de_arca() and _cobradas):
                     st.markdown("**🧾 Facturas electrónicas**")
                 if _facturas_dia:
+                    # El total y el estado, pegados al comprobante: en el celular la tabla se
+                    # corta a lo ancho y quedaban escondidos atrás del cliente y el CAE.
                     st.dataframe([{"Comprobante": nombre_del_comprobante(f["tipo"], f["punto_de_venta"],
                                                                          f["numero"]),
+                                   "Total": formato_precio(f["total"]),
+                                   "Estado": f["estado"]
+                                   + ("" if f["ambiente"] == "produccion" else " (prueba)")
+                                   + (" · traída de ARCA" if f["observaciones"] == TRAIDA_DE_ARCA
+                                      else ""),
                                    "Venta": f"#{f['venta_id']}" if f["venta_id"] else "",
-                                   "Cliente": f["nombre_receptor"] or "", "Total": formato_precio(f["total"]),
-                                   "CAE": f["cae"] or "", "Estado": f["estado"]
-                                   + ("" if f["ambiente"] == "produccion" else " (prueba)")}
+                                   "Cliente": f["nombre_receptor"] or "", "CAE": f["cae"] or ""}
                                   for f in _facturas_dia], width="stretch", hide_index=True)
                     # Cualquiera de las autorizadas, en PDF: las notas de crédito también (la
                     # de abajo muestra solo la factura vigente de una venta).
@@ -388,7 +397,9 @@ if pagina == PAGINAS[11]:
                 if _cobradas and (configuracion_de_arca() or _facturas_dia):
                     _fv = st.selectbox("Factura de la venta:", list(_cobradas), key="factura_de_la_venta",
                                        format_func=lambda i: (f"#{i} · {_cobradas[i]['hora']} · "
-                                                              f"${miles(_cobradas[i]['total'] or 0, 0)}"))
+                                                              f"${miles(_cobradas[i]['total'] or 0, 0)}"
+                                                              + (f" · 🧾 {_facturadas[i]}"
+                                                                 if i in _facturadas else "")))
                     mostrar_la_factura_de(_fv, f"cierre_{_fv}")
                     _vig = factura_vigente_de(_fv)
                     if _vig and _vig["estado"] == "autorizada" and configuracion_de_arca():

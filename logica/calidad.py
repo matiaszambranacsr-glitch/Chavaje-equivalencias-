@@ -485,15 +485,31 @@ def llego_otra_version_de_la_logica():
     return actual is not None and getattr(actual, "__dict__", None) is not globals()
 
 
-def _esperar_o_retirarse(segundos):
+def _esperar_o_retirarse(segundos, despertar=None):
     """Espera esos segundos. True si mientras tanto llegó otra versión de la lógica: el hilo
-    que espera se tiene que ir para que el código nuevo largue el suyo."""
+    que espera se tiene que ir para que el código nuevo largue el suyo. `despertar`: un
+    threading.Event que corta la espera antes (ver pedir_la_copia_ya())."""
     fin = time.time() + segundos
     while time.time() < fin:
         if llego_otra_version_de_la_logica():
             return True
-        time.sleep(max(0.0, min(SEGUNDOS_ENTRE_MIRADAS, fin - time.time())))
+        espera = max(0.0, min(SEGUNDOS_ENTRE_MIRADAS, fin - time.time()))
+        if despertar is None:
+            time.sleep(espera)
+        elif despertar.wait(espera):
+            # Se apaga ANTES de subir: lo que se pida durante la subida vale para otra copia.
+            despertar.clear()
+            break
     return llego_otra_version_de_la_logica()
+
+
+def pedir_la_copia_ya():
+    """Que el vigía suba la copia ahora, sin esperar sus quince minutos: para lo que no se
+    puede perder en un reinicio. Una factura que ARCA autorizó y la app perdió sigue existiendo
+    en ARCA, y el permiso para facturar (ver _ticket_de_acceso()) ARCA no lo da de nuevo hasta
+    que venza. No sube nada acá: despierta al hilo de vigilar_la_copia(), y varios pedidos
+    seguidos son una sola copia."""
+    del_proceso("copia_pedida_ya", threading.Event).set()
 
 
 def vigilar_la_copia():
@@ -541,7 +557,9 @@ def vigilar_la_copia():
                     subir_las_fotos_si_cambiaron()
                 except Exception as _err:
                     anotar_error("vigilar_la_copia/fotos", _err)
-                if _esperar_o_retirarse(MINUTOS_ENTRE_COPIAS * 60):
+                if _esperar_o_retirarse(MINUTOS_ENTRE_COPIAS * 60,
+                                        despertar=del_proceso("copia_pedida_ya",
+                                                              threading.Event)):
                     return
         finally:
             candado.release()

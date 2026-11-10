@@ -46,6 +46,18 @@ def _certificado_de_prueba():
                                 serialization.NoEncryption()).decode())
 
 
+def _texto_del_pdf(pdf):
+    """Lo escrito en un PDF de fpdf2 (sus tramos vienen comprimidos), para buscar adentro."""
+    import zlib
+    partes = []
+    for tramo in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", pdf, re.S):
+        try:
+            partes.append(zlib.decompress(tramo).decode("latin-1"))
+        except zlib.error:
+            continue
+    return "\n".join(partes)
+
+
 class _ArcaDePrueba:
     """Contesta como el WSAA y el WSFEv1. Anota lo que le pidieron."""
 
@@ -53,7 +65,7 @@ class _ArcaDePrueba:
         self.RequestException = requests_de_verdad.RequestException
         self._ConnectionError = requests_de_verdad.ConnectionError
         self.ultimo = {}          # (pto, tipo) -> último número autorizado
-        self.autorizadas = {}     # (pto, tipo, número) -> (cae, total)
+        self.autorizadas = {}     # (pto, tipo, número) -> lo que ARCA guarda del comprobante
         self.pedidos = []         # (acción, cuerpo)
         self.logins = 0
         self.cortar_el_proximo_cae = False
@@ -87,25 +99,46 @@ class _ArcaDePrueba:
                                        "<Msg>El numero no es el proximo a autorizar</Msg></Err>"
                                        "</Errors></R>")
             cae = f"7{pto:03d}{tipo:02d}{numero:08d}"
+            asociado = re.search(r"<CbteAsoc><Tipo>(\d+)</Tipo><PtoVta>(\d+)</PtoVta><Nro>(\d+)"
+                                 r"</Nro>", cuerpo)
+            guardado = {"cae": cae, "total": float(valor("ImpTotal")),
+                        "neto": float(valor("ImpNeto")), "iva": float(valor("ImpIVA")),
+                        "doc_tipo": valor("DocTipo"), "doc_nro": valor("DocNro"),
+                        "fecha": valor("CbteFch"), "condicion": valor("CondicionIVAReceptorId"),
+                        "asociado": asociado.groups() if asociado else None}
             if self.cortar_el_proximo_cae:
                 self.cortar_el_proximo_cae = False
                 if self.autorizar_aunque_se_corte:
                     self.ultimo[(pto, tipo)] = numero
-                    self.autorizadas[(pto, tipo, numero)] = (cae, float(valor("ImpTotal")))
+                    self.autorizadas[(pto, tipo, numero)] = guardado
                 raise self._ConnectionError("se cortó")
             self.ultimo[(pto, tipo)] = numero
-            self.autorizadas[(pto, tipo, numero)] = (cae, float(valor("ImpTotal")))
+            self.autorizadas[(pto, tipo, numero)] = guardado
             return self._respuesta(f"<R><Resultado>A</Resultado><CAE>{cae}</CAE>"
                                    "<CAEFchVto>20261120</CAEFchVto></R>")
         if accion.endswith("FECompConsultar"):
             clave = (int(valor("PtoVta")), int(valor("CbteTipo")), int(valor("CbteNro")))
             if clave in self.autorizadas:
-                cae, total = self.autorizadas[clave]
-                return self._respuesta(f"<R><CodAutorizacion>{cae}</CodAutorizacion>"
-                                       f"<ImpTotal>{total:.2f}</ImpTotal><FchVto>20261120</FchVto></R>")
+                a = self.autorizadas[clave]
+                asociado = ("<CbtesAsoc><CbteAsoc><Tipo>%s</Tipo><PtoVta>%s</PtoVta><Nro>%s</Nro>"
+                            "</CbteAsoc></CbtesAsoc>" % a["asociado"]) if a["asociado"] else ""
+                return self._respuesta(
+                    f"<R><ResultGet><DocTipo>{a['doc_tipo']}</DocTipo><DocNro>{a['doc_nro']}"
+                    f"</DocNro><CbteFch>{a['fecha']}</CbteFch><ImpTotal>{a['total']:.2f}"
+                    f"</ImpTotal><ImpNeto>{a['neto']:.2f}</ImpNeto><ImpIVA>{a['iva']:.2f}</ImpIVA>"
+                    f"<CondicionIVAReceptorId>{a['condicion']}</CondicionIVAReceptorId>"
+                    f"<CodAutorizacion>{a['cae']}</CodAutorizacion><FchVto>20261120</FchVto>"
+                    f"{asociado}</ResultGet></R>")
             return self._respuesta("<R><Errors><Err><Code>602</Code><Msg>No existen datos</Msg>"
                                    "</Err></Errors></R>")
         raise AssertionError(f"acción desconocida: {accion}")
+
+    @staticmethod
+    def perder_en_la_app(c, conn, factura_id):
+        """Como un reinicio justo después de que ARCA autorizó: el renglón se va de la app y
+        ARCA lo sigue teniendo."""
+        c.execute("DELETE FROM facturas WHERE id = ?", (factura_id,))
+        conn.commit()
 
     @staticmethod
     def _respuesta(adentro):
@@ -131,11 +164,13 @@ def probar(L):
         return fila[0] if fila else None
 
     # 1. Lo que se arma sin hablar con nadie.
-    esperar("el tipo: C del monotributista; A al inscripto y B a los demás",
+    esperar("el tipo: C del monotributista; A al inscripto y al monotributista (RG 5003), y B "
+            "a los demás",
             [ns["tipo_de_factura"](n, k) for n, k in
              (("monotributo", "Responsable inscripto"), ("responsable_inscripto",
-              "Responsable inscripto"), ("responsable_inscripto", "Consumidor final"))],
-            [11, 1, 6])
+              "Responsable inscripto"), ("responsable_inscripto", "Consumidor final"),
+              ("responsable_inscripto", "Monotributista"), ("responsable_inscripto", "Exento"))],
+            [11, 1, 6, 1, 6])
     esperar("los importes: en la B se separa el IVA del total; en la C no",
             (ns["importes_de_la_factura"](12100, 6), ns["importes_de_la_factura"](12100, 11)),
             ({"total": 12100.0, "neto": 10000.0, "iva": 2100.0},
@@ -150,6 +185,36 @@ def probar(L):
     esperar("sin los datos en los secretos, dice qué falta",
             (ns["configuracion_de_arca"](), len(ns["lo_que_falta_para_facturar"]()) >= 4),
             (None, True))
+
+    # 1b. El certificado sin OpenSSL: la clave y el pedido que ARCA pide subir, y el bloque para
+    # los secretos. El pedido lleva el CUIT como lo quiere ARCA y está firmado con esa clave.
+    from cryptography import x509 as _x509
+    from cryptography.hazmat.primitives import serialization as _ser
+    _clave_pem, _pedido_pem = ns["pedido_de_certificado"]("20-11111111-2", "El  Chavo SRL", "mi alias!")
+    _pedido = _x509.load_pem_x509_csr(_pedido_pem.encode())
+    _clave = _ser.load_pem_private_key(_clave_pem.encode(), password=None)
+    esperar("el pedido de certificado: firmado con la clave, con el CUIT, el nombre y el alias",
+            (_pedido.is_signature_valid, _pedido.subject.rfc4514_string(),
+             _pedido.public_key().public_numbers() == _clave.public_key().public_numbers(),
+             _clave.key_size),
+            (True, "2.5.4.5=CUIT 20111111112,CN=mialias,O=El Chavo SRL,C=AR", True, 2048))
+    _mal_cert = []
+    for _args in (("20-11111111-3", "El Chavo", "a"), ("20-11111111-2", "", "a"),
+                  ("20-11111111-2", "El Chavo", "¡!")):
+        try:
+            ns["pedido_de_certificado"](*_args)
+            _mal_cert.append("pasó")
+        except ValueError:
+            _mal_cert.append("no")
+    esperar("sin un CUIT que cierre, sin nombre o sin alias, no se hace", _mal_cert, ["no"] * 3)
+    _bloque = ns["secretos_de_arca_para_pegar"]("20-11111111-2", 'El "Chavo"', "monotributo",
+                                                _clave_pem)
+    import tomllib
+    _leido = tomllib.loads(_bloque)["arca"]
+    esperar("el bloque de los secretos se lee como TOML, con la clave entera",
+            (_leido["cuit"], _leido["condicion"], _leido["ambiente"], _leido["razon_social"],
+             _leido["clave_privada"].strip() == _clave_pem.strip()),
+            ("20111111112", "monotributo", "homologacion", "El Chavo", True))
 
     # 2. Con los datos, contra un ARCA de prueba.
     cert, clave = _certificado_de_prueba()
@@ -322,6 +387,97 @@ def probar(L):
                                                     f9["id"]))
         esperar("el PDF de una nota de crédito también sale", _pdf_nc[:4], b"%PDF")
 
+        # 4d. Lo que no se puede perder en un reinicio. La copia se pide al instante; una
+        # pendiente que ARCA no tiene no traba la factura que sigue; y lo que ARCA tiene y la app
+        # perdió se trae solo —y si es por el mismo importe que lo que se está por facturar, se
+        # frena para enlazarla en vez de hacer dos por la misma venta—.
+        import threading
+        _pedida = ns["del_proceso"]("copia_pedida_ya", threading.Event)
+        esperar("después de facturar, la copia quedó pedida", _pedida.is_set(), True)
+        _gc = ns["_esperar_o_retirarse"].__globals__
+        _otra_version = _gc["llego_otra_version_de_la_logica"]
+        _gc["llego_otra_version_de_la_logica"] = lambda: False
+        try:
+            import time as _time
+            _t0 = _time.time()
+            _se_va = ns["_esperar_o_retirarse"](60, despertar=_pedida)
+        finally:
+            _gc["llego_otra_version_de_la_logica"] = _otra_version
+        esperar("el vigía de la copia se despierta enseguida, y el pedido queda atendido",
+                (_se_va, _pedida.is_set(), _time.time() - _t0 < 5), (False, False, True))
+        v13, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v13, "Efectivo")
+        arca.cortar_el_proximo_cae, arca.autorizar_aunque_se_corte = True, False
+        ns["facturar_venta"](v13)
+        f13 = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ? ORDER BY id DESC",
+                             (v13,)).fetchone())
+        v14, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v14, "Efectivo")
+        ok14, _ = ns["facturar_venta"](v14)
+        esperar("con una pendiente que ARCA no tiene, la que sigue se hace igual: con su número",
+                (f13["estado"], ok14, uno("SELECT estado FROM facturas WHERE id = ?", f13["id"]),
+                 uno("SELECT numero FROM facturas WHERE venta_id = ? AND estado = 'autorizada'",
+                     v14)), ("pendiente", True, "rechazada", f13["numero"]))
+        # Un reinicio se lleva una factura (y su venta) de otro importe: se trae sola al facturar
+        # la que sigue, sin la venta, y no frena.
+        v15, _ = ns["cerrar_venta"]([item(4)], a_la_caja=True)
+        ns["cobrar_venta"](v15, "Efectivo")
+        ns["facturar_venta"](v15, "Consumidor final", "30.123.456")
+        f15 = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v15,)).fetchone())
+        arca.perder_en_la_app(c, conn, f15["id"])
+        v16, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v16, "Efectivo")
+        ok16, _ = ns["facturar_venta"](v16)
+        _traida = dict(c.execute("SELECT * FROM facturas WHERE tipo = 6 AND numero = ?",
+                                 (f15["numero"],)).fetchone())
+        esperar("la que la app perdió se trae de ARCA: sus importes, su CAE, sin venta",
+                (ok16, _traida["venta_id"], _traida["total"], _traida["neto"], _traida["iva"],
+                 _traida["cae"], _traida["doc_tipo"], _traida["doc_nro"], _traida["usuario"],
+                 _traida["fecha"], _traida["estado"]),
+                (True, None, f15["total"], f15["neto"], f15["iva"], f15["cae"], 96, 30123456,
+                 "ARCA", f15["fecha"], "autorizada"))
+        esperar("y sale en la planilla del contador",
+                any(x.get("Número") == f15["numero"] and x["Código"] == 6
+                    for x in ns["comprobantes_para_el_contador"](
+                        ns["hoy_aca"]().isoformat()[:7], "homologacion")), True)
+        # Del mismo importe que la venta que se factura: puede ser esa misma. Se frena, se
+        # enlaza, y no quedan dos facturas por una venta.
+        v17, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v17, "Efectivo")
+        ns["facturar_venta"](v17)
+        f17 = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v17,)).fetchone())
+        arca.perder_en_la_app(c, conn, f17["id"])
+        _antes = arca.ultimo[(3, 6)]
+        ok17, texto17 = ns["facturar_venta"](v17)
+        _suelta = ns["facturas_sin_venta"](12100.0)
+        esperar("del mismo importe: no hace otra, la trae y avisa",
+                (ok17, "Es la de esta venta" in texto17, arca.ultimo[(3, 6)] == _antes,
+                 [x["numero"] for x in _suelta]), (False, True, True, [f17["numero"]]))
+        esperar("no se enlaza con una venta de otro importe",
+                ns["enlazar_factura_con_venta"](_suelta[0]["id"], v15)[0], False)
+        ok_e, _ = ns["enlazar_factura_con_venta"](_suelta[0]["id"], v17)
+        _vig17 = ns["factura_vigente_de"](v17)
+        esperar("enlazada: es la factura de la venta, con sus renglones, y no se factura otra vez",
+                (ok_e, _vig17["numero"], json.loads(_vig17["detalle"])["renglones"],
+                 ns["facturar_venta"](v17)[0], ns["facturas_sin_venta"](12100.0)),
+                (True, f17["numero"], [[1, "PRUEBA F1 - FILTRO ACEITE", 12100.0]], False, []))
+        # Con la copia frenada no se hacen facturas de verdad (de prueba sí).
+        v18, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v18, "Efectivo")
+        ns["guardar_config"]("copia_frenada_sin_cifrar", "2026-10-12 15:56:50")
+        secretos["ambiente"] = "produccion"
+        _pedidos = len(arca.pedidos)
+        try:
+            _frenada = ns["facturar_venta"](v18)
+        finally:
+            secretos["ambiente"] = "homologacion"
+        _pedidos_frenada = len(arca.pedidos) - _pedidos
+        _de_prueba = ns["facturar_venta"](v18)
+        ns["guardar_config"]("copia_frenada_sin_cifrar", "")
+        esperar("con la copia frenada: de verdad no (y ni se le habla a ARCA), de prueba sí",
+                (_frenada[0], "copia de seguridad" in _frenada[1], _pedidos_frenada,
+                 _de_prueba[0]), (False, True, 0, True))
+
         # 5. El QR y el PDF.
         _fa = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v2,)).fetchone())
         _qr = ns["url_del_qr"](_fa, "20111111112")
@@ -331,7 +487,20 @@ def probar(L):
                  _datos["nroDocRec"], _datos["importe"], _datos["tipoCodAut"]),
                 (True, 1, 30712345671, 24200.0, "E"))
         _pdf = ns["factura_para_descargar"](_fa["id"])
-        esperar("el PDF sale", (_pdf[:4], len(_pdf) > 2000), (b"%PDF", True))
+        _escrito = _texto_del_pdf(_pdf)
+        esperar("el PDF sale, con el código, el número, el CUIT con guiones y la condición de venta",
+                (_pdf[:4], [x in _escrito for x in ("COD. 001", "Comp. Nro", "30-71234567-1",
+                                                     "Transferencia bancaria", "s/IVA")]),
+                (b"%PDF", [True] * 5))
+        # A un monotributista, la A con la leyenda de la RG 5003.
+        v12, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v12, "Efectivo")
+        ok12, _ = ns["facturar_venta"](v12, "Monotributista", "20-11111111-2", "Taller Mono")
+        f12 = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v12,)).fetchone())
+        esperar("al monotributista: la A, con la leyenda en el PDF (y en la B no va)",
+                (ok12, f12["tipo"], "27.618" in _texto_del_pdf(ns["factura_para_descargar"](f12["id"])),
+                 "27.618" in _texto_del_pdf(ns["factura_para_descargar"](f1["id"]))),
+                (True, 1, True, False))
         esperar("los del día", len(ns["facturas_del_dia"]()) >= 5, True)
         # 6. Lo que se prueba desde Administrar, sin facturar nada.
         esperar("probar la conexión: los tres pasos en verde",
@@ -367,14 +536,55 @@ def probar(L):
         esperar("Administrar: los comprobantes del mes para el contador, y lo que falta en el PDF",
                 (at.selectbox(key="arca_mes_contador").value,
                  any("ingresos_brutos" in x.value for x in at.caption)), (_mes, True))
+        # Sin configurar, Administrar arma el pedido de certificado: la clave se muestra para
+        # copiarla y no queda guardada en la base.
+        g["_secretos_de_arca"] = lambda: {}
+        try:
+            at.session_state["exp_certificado_de_arca"] = True
+            at.run()
+            at.text_input(key="arca_cert_cuit").set_value("20-11111111-2")
+            at.text_input(key="arca_cert_razon").set_value("El Chavo SRL")
+            at.run()
+            [b for b in at.button if b.key == "arca_cert_generar"][0].click().run()
+            _codigos = [x.value for x in at.code]
+            esperar("Administrar: el pedido para bajar y el bloque con la clave para copiar",
+                    (any("BEGIN PRIVATE KEY" in x and 'cuit = "20111111112"' in x for x in _codigos),
+                     len(at.get("download_button")) >= 1,
+                     uno("SELECT COUNT(*) FROM configuracion WHERE valor LIKE '%PRIVATE KEY%'"),
+                     [e.value for e in at.exception]), (True, True, 0, []))
+            [b for b in at.button if b.key == "arca_cert_limpiar"][0].click().run()
+            esperar("y se saca de la pantalla", [x.value for x in at.code
+                                                 if "PRIVATE KEY" in x.value], [])
+        finally:
+            g["_secretos_de_arca"] = lambda: dict(secretos)
+        at.session_state["exp_certificado_de_arca"] = False
         # El cierre de la caja: cualquiera de las autorizadas del día se baja en PDF.
         at.session_state["pagina_actual"] = ns["PAGINAS"][11]
         at.session_state["exp_ventas_cierre_caja_hoy"] = True
         at.run()
-        esperar("el cierre: el selector de los comprobantes para bajar, sin errores",
+        _con_factura = [list(d.value["Factura"]) for d in at.dataframe
+                        if "Factura" in getattr(d.value, "columns", [])]
+        esperar("el cierre: el selector de los comprobantes para bajar, y cada venta con su "
+                "factura a la vista, sin errores",
                 ([len(x.options) >= 5 for x in at.selectbox if x.key == "factura_para_bajar"]
-                 == [True],
-                 [e.value for e in at.exception]), (True, []))
+                 == [True], len(_con_factura),
+                 any(str(x).startswith(("B 00003-", "A 00003-")) for x in (_con_factura or [[]])[0]),
+                 [e.value for e in at.exception]), (True, 1, True, []))
+        # Una factura que la app perdió, del mismo importe que una venta sin factura: el
+        # comprobante de la caja ofrece enlazarla en vez de hacer otra.
+        v19, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v19, "Efectivo")
+        ns["facturar_venta"](v19)
+        f19 = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v19,)).fetchone())
+        arca.perder_en_la_app(c, conn, f19["id"])
+        ns["facturar_venta"](v19)                      # la trae, y frena
+        at.session_state["caja_recien"] = v19
+        at.run()
+        _avisa = any("la app había perdido" in x.value for x in at.warning)
+        [b for b in at.button if (b.key or "").startswith("caja_recien_enlazar_")][0].click().run()
+        esperar("la caja ofrece enlazar la factura traída de ARCA, y queda como la de la venta",
+                (_avisa, (ns["factura_vigente_de"](v19) or {}).get("numero"),
+                 [e.value for e in at.exception]), (True, f19["numero"], []))
         # Una devolución de una venta facturada: la nota de crédito por lo devuelto, tildada de
         # entrada.
         v7, _ = ns["cerrar_venta"]([item(2)], a_la_caja=True)

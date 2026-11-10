@@ -30,6 +30,13 @@ from datetime import timezone as _tz
 # número podía dejar dos facturas por la misma venta. Una pendiente se resuelve preguntándole a
 # ARCA por ese número (consultar_factura_pendiente()), nunca pidiéndola otra vez.
 #
+# Lo que ARCA autorizó no se puede perder, y Streamlit Cloud reinicia la app cuando quiere y
+# vuelve a la última copia: después de cada comprobante la copia se pide al instante
+# (pedir_la_copia_ya()), y antes de numerar el que sigue se trae de ARCA lo que la app no tenga
+# (_traer_los_que_faltan()). Si lo traído es del mismo importe que lo que se está por facturar,
+# se frena: puede ser esa misma venta, y se enlaza (enlazar_factura_con_venta()) en vez de
+# hacerle otra.
+#
 # Lo que hace falta, en los secretos de Streamlit (Settings → Secrets), nunca en el repositorio:
 #     [arca]
 #     cuit = "20123456789"
@@ -65,8 +72,16 @@ CONDICION_DE_VENTA_DE = {"Efectivo": "Contado", "Tarjeta de débito": "Tarjeta d
                          "Transferencia": "Transferencia bancaria",
                          "A cuenta": "Cuenta corriente"}
 IVA_GENERAL = 21.0
+# Lo que la RG 5003 manda poner en la factura A que recibe un monotributista.
+LEYENDA_DE_LA_A_AL_MONOTRIBUTISTA = (
+    "El crédito fiscal discriminado en el presente comprobante, sólo podrá ser computado a "
+    "efectos del Régimen de Sostenimiento e Inclusión Fiscal para Pequeños Contribuyentes de "
+    "la Ley N° 27.618.")
 ID_DEL_IVA_GENERAL = 5          # el código de ARCA de la alícuota del 21%
 SEGUNDOS_PARA_ARCA = 30
+# Lo que dicen las observaciones de un comprobante que no hizo la app en esta base: ver
+# _traer_los_que_faltan().
+TRAIDA_DE_ARCA = "traída de ARCA: la app no la tenía"
 _NS_WSFE = "http://ar.gov.afip.dif.FEV1/"
 _NS_WSAA = "http://wsaa.view.sua.dvadac.desein.afip.gov"
 
@@ -126,10 +141,11 @@ def lo_que_falta_para_facturar():
 
 def tipo_de_factura(condicion_del_negocio, condicion_del_cliente):
     """El tipo de comprobante: el monotributista hace C; el responsable inscripto, A a otro
-    responsable inscripto y B a los demás."""
+    responsable inscripto y al monotributista (RG 5003, desde julio de 2021: antes era B, y a
+    un taller monotributista se le hacía la letra equivocada), y B a los demás."""
     if condicion_del_negocio == "monotributo":
         return 11
-    return 1 if condicion_del_cliente == "Responsable inscripto" else 6
+    return 1 if condicion_del_cliente in ("Responsable inscripto", "Monotributista") else 6
 
 
 def importes_de_la_factura(total, tipo):
@@ -278,6 +294,8 @@ def _ticket_de_acceso(cfg):
     if not nuevo["token"] or not nuevo["sign"]:
         raise ErrorDeArca("ARCA no devolvió el permiso para facturar.")
     guardar_config(clave, json.dumps(nuevo))
+    # A la copia ya: si la app se reinicia y lo pierde, ARCA no da otro hasta que venza.
+    pedir_la_copia_ya()
     return nuevo
 
 
@@ -345,13 +363,40 @@ def _emitir(cfg, tipo, cliente, importes, venta_id, asociada=None, nombre_client
     (`detalle`: los renglones y la condición de venta). (ok, texto, id del renglón)."""
     if importes["total"] <= 0:
         return False, "No se factura algo en cero.", None
+    # CON LA COPIA FRENADA NO SE HACEN FACTURAS DE VERDAD: si la app se reinicia vuelve a la
+    # última copia, las facturas hechas desde entonces se borran de acá y ARCA las sigue
+    # teniendo. De prueba sí: no valen.
+    if cfg["ambiente"] == "produccion" and obtener_config("copia_frenada_sin_cifrar", ""):
+        return False, ("La copia de seguridad está frenada: si la app se reiniciara se perderían "
+                       "las facturas hechas, y ARCA las seguiría teniendo. Primero hay que "
+                       "arreglar la copia (lo dice la campanita 🩺)."), None
     # Uno a la vez: el número sale de preguntarle a ARCA el último, y dos a la vez pedirían el
     # mismo (un candado propio y no db_lock: adentro se habla con ARCA, que tarda).
     with del_proceso("candado_de_arca", threading.Lock):
         try:
-            numero = ultimo_autorizado(cfg, tipo) + 1
+            # Las pendientes de este tipo se resuelven antes de numerar: si ARCA no tiene la
+            # pendiente, el número que sigue es el de ella, y anotarlo de nuevo chocaba con su
+            # renglón (un número, un comprobante).
+            c.execute("""SELECT * FROM facturas WHERE estado = 'pendiente' AND ambiente = ?
+                           AND punto_de_venta = ? AND tipo = ?""",
+                      (cfg["ambiente"], cfg["punto_de_venta"], tipo))
+            for pendiente in [dict(f) for f in c.fetchall()]:
+                _resolver_pendiente(cfg, pendiente)
+            ultimo = ultimo_autorizado(cfg, tipo)
+            traidas = _traer_los_que_faltan(cfg, tipo, ultimo)
         except ErrorDeArca as e:
             return False, str(e), None
+        numero = ultimo + 1
+        # Si lo que faltaba es por este mismo importe, puede ser ESTA venta, facturada justo
+        # antes de un reinicio que se llevó la venta y la factura: no se hace otra sin mirar.
+        repetidas = [t for t in traidas if t["tipo"] == tipo and not asociada
+                     and abs(t["total"] - importes["total"]) < 0.01]
+        if repetidas:
+            return False, ("ARCA ya tenía " + ", ".join(
+                f"la {nombre_del_comprobante(t['tipo'], t['punto_de_venta'], t['numero'])} por "
+                f"{formato_precio(t['total'])}" for t in repetidas)
+                + ", que la app había perdido (un reinicio): la traje. Si es la de esta venta, "
+                  "tocá «🔗 Es la de esta venta»; si no, facturá de nuevo."), None
         fila = {"venta_id": venta_id, "tipo": tipo, "punto_de_venta": cfg["punto_de_venta"],
                 "numero": numero, "fecha": hoy_aca().isoformat(), "doc_tipo": cliente["doc_tipo"],
                 "doc_nro": cliente["doc_nro"],
@@ -372,10 +417,136 @@ def _emitir(cfg, tipo, cliente, importes, venta_id, asociada=None, nombre_client
         try:
             raiz = _pedir_al_wsfe(cfg, "FECAESolicitar", _detalle_del_pedido(cfg, fila, asociada))
         except ErrorDeArca as e:
+            pedir_la_copia_ya()
             return False, (f"{e} La {nombre_del_comprobante(tipo, fila['punto_de_venta'], numero)} "
                            "quedó pendiente: tocá «🔄 Consultar en ARCA» para saber si se hizo."), \
                 factura_id
-        return _anotar_la_respuesta(factura_id, raiz)
+        resultado = _anotar_la_respuesta(factura_id, raiz)
+        # A la copia ya, sin esperar los quince minutos: lo que ARCA autorizó no se puede
+        # perder en un reinicio.
+        pedir_la_copia_ya()
+        return resultado
+
+
+def _consultar_en_arca(cfg, tipo, punto_de_venta, numero):
+    """Lo que ARCA tiene de ese número: dict, o None si no lo tiene. ErrorDeArca si no se pudo
+    preguntar."""
+    raiz = _pedir_al_wsfe(cfg, "FECompConsultar",
+                          f"<FeCompConsReq><CbteTipo>{tipo}</CbteTipo><CbteNro>{numero}</CbteNro>"
+                          f"<PtoVta>{punto_de_venta}</PtoVta></FeCompConsReq>")
+    cae = _texto_de_arca(raiz, "CodAutorizacion")
+    if not cae:
+        return None
+
+    def importe(nombre):
+        try:
+            return round(float(_texto_de_arca(raiz, nombre) or 0), 2)
+        except ValueError:
+            return 0.0
+
+    def entero(texto):
+        return int(texto) if str(texto).isdigit() else 0
+
+    def dia(texto):
+        return f"{texto[:4]}-{texto[4:6]}-{texto[6:8]}" if len(texto) == 8 else texto
+    asociado = _primero_de_arca(raiz, "CbteAsoc")
+    return {"cae": cae, "vence": dia(_texto_de_arca(raiz, "FchVto")),
+            "fecha": dia(_texto_de_arca(raiz, "CbteFch")), "total": importe("ImpTotal"),
+            "neto": importe("ImpNeto"), "iva": importe("ImpIVA"),
+            "doc_tipo": entero(_texto_de_arca(raiz, "DocTipo")) or DOC_SIN_IDENTIFICAR,
+            "doc_nro": entero(_texto_de_arca(raiz, "DocNro")),
+            "condicion": entero(_texto_de_arca(raiz, "CondicionIVAReceptorId")),
+            "asociado": ((entero(_texto_de_arca(asociado, "Tipo")),
+                          entero(_texto_de_arca(asociado, "PtoVta")),
+                          entero(_texto_de_arca(asociado, "Nro")))
+                         if asociado is not None else None)}
+
+
+def _resolver_pendiente(cfg, f):
+    """Una pendiente, preguntándole a ARCA por su número: autorizada con su CAE si la tiene,
+    rechazada (el número queda libre) si no. (ok, texto). ErrorDeArca si no se pudo preguntar."""
+    nombre = nombre_del_comprobante(f["tipo"], f["punto_de_venta"], f["numero"])
+    if f["ambiente"] != cfg["ambiente"]:
+        return False, f"La {nombre} es de otro ambiente de ARCA (prueba o real)."
+    en_arca = _consultar_en_arca(cfg, f["tipo"], f["punto_de_venta"], f["numero"])
+    with db_lock, transaccion():
+        if en_arca and abs(en_arca["total"] - f["total"]) < 0.01:
+            c.execute("""UPDATE facturas SET estado = 'autorizada', cae = ?, cae_vence = ?
+                         WHERE id = ?""", (en_arca["cae"], en_arca["vence"], f["id"]))
+            anotar_cambio("hizo un comprobante de ARCA", "factura", f["id"], None,
+                          {"comprobante": nombre, "cae": en_arca["cae"]})
+            return True, f"🧾 ARCA sí la autorizó: {nombre}, CAE {en_arca['cae']}."
+        if en_arca:
+            return False, (f"ARCA tiene la {nombre} con otro importe "
+                           f"({formato_precio(en_arca['total'])}): no se tocó. Revisalo con el "
+                           "contador.")
+        c.execute("UPDATE facturas SET estado = 'rechazada', observaciones = ? WHERE id = ?",
+                  ("ARCA no la tiene: no llegó a hacerse", f["id"]))
+    return True, f"ARCA no tiene la {nombre}: no llegó a hacerse. Se puede volver a facturar."
+
+
+# De a cuántos comprobantes perdidos se traen por vez: más que esto no es un reinicio, es otro
+# sistema facturando en el mismo punto de venta, y cada uno es una consulta a ARCA.
+TOPE_DE_COMPROBANTES_A_TRAER = 20
+
+
+def _traer_los_que_faltan(cfg, tipo, ultimo):
+    """LO QUE ARCA TIENE Y LA APP NO: los números entre el primero que la app tiene de ese tipo
+    y el último que ARCA autorizó. Pasa cuando la app se reinicia entre que ARCA autoriza y que
+    sube la copia: la factura existe en ARCA y acá no, y el libro del contador quedaba con un
+    número menos. Se traen con lo que ARCA sabe (sin la venta ni el detalle) y se anotan.
+    Devuelve los renglones traídos. Sin ninguno propio todavía no hay desde dónde contar: lo
+    anterior es de antes de la app."""
+    c.execute("""SELECT numero FROM facturas WHERE ambiente = ? AND punto_de_venta = ?
+                   AND tipo = ? AND estado IN ('autorizada', 'pendiente')""",
+              (cfg["ambiente"], cfg["punto_de_venta"], tipo))
+    tengo = {f[0] for f in c.fetchall()}
+    if not tengo:
+        return []
+    faltan = [n for n in range(min(tengo) + 1, ultimo + 1) if n not in tengo]
+    traidas = []
+    for numero in faltan[:TOPE_DE_COMPROBANTES_A_TRAER]:
+        en_arca = _consultar_en_arca(cfg, tipo, cfg["punto_de_venta"], numero)
+        if not en_arca:
+            continue
+        asociada_a = venta_id = None
+        if en_arca["asociado"]:
+            c.execute("""SELECT id, venta_id FROM facturas WHERE ambiente = ? AND tipo = ?
+                           AND punto_de_venta = ? AND numero = ? AND estado = 'autorizada'""",
+                      (cfg["ambiente"],) + en_arca["asociado"])
+            original = c.fetchone()
+            if original:
+                asociada_a, venta_id = original["id"], original["venta_id"]
+        fila = {"tipo": tipo, "punto_de_venta": cfg["punto_de_venta"], "numero": numero,
+                "total": en_arca["total"]}
+        with db_lock, transaccion():
+            c.execute("""INSERT INTO facturas (venta_id, tipo, punto_de_venta, numero, fecha,
+                                               doc_tipo, doc_nro, condicion_receptor,
+                                               nombre_receptor, total, neto, iva, estado, cae,
+                                               cae_vence, observaciones, detalle, ambiente,
+                                               asociada_a, usuario)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, 'autorizada', ?, ?, ?, ?, ?,
+                                 ?, 'ARCA')""",
+                      (venta_id, tipo, cfg["punto_de_venta"], numero,
+                       en_arca["fecha"] or hoy_aca().isoformat(), en_arca["doc_tipo"],
+                       en_arca["doc_nro"],
+                       en_arca["condicion"] or (1 if tipo in (1, 3) else 5), en_arca["total"],
+                       en_arca["neto"] or en_arca["total"], en_arca["iva"], en_arca["cae"],
+                       en_arca["vence"], TRAIDA_DE_ARCA,
+                       json.dumps({"renglones": [[1, "Comprobante traído de ARCA: la app no "
+                                                     "tenía el detalle", en_arca["total"]]]},
+                                  ensure_ascii=False),
+                       cfg["ambiente"], asociada_a))
+            fila["id"] = c.lastrowid
+            anotar_cambio("trajo de ARCA un comprobante que la app no tenía", "factura",
+                          fila["id"], None,
+                          {"comprobante": nombre_del_comprobante(tipo, cfg["punto_de_venta"],
+                                                                 numero),
+                           "total": en_arca["total"]})
+        traidas.append(fila)
+    if traidas:
+        pedir_la_copia_ya()
+    return traidas
 
 
 def _anotar_la_respuesta(factura_id, raiz):
@@ -457,6 +628,22 @@ def condicion_de_venta(venta_id):
     if v["forma_de_pago"] == "Tarjeta de crédito" and (v["cuotas"] or 1) > 1:
         forma += f" ({v['cuotas']} cuotas)"
     return forma
+
+
+def facturas_de_las_ventas(ventas):
+    """{venta: «B 00003-00000042»} de las que tienen factura vigente («⏳ …» si quedó pendiente):
+    para ver en el cierre de caja cuáles ya están facturadas, sin elegirlas de a una."""
+    ventas = [int(v) for v in ventas]
+    if not ventas:
+        return {}
+    huecos = ",".join("?" * len(ventas))
+    c.execute("SELECT id, venta_id, tipo, punto_de_venta, numero, estado FROM facturas "
+              "WHERE tipo IN (1, 6, 11) AND estado IN ('autorizada', 'pendiente') "
+              "AND venta_id IN (" + huecos + ") ORDER BY id", ventas)
+    return {f["venta_id"]: ("⏳ " if f["estado"] == "pendiente" else "")
+            + f"{TIPOS_DE_COMPROBANTE[f['tipo']][1]} {f['punto_de_venta']:05d}-{f['numero']:08d}"
+            for f in [dict(x) for x in c.fetchall()]
+            if lo_que_queda_de_la_factura(f["id"]) > 0.005}
 
 
 def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=""):
@@ -566,30 +753,53 @@ def consultar_factura_pendiente(factura_id):
     f = c.fetchone()
     if not f:
         return False, "Esa factura no está pendiente."
-    nombre = nombre_del_comprobante(f["tipo"], f["punto_de_venta"], f["numero"])
     try:
-        raiz = _pedir_al_wsfe(cfg, "FECompConsultar",
-                              f"<FeCompConsReq><CbteTipo>{f['tipo']}</CbteTipo>"
-                              f"<CbteNro>{f['numero']}</CbteNro><PtoVta>{f['punto_de_venta']}"
-                              "</PtoVta></FeCompConsReq>")
+        resultado = _resolver_pendiente(cfg, dict(f))
     except ErrorDeArca as e:
         return False, str(e)
-    cae = _texto_de_arca(raiz, "CodAutorizacion")
-    total = _texto_de_arca(raiz, "ImpTotal")
+    pedir_la_copia_ya()
+    return resultado
+
+
+def facturas_sin_venta(total=None):
+    """Las facturas autorizadas que no son de ninguna venta de la app (las traídas de ARCA
+    después de un reinicio) y todavía valen; con `total`, las de ese importe. [dict]."""
+    c.execute("""SELECT * FROM facturas WHERE venta_id IS NULL AND estado = 'autorizada'
+                   AND tipo IN (1, 6, 11) ORDER BY id DESC""")
+    return [dict(f) for f in c.fetchall()
+            if lo_que_queda_de_la_factura(f["id"]) > 0.005
+            and (total is None or abs(f["total"] - total) < 0.01)]
+
+
+def enlazar_factura_con_venta(factura_id, venta_id):
+    """«🔗 Es la de esta venta»: una factura traída de ARCA pasa a ser la de una venta cobrada
+    del mismo importe (la que se volvió a cargar después del reinicio), en vez de hacerle otra.
+    (ok, texto)."""
+    exigir_nivel("empleado", "enlazar una factura con su venta")
+    c.execute("SELECT * FROM facturas WHERE id = ? AND venta_id IS NULL AND estado = 'autorizada'",
+              (factura_id,))
+    f = c.fetchone()
+    if not f:
+        return False, "Esa factura ya es de una venta."
+    c.execute("SELECT COALESCE(cobrada, 1) AS cobrada, COALESCE(anulada, 0) AS anulada "
+              "FROM ventas WHERE id = ?", (venta_id,))
+    venta = c.fetchone()
+    if not venta or venta["anulada"] or not venta["cobrada"]:
+        return False, "Se enlaza con una venta cobrada y sin anular."
+    if factura_vigente_de(venta_id):
+        return False, "Esa venta ya tiene su factura."
+    if abs(lo_que_se_puede_facturar(venta_id) - f["total"]) >= 0.01:
+        return False, "El importe de la factura no es el de la venta."
+    nombre = nombre_del_comprobante(f["tipo"], f["punto_de_venta"], f["numero"])
     with db_lock, transaccion():
-        if cae and total and abs(float(total) - f["total"]) < 0.01:
-            vence = _texto_de_arca(raiz, "FchVto")
-            c.execute("""UPDATE facturas SET estado = 'autorizada', cae = ?, cae_vence = ?
-                         WHERE id = ?""",
-                      (cae, f"{vence[:4]}-{vence[4:6]}-{vence[6:8]}" if len(vence) == 8 else vence,
-                       factura_id))
-            return True, f"🧾 ARCA sí la autorizó: {nombre}, CAE {cae}."
-        if cae:
-            return False, (f"ARCA tiene la {nombre} con otro importe ({total}): no se tocó. "
-                           "Revisalo con el contador.")
-        c.execute("UPDATE facturas SET estado = 'rechazada', observaciones = ? WHERE id = ?",
-                  ("ARCA no la tiene: no llegó a hacerse", factura_id))
-    return True, f"ARCA no tiene la {nombre}: no llegó a hacerse. Se puede volver a facturar."
+        c.execute("UPDATE facturas SET venta_id = ?, detalle = ? WHERE id = ? OR asociada_a = ?",
+                  (venta_id, json.dumps({"renglones": renglones_de_la_venta(venta_id),
+                                         "condicion_de_venta": condicion_de_venta(venta_id)},
+                                        ensure_ascii=False), factura_id, factura_id))
+        anotar_cambio("enlazó una factura traída de ARCA con su venta", "factura", factura_id,
+                      None, {"comprobante": nombre, "venta": venta_id})
+    pedir_la_copia_ya()
+    return True, f"🔗 La {nombre} quedó como la factura de la venta #{venta_id}."
 
 
 def facturas_del_dia(dia=None):
@@ -821,6 +1031,11 @@ def factura_para_descargar(factura_id):
         pdf.cell(0, 5, latin("Régimen de Transparencia Fiscal al Consumidor (Ley 27.743) - "
                              f"IVA contenido: {formato_precio(f['iva'])}"), align="R",
                  new_x="LMARGIN", new_y="NEXT")
+    if discrimina and f["condicion_receptor"] == CONDICIONES_DEL_CLIENTE["Monotributista"]:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.multi_cell(0, 4, latin(LEYENDA_DE_LA_A_AL_MONOTRIBUTISTA), new_x="LMARGIN",
+                       new_y="NEXT")
 
     # EL CAE Y EL QR.
     if f["estado"] == "autorizada" and f["cae"]:
@@ -851,6 +1066,80 @@ def factura_para_descargar(factura_id):
                      new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(0, 0, 0)
     return bytes(pdf.output())
+
+
+def pedido_de_certificado(cuit, razon_social, alias="chavaje"):
+    """PARA SACAR EL CERTIFICADO SIN SABER DE COMPUTACIÓN: la clave privada y el pedido de
+    certificado (el «CSR») que ARCA pide subir, hechos acá. Lo normal es armarlos con OpenSSL en
+    una terminal, y eso solo ya frenaba al dueño antes de empezar. (clave PEM, pedido PEM), o
+    levanta ValueError con lo que está mal. No se guardan en ningún lado: la clave se le muestra
+    una vez a quien la pidió, para que la pegue en los secretos."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    cuit = cuit_valido(cuit)
+    if not cuit:
+        raise ValueError("El CUIT tiene 11 números y el último tiene que cerrar: revisalo.")
+    razon_social = " ".join(str(razon_social or "").split())[:60]
+    alias = re.sub(r"[^A-Za-z0-9]", "", str(alias or ""))[:30]
+    if not razon_social or not alias:
+        raise ValueError("Hacen falta el nombre del negocio y un alias (letras y números).")
+    clave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pedido = (x509.CertificateSigningRequestBuilder()
+              .subject_name(x509.Name([
+                  x509.NameAttribute(NameOID.COUNTRY_NAME, "AR"),
+                  x509.NameAttribute(NameOID.ORGANIZATION_NAME, razon_social),
+                  x509.NameAttribute(NameOID.COMMON_NAME, alias),
+                  x509.NameAttribute(NameOID.SERIAL_NUMBER, f"CUIT {cuit}")]))
+              .sign(clave, hashes.SHA256()))
+    return (clave.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                serialization.NoEncryption()).decode("ascii"),
+            pedido.public_bytes(serialization.Encoding.PEM).decode("ascii"))
+
+
+def secretos_de_arca_para_pegar(cuit, razon_social, condicion, clave_pem):
+    """El bloque `[arca]` listo para pegar en Settings → Secrets, con la clave recién hecha y
+    los lugares donde va lo que todavía falta (el certificado que da ARCA, el punto de venta)."""
+    return (
+        "[arca]\n"
+        f'cuit = "{cuit_valido(cuit) or ""}"\n'
+        "punto_de_venta = 0          # el que des de alta para Web Services\n"
+        f'condicion = "{condicion}"\n'
+        'ambiente = "homologacion"   # de prueba; "produccion" cuando ande\n'
+        f'razon_social = "{" ".join(str(razon_social or "").split()).replace(chr(34), "")}"\n'
+        'domicilio = ""\n'
+        'ingresos_brutos = ""\n'
+        'inicio_de_actividades = ""  # dd/mm/aaaa\n'
+        'certificado = """\n(pegá acá el certificado que te da ARCA, con sus renglones '
+        'BEGIN y END)\n"""\n'
+        f'clave_privada = """\n{clave_pem.strip()}\n"""\n')
+
+
+# Los pasos en ARCA, para Administrar. Primero el de prueba: no tiene validez fiscal y deja
+# probar todo antes de facturar de verdad.
+PASOS_DEL_CERTIFICADO_DE_ARCA = (
+    "**De prueba (homologación), primero:**\n"
+    "1. Entrá a ARCA con tu clave fiscal y, en «Administrador de Relaciones de Clave Fiscal», "
+    "adherí el servicio **«WSASS - Autogestión Certificados Homologación»**.\n"
+    "2. En WSASS → **«Nuevo Certificado»**: poné el alias de acá abajo, pegá el contenido del "
+    "pedido (el archivo `pedido.csr`, abierto con el Bloc de notas) y tocá «Crear DN y obtener "
+    "certificado». Copiá el certificado que te devuelve.\n"
+    "3. En WSASS → **«Crear autorización a servicio»**: elegí ese alias, tu CUIT y el servicio "
+    "**`wsfe`** (factura electrónica).\n"
+    "4. Pegá el bloque de abajo en Streamlit (Settings → Secrets), con el certificado adentro. "
+    "De prueba, el punto de venta puede ser cualquiera (por ejemplo 1).\n\n"
+    "**De verdad (producción), cuando el de prueba ande:**\n"
+    "1. En ARCA → **«Administración de Certificados Digitales»** → «Agregar alias»: el mismo "
+    "alias y el mismo `pedido.csr`. Bajá el certificado (`.crt`).\n"
+    "2. En «Administrador de Relaciones de Clave Fiscal» → «Nueva relación» → ARCA → WebServices "
+    "→ **«Facturación Electrónica»**, y como representante el «Computador Fiscal» con ese "
+    "alias.\n"
+    "3. En «Administración de puntos de venta y domicilios», un punto de venta nuevo del tipo "
+    "**«RECE para aplicativo y web services»** (si sos monotributista: «Factura Electrónica - "
+    "Monotributo - Web Services»). Ese número va en `punto_de_venta`.\n"
+    "4. En los secretos, cambiá el certificado por el nuevo y `ambiente` a `\"produccion\"`. La "
+    "clave privada es la misma.")
 
 
 def lo_que_conviene_completar():
@@ -933,6 +1222,21 @@ def mostrar_la_factura_de(venta_id, prefijo):
         return
     with st.container(border=True):
         st.markdown("**🧾 ¿Le hacés factura?**")
+        # Una traída de ARCA por este mismo importe puede ser la de esta venta (ver
+        # _traer_los_que_faltan()): se enlaza, no se hace otra.
+        for _suelta in facturas_sin_venta(lo_que_se_puede_facturar(venta_id))[:2]:
+            st.warning(
+                f"ARCA ya tiene la {nombre_del_comprobante(_suelta['tipo'], _suelta['punto_de_venta'], _suelta['numero'])}"
+                f" por {formato_precio(_suelta['total'])}, del "
+                f"{_suelta['fecha'][8:10]}/{_suelta['fecha'][5:7]}, que la app había perdido en "
+                "un reinicio. Si es la de esta venta, enlazala en vez de hacer otra.")
+            if candado("enlazar una factura con su venta",
+                       st.button("🔗 Es la de esta venta",
+                                 key=f"{prefijo}_enlazar_{_suelta['id']}"),
+                       f"{prefijo}_enlazar_{_suelta['id']}_candado", nivel="empleado"):
+                ok, texto = enlazar_factura_con_venta(_suelta["id"], venta_id)
+                avisar("success" if ok else "warning", texto)
+                st.rerun()
         condicion, documento, nombre = elegir_cliente_de_la_factura(prefijo)
         if candado("hacer una factura", st.button("🧾 Hacer la factura", key=f"{prefijo}_facturar"),
                    f"{prefijo}_facturar_candado", nivel="empleado"):

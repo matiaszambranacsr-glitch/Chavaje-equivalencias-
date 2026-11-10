@@ -147,6 +147,7 @@ MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo",
     "candado_del_indice_de_busqueda", "candado_del_contexto_de_precios",
     "candado_de_los_precios_dobles", "candado_de_los_precios_de_medida", "candado_de_arca",
+    "copia_pedida_ya",
     "intentos_en_recuperacion",
     "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
     "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",
