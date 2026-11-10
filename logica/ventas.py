@@ -300,10 +300,10 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=
                                   f"{f['stock']} en stock. Quedó en 0: conviene contarlo.")
             c.execute("""INSERT INTO ventas_items (venta_id, producto_id, codigo, marca,
                                                    descripcion, cantidad, precio, pedido,
-                                                   stock_descontado, costo)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                   stock_descontado, costo, precio_de_lista)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                       (venta_id, producto_id, f["codigo_raw"], f["marca"], f["descripcion"],
-                       cantidad, precio, pedido, descontado, f["precio_costo"]))
+                       cantidad, precio, pedido, descontado, f["precio_costo"], precio))
             item_id = c.lastrowid
             # Lo que aprende de las ventas, como «Se llevó»: lo que pidió el cliente y lo que
             # se llevó. Ver descubrir_equivalencias_candidatas(). Lo que salió de la mano del
@@ -1063,9 +1063,11 @@ def _descuento_valido(descuento, tope):
 
 def _aplicar_el_descuento(venta_id, descuento):
     """Adentro de la transacción del cobro: el precio de cada cosa, con el descuento; devuelve
-    el total nuevo (el que llama lo guarda en la venta)."""
+    el total nuevo (el que llama lo guarda en la venta). Siempre desde el precio sin descuento
+    (precio_de_lista; en las ventas de antes de guardarlo, el que tiene)."""
     if descuento:
-        c.execute("""UPDATE ventas_items SET precio = ROUND(precio * (1 - ? / 100.0), 2)
+        c.execute("""UPDATE ventas_items
+                     SET precio = ROUND(COALESCE(precio_de_lista, precio) * (1 - ? / 100.0), 2)
                      WHERE venta_id = ?""", (descuento, venta_id))
     c.execute("SELECT COALESCE(SUM(cantidad * precio), 0) FROM ventas_items WHERE venta_id = ?",
               (venta_id,))
@@ -1612,9 +1614,12 @@ def _volver_a_la_caja(venta_id):
                      FROM ventas WHERE id = ?""", (venta_id,))
         antes = c.fetchone()
         # El descuento se había aplicado al precio de cada cosa (ver _aplicar_el_descuento()):
-        # se deshace igual, renglón por renglón.
+        # cada renglón vuelve al precio sin descuento que tiene guardado. Dividiendo —lo que se
+        # hacía, y lo que queda para las ventas de antes de guardarlo— el redondeo de ida y
+        # vuelta se comía un centavo ($1.234,50 con 5% volvía en $1.234,49).
         if antes["descuento"]:
-            c.execute("""UPDATE ventas_items SET precio = ROUND(precio / (1 - ? / 100.0), 2)
+            c.execute("""UPDATE ventas_items
+                         SET precio = COALESCE(precio_de_lista, ROUND(precio / (1 - ? / 100.0), 2))
                          WHERE venta_id = ?""", (antes["descuento"], venta_id))
         if antes["movimiento_id"]:
             c.execute("UPDATE movimientos_de_cuenta SET anulado = 1 WHERE id = ?",

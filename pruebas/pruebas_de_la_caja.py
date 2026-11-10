@@ -373,6 +373,18 @@ def probar(L):
     ns["poner_a_cuenta"](v_k)
     esperar("a cuenta: no se cambia la forma de pago desde acá",
             ns["cambiar_como_se_pago"](v_k, "Efectivo")[0], False)
+    # Ni se le anula el cargo desde la cuenta corriente: la venta seguiría «A cuenta» en la caja
+    # sin que nadie la deba.
+    _saldo_con_k = saldo()
+    g["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+    try:
+        _ok_cargo, _texto_cargo = ns["anular_movimiento_de_cuenta"](
+            uno("SELECT movimiento_id FROM ventas WHERE id = ?", v_k))
+    finally:
+        g["_nivel_de_quien_esta_adentro"] = g_adentro
+    esperar("el cargo de una venta a cuenta no se anula suelto: dice cómo",
+            (_ok_cargo, f"venta #{v_k}" in _texto_cargo, saldo() == _saldo_con_k),
+            (False, True, True))
     ns["volver_a_la_caja"](v_k)
     esperar("vuelta a la caja: el cargo de la cuenta, anulado",
             (saldo() - _saldo_k, uno("SELECT movimiento_id FROM ventas WHERE id = ?", v_k)),
@@ -394,6 +406,30 @@ def probar(L):
     esperar("y la campanita se lo dice al administrador",
             any("se corrigieron 4 cobro" in p["titulo"] and p.get("solo_admin")
                 for p in ns["diagnostico_de_salud"]()), True)
+    # Con centavos, el precio vuelve justo: guardado, no dividiendo (1.234,50 con 5% volvía en
+    # 1.234,49: lo encontró pruebas_al_azar_de_la_caja.py). Y una venta de antes de guardarlo
+    # vuelve como antes, dividiendo.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
+              "stock) SELECT 'CENT1', 'CENT1', 'FILTRO', marca_id, 1234.5, 10 FROM productos "
+              "WHERE id = ?", (ids["A1"],))
+    _cent = c.lastrowid
+    conn.commit()
+    v_c, _ = ns["cerrar_venta"]([dict(ns["item_de_venta"](_cent, 1))], a_la_caja=True)
+    ns["cobrar_venta"](v_c, "Efectivo", descuento=5)
+    _con_5 = uno("SELECT precio FROM ventas_items WHERE venta_id = ?", v_c)
+    ns["volver_a_la_caja"](v_c)
+    v_v, _ = ns["cerrar_venta"]([item("A1", 2)], a_la_caja=True)
+    c.execute("UPDATE ventas_items SET precio_de_lista = NULL WHERE venta_id = ?", (v_v,))
+    conn.commit()
+    ns["cobrar_venta"](v_v, "Efectivo", descuento=10)
+    ns["volver_a_la_caja"](v_v)
+    esperar("el descuento se deshace justo, al centavo; y en una venta de antes, dividiendo",
+            (_con_5, uno("SELECT precio FROM ventas_items WHERE venta_id = ?", v_c),
+             uno("SELECT total FROM ventas WHERE id = ?", v_c),
+             uno("SELECT precio FROM ventas_items WHERE venta_id = ?", v_v)),
+            (1172.77, 1234.5, 1234.5, 1000.0))
+    ns["cobrar_venta"](v_c, "Efectivo")
+    ns["cobrar_venta"](v_v, "Efectivo")
 
     # LA HORA DE ACÁ (ver esa sección en logica/base.py): se guarda en UTC y se muestra —y se
     # corta el día— en la de Argentina. Lo vendido a las 22:30 de acá es la 01:30 UTC del día

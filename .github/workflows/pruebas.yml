@@ -37,3 +37,10 @@ jobs:
         run: pip install -r requirements.txt
       - name: Auditor y pruebas
         run: python .github/correr_las_pruebas.py
+      # Las mismas, con el reloj a las 22:30 de Argentina: a esa hora el día UTC ya es el
+      # siguiente, y lo que corta el día con el reloj equivocado falla solo de noche. Ver
+      # «CON EL RELOJ EN OTRO MOMENTO» en .github/correr_las_pruebas.py.
+      - name: Las mismas pruebas, de noche
+        run: |
+          sudo apt-get install -y faketime
+          python .github/correr_las_pruebas.py --de-noche

@@ -1565,16 +1565,31 @@ def registrar_pago_de_cuenta(mecanico_id, importe, medio, concepto="", cheque_fe
 
 
 def anular_movimiento_de_cuenta(movimiento_id):
-    """No se borra: queda tachado («ANULADO») para que se vea qué pasó."""
+    """No se borra: queda tachado («ANULADO») para que se vea qué pasó. (ok, texto).
+
+    EL CARGO DE UNA VENTA PUESTA A CUENTA NO SE ANULA DESDE ACÁ: la venta seguía «A cuenta» en
+    el cierre de caja y la cuenta ya no la debía —la mercadería salió y no la debía nadie—. Se
+    saca volviendo la venta a la caja o anulándola, que hacen las dos cosas juntas."""
     exigir_nivel("admin", "anular un movimiento de cuenta")
     with db_lock:
         c.execute("SELECT mecanico_id, concepto, importe FROM movimientos_de_cuenta WHERE id = ?",
                   (movimiento_id,))
         antes = c.fetchone()
+        if not antes:
+            return False, "Ese movimiento no existe."
+        c.execute("SELECT id FROM ventas WHERE movimiento_id = ? AND anulada = 0",
+                  (movimiento_id,))
+        venta = c.fetchone()
+        if venta:
+            return False, (f"Es el cargo de la venta #{venta['id']}, que sigue puesta a cuenta. "
+                           "Para sacarlo, volvé la venta a la caja o anulala (en "
+                           f"{miga_hasta('💵 Caja')} → 📋 Ventas y cierre de caja): así la caja "
+                           "y la cuenta dicen lo mismo.")
         c.execute("UPDATE movimientos_de_cuenta SET anulado = 1 WHERE id = ?", (movimiento_id,))
         anotar_cambio("anuló movimiento de cuenta", "movimiento", movimiento_id,
-                      antes=dict(antes) if antes else None)
+                      antes=dict(antes))
         conn.commit()
+    return True, "Movimiento anulado."
 
 
 # ============================================================

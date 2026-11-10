@@ -7091,8 +7091,27 @@ Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:5
 - **El día es el de acá**: `hoy_aca()` y `date(col, '-3 hours')` en la caja (las ventas, las devoluciones, el arqueo, las correcciones), lo más vendido, lo que se va a terminar, la venta a medio armar «de hoy», los vencimientos de las cuentas y el «hoy 14:32» del depósito, los permisos y los portales. Una fecha sin hora (un vencimiento, un cheque) ya es de acá: se compara tal cual con `hoy_aca()`; pasada por el modificador caería el día anterior.
 - **Las marcas internas** (los cupos diarios de las fuentes de afuera, las fotos diarias de la calidad) siguen en UTC, como se guardan.
 - **Lo que mostraron las pruebas corridas a las 21 de acá** (entre las 21 y las 24 el día UTC ya es el siguiente): el **interés por mora** cargado el 31/3 después de las 21 quedaba del 1/4 —se leía con `date(fecha)`— y el próximo cálculo se comía un día; ahora `date(fecha, '-3 hours')`. La fecha «Aprobado el» de los códigos puente, igual. Y cuatro pruebas comparaban con `date.today()` o `datetime.now()`: daban verde de día y fallaban de noche.
+- **Las pruebas corren también de noche, siempre.** Aquel error apareció de casualidad, porque las pruebas se corrieron a las 21:07. Ahora `python .github/correr_las_pruebas.py --de-noche` las corre con el reloj a las 22:30 de acá (con `faketime`), y GitHub lo hace en cada subida: probado volviendo a poner el error del interés, da verde de día y rojo de noche. Con `--fecha` se probaron los otros bordes —fin de año a la noche, fin de mes, 29 de febrero, recién pasada la medianoche, y las 89 pantallas con la base real un 31/12 a las 22:30—: todo en verde. «Dentro de cinco años» encontró una prueba con una fecha escrita que empezaba a fallar sola el 10/1/2028.
 
 Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), el día UTC de una fecha guardada (`date(fecha)`, `substr(fecha, 1, 10)`), `date('now', 'localtime')`, `date.today()` (también en las pruebas) y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
+
+## 🎲 La caja, al azar: que la plata, el stock y las cuentas cierren siempre
+
+Las pruebas de la caja siguen caminos pensados: vender, cobrar, devolver. Los errores de plata aparecen en los que nadie pensó. `pruebas/pruebas_al_azar_de_la_caja.py` arma el camino al azar —con semilla fija: si falla, falla siempre igual y dice en qué paso y de dónde venía— con unas 250 operaciones por semilla mezcladas: vender (a la caja o cobrando), cobrar con descuento, poner a cuenta, devolver una parte (con motivos que vuelven al stock y que no), anular, deshacer, corregir cómo pagó, volver la venta a la caja y registrar pagos. Después de **cada una** controla lo que no depende del camino:
+
+- cada venta vale lo que suman sus renglones, y lo devuelto nunca pasa de lo vendido;
+- sin descuento, cada cosa está a su precio de lista (también después de deshacer un cobro);
+- el stock es el del principio menos lo que salió más lo que volvió, y nunca negativo;
+- el saldo de cada cuenta es lo puesto a cuenta menos lo devuelto y lo pagado, y cada venta a cuenta tiene su cargo vivo por su total;
+- el cierre de caja es lo cobrado menos lo devuelto —por cada forma de pago, por quién atendió y en total—, y cajón + otros medios + a cuenta dan el total;
+- lo que espera en la caja no tiene forma de pago, descuento ni cargo en ninguna cuenta.
+
+**Lo que encontró:**
+
+- **El descuento se deshacía con un centavo de menos.** El descuento del cobro baja el precio de cada renglón, y «↩️ Volverla a la caja» lo subía dividiendo: de ida y vuelta el redondeo se comía un centavo ($1.234,50 con 5% volvía en $1.234,49), y la venta quedaba por un total distinto del que tenía. Ahora cada renglón guarda su **precio sin descuento** (`precio_de_lista`) y vuelve a ese, justo; el descuento siempre se calcula desde ahí. Las ventas de antes siguen como antes.
+- **El cargo de una venta a cuenta se podía anular suelto** desde Cuentas corrientes: la venta seguía «A cuenta» en el cierre de caja y la cuenta ya no la debía —la mercadería había salido y no la debía nadie—. Ahora no deja, y dice cómo se hace: volver la venta a la caja o anularla, que hacen las dos cosas juntas.
+
+Probado con 40 semillas de 400 pasos (unas 13.000 operaciones) y rompiendo el código a propósito en cuatro lugares: los cuatro saltan.
 
 ## ✏️ Corregir un cobro
 

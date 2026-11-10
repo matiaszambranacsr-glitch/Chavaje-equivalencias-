@@ -544,7 +544,9 @@ def probar(L):
     ficha = ns["ficha_de_prueba"](fa_a, fa_b)
     esperar("un filtro es de riesgo normal", ficha["riesgo"][:1], "🟢")
     esperar("revisado hace más de tres años vuelve a probable", ficha["estado"], "🟡 PROBABLE")
-    c.execute("UPDATE equivalencias_revisadas SET fecha = '2025-01-10 10:00:00' WHERE "
+    # Dos años atrás de hoy, no una fecha escrita: con «2025-01-10» esta prueba empezaba a fallar
+    # sola el 10/1/2028 (apareció corriendo las pruebas con la fecha simulada).
+    c.execute("UPDATE equivalencias_revisadas SET fecha = datetime('now', '-2 years') WHERE "
               "producto_a_id = ? AND producto_b_id = ?", (min(fa_a, fa_b), max(fa_a, fa_b)))
     conn.commit()
     esperar("revisado hace menos de tres años, sigue verificado",

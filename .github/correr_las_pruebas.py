@@ -11,13 +11,28 @@ propia carpeta temporal y no toca la base de trabajo.
 Lo que necesita la base real (pruebas/pruebas_de_la_revision.py --base,
 pruebas/pruebas_de_compatibilidad.py) no corre acá: GitHub no tiene la base. Eso se sigue
 corriendo antes de publicar.
+
+CON EL RELOJ EN OTRO MOMENTO (hace falta el programa `faketime`: apt-get install faketime):
+
+    python .github/correr_las_pruebas.py --de-noche                    # hoy a las 22:30 de acá
+    python .github/correr_las_pruebas.py --fecha "2028-02-29 15:00:00"  # en UTC
+
+La app guarda en UTC y muestra la hora de Argentina: de 21 a 24 de acá el día UTC ya es el
+siguiente, y lo que corta el día con el reloj equivocado anda bien todo el día y falla de noche.
+Así apareció que el interés por mora cargado después de las 21 quedaba del día siguiente (las
+pruebas se corrieron, de casualidad, a las 21:07). GitHub las corre siempre a la hora que sea:
+con --de-noche también pasan por esa franja en cada subida. Con --fecha se prueban los otros
+bordes (fin de año, 29 de febrero) y que ninguna prueba tenga una fecha escrita que venza:
+«dentro de cinco años» encontró una que empezaba a fallar sola en enero de 2028.
 """
 import glob
 import os
+import shutil
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MINUTOS_POR_PRUEBA = 25
@@ -40,10 +55,31 @@ def _las_pruebas():
     return comandos
 
 
+def _con_el_reloj_en(comandos, fecha):
+    """Los mismos comandos con el reloj en `fecha` (UTC). El auditor no: no mira la hora. El
+    que corre las pruebas tampoco: con el reloj cambiado no sabe esperar a las que lanza."""
+    return [(nombre, ["faketime", fecha] + comando) for nombre, comando in comandos
+            if nombre != "auditar.py"]
+
+
+def _la_fecha_pedida(argumentos):
+    """La fecha de --fecha o la de --de-noche (hoy a las 22:30 de acá, que en UTC es mañana a
+    la 01:30), o None."""
+    if "--fecha" in argumentos:
+        return argumentos[argumentos.index("--fecha") + 1]
+    if "--de-noche" in argumentos:
+        return f"{datetime.now(timezone.utc).date() + timedelta(days=1)} 01:30:00"
+    return None
+
+
 def _correr(nombre, comando):
     inicio = time.time()
+    # Con el reloj simulado, las pruebas lo saben: la del vigía de la copia saltea lo que espera
+    # con un hilo, que con `faketime` no se despierta (ver pruebas_de_las_copias_en_github.py).
+    entorno = dict(os.environ, EQUIVALENCIAS_FECHA_SIMULADA="1") if comando[0] == "faketime" \
+        else None
     try:
-        r = subprocess.run(comando, cwd=RAIZ, capture_output=True, text=True,
+        r = subprocess.run(comando, cwd=RAIZ, capture_output=True, text=True, env=entorno,
                            timeout=MINUTOS_POR_PRUEBA * 60)
         dijo, errores, codigo = r.stdout or "", r.stderr or "", r.returncode
     except subprocess.TimeoutExpired as e:
@@ -55,8 +91,15 @@ def _correr(nombre, comando):
 
 def main():
     comandos = _las_pruebas()
+    fecha = _la_fecha_pedida(sys.argv[1:])
+    if fecha:
+        if not shutil.which("faketime"):
+            print("Falta el programa «faketime» para simular la fecha: apt-get install faketime")
+            return 2
+        comandos = _con_el_reloj_en(comandos, fecha)
     a_la_vez = max(1, min(4, os.cpu_count() or 1))
-    print(f"{len(comandos)} pruebas, de a {a_la_vez}", flush=True)
+    print(f"{len(comandos)} pruebas, de a {a_la_vez}"
+          + (f", con el reloj en {fecha} UTC" if fecha else ""), flush=True)
     inicio = time.time()
     resultados = []
     with ThreadPoolExecutor(max_workers=a_la_vez) as pool:

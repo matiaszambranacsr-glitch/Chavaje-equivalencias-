@@ -1405,8 +1405,8 @@ if pagina == PAGINAS[3]:
                     if candado("anular un movimiento de cuenta corriente",
                                st.button("🚫 Anular ese movimiento", key=f"cc_anular_{_mid}"),
                                f"cc_anular_{_mid}"):
-                        anular_movimiento_de_cuenta(_anulables[_a_anular])
-                        avisar("success", "Movimiento anulado.")
+                        _ok_an, _texto_an = anular_movimiento_de_cuenta(_anulables[_a_anular])
+                        avisar("success" if _ok_an else "warning", _texto_an)
                         st.rerun()
 
             # INTERÉS POR MORA con la tasa del BCRA: ver «INTERÉS POR MORA» en

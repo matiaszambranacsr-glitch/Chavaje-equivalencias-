@@ -23,6 +23,9 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - `python .github/correr_las_pruebas.py` → auditor + todas las `pruebas/pruebas_*.py` (~1 min, una línea
   por prueba). Es lo mismo que corre GitHub.
 - `python auditar.py` solo, cuando se toca código de pantallas (tiene que dar 0 / 0 / 0).
+- Si se tocan fechas u horas: `python .github/correr_las_pruebas.py --de-noche` (las mismas pruebas
+  con el reloj a las 22:30 de acá; hace falta `apt-get install faketime`). GitHub lo corre siempre.
+  Otros bordes: `--fecha "2028-02-29 15:00:00"` (en UTC).
 - `python pruebas/pruebas_de_compatibilidad.py --base <copia de la base real> --contra origin/main`.
 - Medir antes y después de tocar reglas: `python pruebas/medir.py --base <copia> busquedas --guardar antes.json`, y después `--comparar antes.json` (también `cola`, `fichas` y `texto`). Salida de pocos renglones; no escribir scripts sueltos para eso.
 - Cuánto tarda cada pantalla en un toque y dónde se va el tiempo: `python pruebas/medir.py --base <copia> toques` (con `--guardar`/`--comparar` igual).

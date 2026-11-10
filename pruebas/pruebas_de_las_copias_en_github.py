@@ -391,6 +391,11 @@ def probar(ns, gh, carpeta):
 
     # EL VIGÍA SE VA CUANDO LLEGA CÓDIGO NUEVO (ver vigilar_la_copia()). Seguía corriendo el
     # código con que arrancó el servidor: la copia del 12/10 la subió una versión del 7/10.
+    # Con el reloj simulado no se prueba (ver «CON EL RELOJ EN OTRO MOMENTO» en
+    # .github/correr_las_pruebas.py): `faketime` no deja despertar a un hilo que espera con
+    # tiempo, y el vigía no llega a ver el código nuevo. No es una cosa de fechas.
+    if os.environ.get("EQUIVALENCIAS_FECHA_SIMULADA"):
+        return fallas
     import time
     import types
     g["SEGUNDOS_ANTES_DE_LA_PRIMERA_COPIA"] = 0

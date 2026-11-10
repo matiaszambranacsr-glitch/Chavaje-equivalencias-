@@ -3019,6 +3019,12 @@ def _esquema_ventas(c):
     # del día en que se devuelve, no del día de la venta.
     if "devuelto" not in [f[1] for f in c.execute("PRAGMA table_info(ventas_items)")]:
         c.execute("ALTER TABLE ventas_items ADD COLUMN devuelto INTEGER DEFAULT 0")
+    # EL PRECIO SIN EL DESCUENTO, de cada cosa: el descuento del cobro baja el precio del
+    # renglón, y al deshacer el cobro se volvía dividiendo. De ida y vuelta el redondeo se comía
+    # un centavo: $1.234,50 con 5% y de vuelta quedaba en $1.234,49 (lo encontró la prueba al
+    # azar de la caja). Con el de lista guardado, vuelve justo. Ver _aplicar_el_descuento().
+    if "precio_de_lista" not in [f[1] for f in c.execute("PRAGMA table_info(ventas_items)")]:
+        c.execute("ALTER TABLE ventas_items ADD COLUMN precio_de_lista REAL")
     c.execute("""CREATE TABLE IF NOT EXISTS ventas_devoluciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         venta_id INTEGER NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
