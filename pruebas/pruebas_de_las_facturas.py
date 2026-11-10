@@ -478,6 +478,29 @@ def probar(L):
                 (_frenada[0], "copia de seguridad" in _frenada[1], _pedidos_frenada,
                  _de_prueba[0]), (False, True, 0, True))
 
+        # 4e. Lo que se sabe del cliente: la venta de un taller viene con su CUIT (el de su
+        # cuenta corriente, o el de la primera factura que se le hizo), con la condición y el
+        # nombre de la última; y a un documento ya facturado se le recuerda el nombre.
+        st.session_state["nivel_usuario"] = "admin"
+        ns["crear_mecanico"]("Taller Sur", "clave-sur-1")
+        st.session_state["nivel_usuario"] = "operador"
+        _taller = uno("SELECT id FROM mecanicos WHERE nombre = 'Taller Sur'")
+        v20, _ = ns["cerrar_venta"]([item()], mecanico_id=_taller, a_la_caja=True)
+        ns["cobrar_venta"](v20, "Efectivo")
+        esperar("un taller sin CUIT cargado: consumidor final, sin nada",
+                ns["cliente_sugerido_para_la_factura"](v20), ("Consumidor final", "", ""))
+        ns["facturar_venta"](v20, "Monotributista", "30-71234567-1", "Taller Sur SRL")
+        v21, _ = ns["cerrar_venta"]([item()], mecanico_id=_taller, a_la_caja=True)
+        ns["cobrar_venta"](v21, "Efectivo")
+        esperar("facturado una vez: su CUIT queda en la cuenta, y la próxima viene con todo",
+                (ns["obtener_config"](f"cuit_taller_{_taller}", ""),
+                 ns["cliente_sugerido_para_la_factura"](v21)),
+                ("30712345671", ("Monotributista", "30-71234567-1", "Taller Sur SRL")))
+        ns["facturar_venta"](v21, "Monotributista", "30-71234567-1", "")
+        esperar("sin nombre y con un documento conocido: el de la última vez",
+                uno("SELECT nombre_receptor FROM facturas WHERE venta_id = ?", v21),
+                "Taller Sur SRL")
+
         # 5. El QR y el PDF.
         _fa = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v2,)).fetchone())
         _qr = ns["url_del_qr"](_fa, "20111111112")
@@ -570,6 +593,22 @@ def probar(L):
                  == [True], len(_con_factura),
                  any(str(x).startswith(("B 00003-", "A 00003-")) for x in (_con_factura or [[]])[0]),
                  [e.value for e in at.exception]), (True, 1, True, []))
+        # Lo tipeado para una venta que no se facturó no sigue puesto en la siguiente; y la de
+        # un taller con CUIT viene con sus datos.
+        v22, _ = ns["cerrar_venta"]([item(7)], a_la_caja=True)
+        ns["cobrar_venta"](v22, "Efectivo")
+        v23, _ = ns["cerrar_venta"]([item(7)], mecanico_id=_taller, a_la_caja=True)
+        ns["cobrar_venta"](v23, "Efectivo")
+        at.session_state["caja_recien"] = v22
+        at.run()
+        at.text_input(key=f"caja_recien_v{v22}_documento_factura").set_value("30123456").run()
+        at.session_state["caja_recien"] = v23
+        at.run()
+        esperar("otra venta, sus propios campos: los del taller, no lo tipeado para la anterior",
+                ([x.value for x in at.text_input if (x.key or "").endswith("_documento_factura")],
+                 [x.value for x in at.selectbox if (x.key or "").endswith("_condicion_factura")],
+                 [e.value for e in at.exception]),
+                (["30-71234567-1"], ["Monotributista"], []))
         # Una factura que la app perdió, del mismo importe que una venta sin factura: el
         # comprobante de la caja ofrece enlazarla en vez de hacer otra.
         v19, _ = ns["cerrar_venta"]([item()], a_la_caja=True)

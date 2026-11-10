@@ -657,8 +657,8 @@ def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=
     cliente, problema = cliente_de_la_factura(condicion, documento)
     if problema:
         return False, problema
-    c.execute("SELECT total, COALESCE(cobrada, 1) AS cobrada, COALESCE(anulada, 0) AS anulada "
-              "FROM ventas WHERE id = ?", (venta_id,))
+    c.execute("SELECT total, COALESCE(cobrada, 1) AS cobrada, COALESCE(anulada, 0) AS anulada, "
+              "mecanico_id FROM ventas WHERE id = ?", (venta_id,))
     venta = c.fetchone()
     if not venta:
         return False, "Esa venta no existe."
@@ -682,8 +682,19 @@ def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=
     tipo = tipo_de_factura(cfg["condicion"], cliente["condicion"])
     detalle = {"renglones": renglones_de_la_venta(venta_id),
                "condicion_de_venta": condicion_de_venta(venta_id)}
+    # Sin nombre y con un documento ya facturado: el nombre de la última vez.
+    if not (nombre or "").strip() and cliente["doc_nro"]:
+        c.execute("""SELECT nombre_receptor FROM facturas WHERE doc_tipo = ? AND doc_nro = ?
+                       AND COALESCE(nombre_receptor, '') <> '' ORDER BY id DESC LIMIT 1""",
+                  (cliente["doc_tipo"], cliente["doc_nro"]))
+        conocido = c.fetchone()
+        nombre = conocido[0] if conocido else nombre
     ok, texto, _id = _emitir(cfg, tipo, cliente, importes_de_la_factura(total, tipo),
                              venta_id, nombre_cliente=nombre, detalle=detalle)
+    # El CUIT con que se le facturó a un taller queda en su cuenta: la próxima viene puesto.
+    if ok and cliente["doc_tipo"] == DOC_CUIT and venta["mecanico_id"] \
+            and not obtener_config(f"cuit_taller_{venta['mecanico_id']}", ""):
+        guardar_config(f"cuit_taller_{venta['mecanico_id']}", f"{cliente['doc_nro']:011d}")
     return ok, texto
 
 
@@ -1180,9 +1191,38 @@ def probar_la_conexion_con_arca():
     return pasos
 
 
-def elegir_cliente_de_la_factura(prefijo):
+def cliente_sugerido_para_la_factura(venta_id):
+    """(condición, documento, nombre) con los que arranca el formulario de una venta. La de un
+    taller con su CUIT cargado (en su cuenta corriente, o de una factura anterior) viene con ese
+    CUIT, y con la condición y el nombre de la última factura que se le hizo: la cajera no lo
+    tipea cada vez. Si no se sabe, consumidor final sin nada."""
+    c.execute("""SELECT v.mecanico_id, m.nombre FROM ventas v
+                 LEFT JOIN mecanicos m ON m.id = v.mecanico_id WHERE v.id = ?""", (venta_id,))
+    venta = c.fetchone()
+    cuit = cuit_valido(obtener_config(f"cuit_taller_{venta['mecanico_id']}", "")) \
+        if venta and venta["mecanico_id"] else None
+    if not cuit:
+        return "Consumidor final", "", ""
+    c.execute("""SELECT condicion_receptor, nombre_receptor FROM facturas
+                 WHERE doc_tipo = ? AND doc_nro = ? ORDER BY id DESC LIMIT 1""",
+              (DOC_CUIT, int(cuit)))
+    previa = c.fetchone()
+    condicion = next((k for k, v in CONDICIONES_DEL_CLIENTE.items()
+                      if previa and v == previa["condicion_receptor"]), "Responsable inscripto")
+    return (condicion, documento_legible(DOC_CUIT, cuit)[5:],
+            (previa["nombre_receptor"] if previa and previa["nombre_receptor"] else venta["nombre"]))
+
+
+def elegir_cliente_de_la_factura(prefijo, venta_id=None):
     """Los campos del cliente de la factura, para la caja: (condición, documento, nombre).
-    Consumidor final de entrada, que puede ir sin documento."""
+    Consumidor final de entrada, que puede ir sin documento; con `venta_id`, lo que se sabe del
+    cliente de esa venta (ver cliente_sugerido_para_la_factura())."""
+    if venta_id is not None and f"{prefijo}_condicion_factura" not in st.session_state:
+        _cond, _doc, _nom = cliente_sugerido_para_la_factura(venta_id)
+        if _doc:
+            st.session_state[f"{prefijo}_condicion_factura"] = _cond
+            st.session_state[f"{prefijo}_documento_factura"] = _doc
+            st.session_state[f"{prefijo}_nombre_factura"] = _nom
     # La condición sola en su renglón: en el diálogo de cobrar, de a tres, «Consumidor final» se
     # cortaba en «Consumidor f…» (se vio en una captura).
     condicion = st.selectbox("Cliente:", list(CONDICIONES_DEL_CLIENTE),
@@ -1237,7 +1277,11 @@ def mostrar_la_factura_de(venta_id, prefijo):
                 ok, texto = enlazar_factura_con_venta(_suelta["id"], venta_id)
                 avisar("success" if ok else "warning", texto)
                 st.rerun()
-        condicion, documento, nombre = elegir_cliente_de_la_factura(prefijo)
+        # Las claves de los campos llevan la venta: con una sola para el comprobante «recién
+        # cobrado», el CUIT tipeado para una venta que al final no se facturó seguía puesto en
+        # la siguiente, listo para facturarle a otro.
+        condicion, documento, nombre = elegir_cliente_de_la_factura(f"{prefijo}_v{venta_id}",
+                                                                    venta_id)
         if candado("hacer una factura", st.button("🧾 Hacer la factura", key=f"{prefijo}_facturar"),
                    f"{prefijo}_facturar_candado", nivel="empleado"):
             ok, texto = facturar_venta(venta_id, condicion, documento, nombre)

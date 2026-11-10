@@ -75,7 +75,7 @@ if pagina == PAGINAS[11]:
                                      help="La hace en ARCA al cobrar. Si no, se puede hacer "
                                           "después, desde el comprobante o el cierre de caja.")
             if _con_factura:
-                _cond_f, _doc_f, _nom_f = elegir_cliente_de_la_factura(f"cobro_{venta_id}")
+                _cond_f, _doc_f, _nom_f = elegir_cliente_de_la_factura(f"cobro_{venta_id}", venta_id)
         if st.button(f"✅ Cobrar ${miles(_total, 0)}", type="primary", key=f"cobro_ok_{venta_id}",
                      width="stretch"):
             _ok_c, _texto_c = cobrar_venta(venta_id, _forma, _cuotas, _desc)
