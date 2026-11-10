@@ -71,7 +71,7 @@ def probar(L):
     ok, aviso = ns["cargar_el_interes_por_mora"](taller, 60, "prueba", usuario="ana",
                                                  hoy=date(2026, 3, 31))
     esperar("cargado", (ok, aviso), (True, aviso))
-    fila = c.execute("SELECT id, importe, vence, date(fecha) FROM movimientos_de_cuenta "
+    fila = c.execute("SELECT id, importe, vence, date(fecha, '-3 hours') FROM movimientos_de_cuenta "
                      "WHERE concepto LIKE 'Interés por mora%'").fetchone()
     esperar("el movimiento", (fila[1], fila[2], fila[3]),
             (round(30000 * 0.6 * 30 / 365, 2), "2026-04-30", "2026-03-31"))

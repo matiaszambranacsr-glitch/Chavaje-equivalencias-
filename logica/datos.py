@@ -3095,11 +3095,16 @@ def _esquema_ventas(c):
         cae TEXT,
         cae_vence TEXT,
         observaciones TEXT,
+        detalle TEXT,
         ambiente TEXT NOT NULL,
         asociada_a INTEGER REFERENCES facturas(id),
         usuario TEXT,
         creada_en TEXT DEFAULT (datetime('now'))
     )""")
+    # Lo que dice el comprobante (los renglones y la condición de venta), guardado al hacerlo:
+    # rearmado de la venta después, una devolución cambiaba el PDF de una factura ya hecha.
+    if "detalle" not in [f[1] for f in c.execute("PRAGMA table_info(facturas)")]:
+        c.execute("ALTER TABLE facturas ADD COLUMN detalle TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_facturas_venta ON facturas(venta_id)")
     # Un número, un comprobante: entre los autorizados y los pendientes. Uno rechazado (ARCA no
     # lo hizo) deja el número libre, y la próxima vez ARCA da ese mismo.

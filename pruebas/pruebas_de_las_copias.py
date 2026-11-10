@@ -139,7 +139,7 @@ def probar(L):
     esperar("con la copia frenada, un solo aviso de la copia",
             [p["titulo"] for p in ns["diagnostico_de_salud"]() if p["titulo"] == "Backup atrasado"], [])
     ns["marcar_backup_bajado"]()
-    esperar("bajado uno: dice de cuándo", [f"del {datetime.now():%d/%m/%Y}" in d for d in _frenada()],
+    esperar("bajado uno: dice de cuándo", [f"del {ns['ahora_aca']():%d/%m/%Y}" in d for d in _frenada()],
             [True])
     ns["guardar_config"]("copia_frenada_sin_cifrar", "")
     ns["guardar_config"]("ultimo_backup_fecha", f"{datetime.now() - timedelta(days=20):%Y-%m-%d %H:%M:%S}")

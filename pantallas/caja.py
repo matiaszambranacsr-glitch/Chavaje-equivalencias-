@@ -365,6 +365,26 @@ if pagina == PAGINAS[11]:
                                    "CAE": f["cae"] or "", "Estado": f["estado"]
                                    + ("" if f["ambiente"] == "produccion" else " (prueba)")}
                                   for f in _facturas_dia], width="stretch", hide_index=True)
+                    # Cualquiera de las autorizadas, en PDF: las notas de crédito también (la
+                    # de abajo muestra solo la factura vigente de una venta).
+                    _autorizadas_dia = {f["id"]: f for f in _facturas_dia
+                                        if f["estado"] == "autorizada"}
+                    if _autorizadas_dia:
+                        _b1, _b2 = cols([3, 1])
+                        _fb = _b1.selectbox(
+                            "Comprobante para bajar:", list(_autorizadas_dia),
+                            key="factura_para_bajar", label_visibility="collapsed",
+                            format_func=lambda i: (
+                                nombre_del_comprobante(_autorizadas_dia[i]["tipo"],
+                                                       _autorizadas_dia[i]["punto_de_venta"],
+                                                       _autorizadas_dia[i]["numero"])
+                                + f" · {formato_precio(_autorizadas_dia[i]['total'])}"))
+                        _b2.download_button(
+                            "📄 PDF", data=lambda _i=_fb: factura_para_descargar(_i),
+                            file_name=f"comprobante_{_autorizadas_dia[_fb]['punto_de_venta']:05d}-"
+                                      f"{_autorizadas_dia[_fb]['tipo']:03d}-"
+                                      f"{_autorizadas_dia[_fb]['numero']:08d}.pdf",
+                            mime="application/pdf", key="factura_bajar_pdf", width="stretch")
                 if _cobradas and (configuracion_de_arca() or _facturas_dia):
                     _fv = st.selectbox("Factura de la venta:", list(_cobradas), key="factura_de_la_venta",
                                        format_func=lambda i: (f"#{i} · {_cobradas[i]['hora']} · "

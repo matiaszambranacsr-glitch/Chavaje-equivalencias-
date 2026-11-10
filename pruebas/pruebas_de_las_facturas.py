@@ -256,6 +256,72 @@ def probar(L):
                  uno("SELECT SUM(iva) FROM facturas WHERE asociada_a = ?", f6["id"]),
                  ns["factura_vigente_de"](v6)), (True, f6["neto"], f6["iva"], None))
 
+        # 4c. Lo que dice el comprobante queda guardado al hacerlo: lo devuelto antes de facturar
+        # no se factura, la nota por lo devuelto lleva ese renglón, la que anula entera repite
+        # los de la factura. Y lo que ARCA rechazaría se frena antes: el CUIT mal tipeado y el
+        # consumidor final sin documento de mucha plata.
+        _mal = ns["cliente_de_la_factura"]("Responsable inscripto", "30-71234567-2")
+        esperar("el CUIT con el último número que no cierra: no pasa, y dice cuál",
+                (_mal[0], "30-71234567-2 no cierra" in (_mal[1] or "")), (None, True))
+        v9, _ = ns["cerrar_venta"]([item(3)], a_la_caja=True)
+        ns["cobrar_venta"](v9, "Tarjeta de crédito", cuotas=3)
+        ns["devolver_de_una_venta"](uno("SELECT id FROM ventas_items WHERE venta_id = ?", v9), 1,
+                                    "no_le_iba")
+        ok9, _ = ns["facturar_venta"](v9)
+        f9 = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v9,)).fetchone())
+        _d9 = json.loads(f9["detalle"])
+        esperar("devuelto uno antes de facturar: la factura va por los otros dos, y lo dice",
+                (ok9, f9["total"], _d9["renglones"], _d9["condicion_de_venta"]),
+                (True, 24200.0, [[2, "PRUEBA F1 - FILTRO ACEITE", 12100.0]],
+                 "Tarjeta de crédito (3 cuotas)"))
+        okd, _ = ns["nota_de_credito"](f9["id"], 12100,
+                                       renglones=[[1, "PRUEBA F1 - FILTRO ACEITE", 12100.0]])
+        _n9 = json.loads(uno("SELECT detalle FROM facturas WHERE asociada_a = ?", f9["id"]))
+        esperar("la nota por lo devuelto: ese renglón, con la condición de venta de la factura",
+                (okd, _n9["renglones"], _n9["condicion_de_venta"]),
+                (True, [[1, "PRUEBA F1 - FILTRO ACEITE", 12100.0]], "Tarjeta de crédito (3 cuotas)"))
+        esperar("sin renglones: la parcial y la que cierra lo dicen",
+                [json.loads(d)["renglones"][0][1].split(" de la Factura")[0] for (d,) in
+                 c.execute("SELECT detalle FROM facturas WHERE asociada_a = ? ORDER BY id",
+                           (f6["id"],)).fetchall()],
+                ["Anulación parcial", "Anulación de lo que quedaba"])
+        esperar("la que anula entera repite los renglones de la factura",
+                json.loads(uno("SELECT detalle FROM facturas WHERE asociada_a = ?",
+                               f1["id"]))["renglones"], json.loads(f1["detalle"])["renglones"])
+        v10, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v10, "Efectivo")
+        _tope = g["TOPE_CONSUMIDOR_FINAL_SIN_DOCUMENTO"]
+        g["TOPE_CONSUMIDOR_FINAL_SIN_DOCUMENTO"] = 10000
+        try:
+            _sin = ns["facturar_venta"](v10)
+            _con = ns["facturar_venta"](v10, "Consumidor final", "30.123.456")
+        finally:
+            g["TOPE_CONSUMIDOR_FINAL_SIN_DOCUMENTO"] = _tope
+        esperar("pasado el tope, el consumidor final va con DNI",
+                (_sin[0], "DNI" in _sin[1], _con[0],
+                 uno("SELECT doc_tipo FROM facturas WHERE venta_id = ? AND estado = 'autorizada'",
+                     v10)), (False, True, True, 96))
+        v11, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v11, "Efectivo")
+        ns["devolver_de_una_venta"](uno("SELECT id FROM ventas_items WHERE venta_id = ?", v11), 1,
+                                    "no_le_iba")
+        esperar("devuelta entera: no queda nada para facturar",
+                ns["facturar_venta"](v11), (False, "De esa venta se devolvió todo: no queda nada "
+                                                   "para facturar."))
+        _mes = ns["hoy_aca"]().isoformat()[:7]
+        _filas = ns["comprobantes_para_el_contador"](_mes, "homologacion")
+        esperar("para el contador: las notas en negativo, el total al final, y la planilla sale",
+                (ns["meses_con_comprobantes"]("homologacion"), _filas[-1]["Comprobante"],
+                 any(f["Total"] < 0 for f in _filas[:-1]),
+                 round(sum(f["Total"] for f in _filas[:-1]), 2) == _filas[-1]["Total"],
+                 ns["to_excel_bytes"](_filas)[:2]), ([_mes], "TOTAL DEL MES", True, True, b"PK"))
+        esperar("lo que conviene completar para el PDF: lo que no está en los secretos",
+                [x.split(" ")[0] for x in ns["lo_que_conviene_completar"]()],
+                ["ingresos_brutos", "inicio_de_actividades"])
+        _pdf_nc = ns["factura_para_descargar"](uno("SELECT id FROM facturas WHERE asociada_a = ?",
+                                                    f9["id"]))
+        esperar("el PDF de una nota de crédito también sale", _pdf_nc[:4], b"%PDF")
+
         # 5. El QR y el PDF.
         _fa = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v2,)).fetchone())
         _qr = ns["url_del_qr"](_fa, "20111111112")
@@ -298,6 +364,17 @@ def probar(L):
                 (any("···1112" in x.value for x in at.caption),
                  sum(x.value.startswith(("Los datos", "El permiso", "El último"))
                      for x in at.success)), (True, 3))
+        esperar("Administrar: los comprobantes del mes para el contador, y lo que falta en el PDF",
+                (at.selectbox(key="arca_mes_contador").value,
+                 any("ingresos_brutos" in x.value for x in at.caption)), (_mes, True))
+        # El cierre de la caja: cualquiera de las autorizadas del día se baja en PDF.
+        at.session_state["pagina_actual"] = ns["PAGINAS"][11]
+        at.session_state["exp_ventas_cierre_caja_hoy"] = True
+        at.run()
+        esperar("el cierre: el selector de los comprobantes para bajar, sin errores",
+                ([len(x.options) >= 5 for x in at.selectbox if x.key == "factura_para_bajar"]
+                 == [True],
+                 [e.value for e in at.exception]), (True, []))
         # Una devolución de una venta facturada: la nota de crédito por lo devuelto, tildada de
         # entrada.
         v7, _ = ns["cerrar_venta"]([item(2)], a_la_caja=True)

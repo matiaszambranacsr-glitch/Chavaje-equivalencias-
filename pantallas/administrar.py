@@ -903,10 +903,28 @@ if pagina == PAGINAS[3]:
                        f"{_cfg_arca['punto_de_venta']}, {_cfg_arca['condicion'].replace('_', ' ')}, "
                        + ("**producción** (con validez fiscal)." if _cfg_arca["ambiente"] == "produccion"
                           else "**de prueba** (homologación: sin validez fiscal)."))
+            _completar_arca = lo_que_conviene_completar()
+            if _completar_arca:
+                st.caption("Para que el PDF diga todo lo que pide ARCA, sumá en `[arca]`: "
+                           + ", ".join(_completar_arca) + ".")
             if st.button("🔌 Probar la conexión con ARCA", key="arca_probar"):
                 st.session_state["_arca_prueba"] = probar_la_conexion_con_arca()
             for _que, _ok, _detalle in st.session_state.get("_arca_prueba") or []:
                 (st.success if _ok else st.error)(f"{'✅' if _ok else '❌'} {_que}: {_detalle}")
+            # PARA EL CONTADOR: los comprobantes de un mes en una planilla, como el libro de IVA
+            # ventas (las notas de crédito en negativo y el total al final).
+            _meses_arca = meses_con_comprobantes(_cfg_arca["ambiente"])
+            if _meses_arca:
+                _m1, _m2 = cols([2, 1])
+                _mes_arca = _m1.selectbox("📊 Comprobantes del mes, para el contador:", _meses_arca,
+                                          key="arca_mes_contador",
+                                          format_func=lambda m: f"{m[5:7]}/{m[:4]}")
+                _m2.download_button("⬇️ Excel", key="arca_bajar_mes", width="stretch",
+                                    data=lambda _m=_mes_arca: to_excel_bytes(
+                                        comprobantes_para_el_contador(_m, _cfg_arca["ambiente"])),
+                                    file_name=f"comprobantes_{_mes_arca}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument."
+                                         "spreadsheetml.sheet")
         st.markdown("---")
         st.markdown("**💬 Texto del mensaje de WhatsApp**",
                     help="Personalizá el encabezado y el pie del mensaje que se arma en 'Lista "

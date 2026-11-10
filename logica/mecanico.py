@@ -1881,9 +1881,11 @@ def tasa_de_mora():
 
 
 def _interes_cobrado_hasta(mecanico_id):
-    c.execute("""SELECT MAX(date(fecha)) FROM movimientos_de_cuenta
+    # El día de acá del último interés (ver «LA HORA DE ACÁ»): con date(fecha), el cargado el
+    # 31/3 después de las 21 quedaba del 1/4 en UTC, y el próximo cálculo se comía un día.
+    c.execute("""SELECT MAX(date(fecha, ?)) FROM movimientos_de_cuenta
                  WHERE mecanico_id = ? AND anulado = 0 AND concepto LIKE ?""",
-              (mecanico_id, PREFIJO_DEL_INTERES + "%"))
+              (A_LA_HORA_DE_ACA, mecanico_id, PREFIJO_DEL_INTERES + "%"))
     valor = c.fetchone()[0]
     try:
         return date.fromisoformat(valor) if valor else None
@@ -1903,7 +1905,7 @@ def interes_por_mora(mecanico_id, tna, hoy=None):
     cobrado_hasta = _interes_cobrado_hasta(mecanico_id)
     c.execute("""SELECT fecha, concepto, importe, vence FROM movimientos_de_cuenta
                  WHERE mecanico_id = ? AND anulado = 0 AND importe > 0
-                 ORDER BY COALESCE(vence, substr(fecha, 1, 10)), id""", (mecanico_id,))
+                 ORDER BY COALESCE(vence, date(fecha, '-3 hours')), id""", (mecanico_id,))
     renglones, total = [], 0.0
     for f in c.fetchall():
         cubre = min(pagos, float(f["importe"]))

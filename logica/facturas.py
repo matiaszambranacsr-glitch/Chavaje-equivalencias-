@@ -56,6 +56,14 @@ NOTA_DE_CREDITO_DE = {1: 3, 6: 8, 11: 13}
 CONDICIONES_DEL_CLIENTE = {"Consumidor final": 5, "Responsable inscripto": 1,
                            "Monotributista": 6, "Exento": 4}
 DOC_CUIT, DOC_DNI, DOC_SIN_IDENTIFICAR = 80, 96, 99
+# Desde este total, ARCA rechaza la factura a un consumidor final sin DNI ni CUIT (RG 5700/2025:
+# antes eran $191.624). Si ARCA lo cambia, se cambia acá.
+TOPE_CONSUMIDOR_FINAL_SIN_DOCUMENTO = 10_000_000
+# La condición de venta del comprobante, según cómo se cobró (ver condicion_de_venta()).
+CONDICION_DE_VENTA_DE = {"Efectivo": "Contado", "Tarjeta de débito": "Tarjeta de débito",
+                         "Tarjeta de crédito": "Tarjeta de crédito",
+                         "Transferencia": "Transferencia bancaria",
+                         "A cuenta": "Cuenta corriente"}
 IVA_GENERAL = 21.0
 ID_DEL_IVA_GENERAL = 5          # el código de ARCA de la alícuota del 21%
 SEGUNDOS_PARA_ARCA = 30
@@ -98,8 +106,8 @@ def lo_que_falta_para_facturar():
     """Qué falta en los secretos para poder facturar, en castellano. [] si está todo."""
     datos = _secretos_de_arca()
     falta = []
-    if len(re.sub(r"\D", "", str(datos.get("cuit") or ""))) != 11:
-        falta.append("el CUIT del negocio (11 números)")
+    if not cuit_valido(datos.get("cuit")):
+        falta.append("el CUIT del negocio (11 números, con el último que cierre)")
     try:
         if int(datos.get("punto_de_venta") or 0) <= 0:
             raise ValueError
@@ -134,6 +142,16 @@ def importes_de_la_factura(total, tipo):
     return {"total": total, "neto": neto, "iva": round(total - neto, 2)}
 
 
+def documento_legible(doc_tipo, doc_nro):
+    """«CUIT 30-71234567-1», «DNI 30.123.456» o "" (consumidor final sin identificar)."""
+    if doc_tipo == DOC_CUIT:
+        n = f"{int(doc_nro):011d}"
+        return f"CUIT {n[:2]}-{n[2:10]}-{n[10]}"
+    if doc_tipo == DOC_DNI:
+        return f"DNI {miles(int(doc_nro), 0)}"
+    return ""
+
+
 def cliente_de_la_factura(condicion="Consumidor final", documento=""):
     """El que recibe la factura, revisado: (cliente, None) o (None, qué está mal). Un
     consumidor final puede ir sin documento; con 7 u 8 números es un DNI y con 11, un CUIT. Los
@@ -146,6 +164,11 @@ def cliente_de_la_factura(condicion="Consumidor final", documento=""):
             return None, f"Para un {condicion.lower()} hace falta el CUIT."
         return {"condicion": condicion, "doc_tipo": DOC_SIN_IDENTIFICAR, "doc_nro": 0}, None
     if len(numero) == 11:
+        # Con el dígito verificador (cuit_valido(), en logica/salud.py): un número mal tipeado
+        # lo rechazaba ARCA con un error que la cajera no entendía; así sabe cuál revisar.
+        if not cuit_valido(numero):
+            return None, (f"El CUIT {numero[:2]}-{numero[2:10]}-{numero[10]} no cierra: el "
+                          "último número no corresponde a los otros. Revisalo.")
         return {"condicion": condicion, "doc_tipo": DOC_CUIT, "doc_nro": int(numero)}, None
     if len(numero) in (7, 8) and condicion == "Consumidor final":
         return {"condicion": condicion, "doc_tipo": DOC_DNI, "doc_nro": int(numero)}, None
@@ -316,8 +339,10 @@ def _detalle_del_pedido(cfg, f, asociada=None):
             f"{asociado}{iva}</FECAEDetRequest></FeDetReq></FeCAEReq>")
 
 
-def _emitir(cfg, tipo, cliente, importes, venta_id, asociada=None, nombre_cliente=""):
-    """Pide el CAE de un comprobante y lo deja anotado. (ok, texto, id del renglón)."""
+def _emitir(cfg, tipo, cliente, importes, venta_id, asociada=None, nombre_cliente="",
+            detalle=None):
+    """Pide el CAE de un comprobante y lo deja anotado, con lo que va a decir el PDF
+    (`detalle`: los renglones y la condición de venta). (ok, texto, id del renglón)."""
     if importes["total"] <= 0:
         return False, "No se factura algo en cero.", None
     # Uno a la vez: el número sale de preguntarle a ARCA el último, y dos a la vez pedirían el
@@ -336,13 +361,13 @@ def _emitir(cfg, tipo, cliente, importes, venta_id, asociada=None, nombre_client
             c.execute("""INSERT INTO facturas (venta_id, tipo, punto_de_venta, numero, fecha,
                                                doc_tipo, doc_nro, condicion_receptor,
                                                nombre_receptor, total, neto, iva, estado,
-                                               ambiente, asociada_a, usuario)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)""",
+                                               detalle, ambiente, asociada_a, usuario)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?)""",
                       (venta_id, tipo, fila["punto_de_venta"], numero, fila["fecha"],
                        fila["doc_tipo"], fila["doc_nro"], fila["condicion_receptor"],
                        fila["nombre_receptor"], fila["total"], fila["neto"], fila["iva"],
-                       cfg["ambiente"], asociada["id"] if asociada else None,
-                       obtener_usuario_actual()))
+                       json.dumps(detalle or {}, ensure_ascii=False), cfg["ambiente"],
+                       asociada["id"] if asociada else None, obtener_usuario_actual()))
             factura_id = c.lastrowid
         try:
             raiz = _pedir_al_wsfe(cfg, "FECAESolicitar", _detalle_del_pedido(cfg, fila, asociada))
@@ -400,6 +425,40 @@ def factura_vigente_de(venta_id):
     return None
 
 
+def renglones_de_la_venta(venta_id):
+    """[[cantidad, qué, precio final por unidad]] de lo que el cliente se quedó: sin lo que ya
+    devolvió."""
+    c.execute("""SELECT cantidad - COALESCE(devuelto, 0) AS cantidad, marca, codigo, descripcion,
+                        COALESCE(precio, 0) AS precio
+                 FROM ventas_items WHERE venta_id = ? ORDER BY id""", (venta_id,))
+    return [[f["cantidad"], f"{f['marca'] or ''} {f['codigo'] or ''} - {f['descripcion'] or ''}"
+             .strip(" -"), round(float(f["precio"]), 2)]
+            for f in c.fetchall() if f["cantidad"] > 0]
+
+
+def lo_que_se_puede_facturar(venta_id):
+    """El total de la venta menos lo devuelto: una devolución antes de facturar no se factura
+    (la factura de una venta de $30.000 a la que le devolvieron un filtro de $8.000 va por
+    $22.000, no por lo que se cobró al principio)."""
+    c.execute("""SELECT v.total - COALESCE((SELECT SUM(d.importe) FROM ventas_devoluciones d
+                                            WHERE d.venta_id = v.id), 0)
+                 FROM ventas v WHERE v.id = ?""", (venta_id,))
+    fila = c.fetchone()
+    return round(float(fila[0] or 0), 2) if fila else 0.0
+
+
+def condicion_de_venta(venta_id):
+    """«Contado», «Tarjeta de crédito (3 cuotas)», «Cuenta corriente»…: va en el comprobante."""
+    c.execute("SELECT forma_de_pago, cuotas FROM ventas WHERE id = ?", (venta_id,))
+    v = c.fetchone()
+    if not v:
+        return "Contado"
+    forma = CONDICION_DE_VENTA_DE.get(v["forma_de_pago"] or "", "Contado")
+    if v["forma_de_pago"] == "Tarjeta de crédito" and (v["cuotas"] or 1) > 1:
+        forma += f" ({v['cuotas']} cuotas)"
+    return forma
+
+
 def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=""):
     """«🧾 Con factura»: la factura electrónica de una venta cobrada, si la cajera la pide.
     (ok, texto)."""
@@ -426,15 +485,25 @@ def facturar_venta(venta_id, condicion="Consumidor final", documento="", nombre=
         return False, (f"Ya tiene la {nombre_ya}"
                        + (" (pendiente: consultala en ARCA)." if ya["estado"] == "pendiente"
                           else "."))
+    total = lo_que_se_puede_facturar(venta_id)
+    if total <= 0.005:
+        return False, "De esa venta se devolvió todo: no queda nada para facturar."
+    if (cliente["doc_tipo"] == DOC_SIN_IDENTIFICAR
+            and total >= TOPE_CONSUMIDOR_FINAL_SIN_DOCUMENTO):
+        return False, (f"Desde {formato_precio(TOPE_CONSUMIDOR_FINAL_SIN_DOCUMENTO)} ARCA pide el "
+                       "DNI o el CUIT del consumidor final: cargalo y volvé a tocar.")
     tipo = tipo_de_factura(cfg["condicion"], cliente["condicion"])
-    ok, texto, _id = _emitir(cfg, tipo, cliente, importes_de_la_factura(venta["total"], tipo),
-                             venta_id, nombre_cliente=nombre)
+    detalle = {"renglones": renglones_de_la_venta(venta_id),
+               "condicion_de_venta": condicion_de_venta(venta_id)}
+    ok, texto, _id = _emitir(cfg, tipo, cliente, importes_de_la_factura(total, tipo),
+                             venta_id, nombre_cliente=nombre, detalle=detalle)
     return ok, texto
 
 
-def nota_de_credito(factura_id, importe=None):
+def nota_de_credito(factura_id, importe=None, renglones=None):
     """La nota de crédito de una factura, al mismo cliente: por lo que le queda (anularla), o
-    por `importe` (lo devuelto de una venta facturada). (ok, texto)."""
+    por `importe` (lo devuelto de una venta facturada, con sus `renglones` [[cantidad, qué,
+    precio]]). (ok, texto)."""
     exigir_nivel("empleado", "hacer una nota de crédito")
     cfg = configuracion_de_arca()
     if not cfg:
@@ -470,8 +539,19 @@ def nota_de_credito(factura_id, importe=None):
                       if v == factura["condicion_receptor"]), "Consumidor final")
     cliente = {"condicion": condicion, "doc_tipo": factura["doc_tipo"],
                "doc_nro": factura["doc_nro"]}
+    # Lo que dice: lo devuelto; o, si anula la factura entera, lo mismo que ella; o una parte.
+    nombre_f = nombre_del_comprobante(factura["tipo"], factura["punto_de_venta"], factura["numero"])
+    if not renglones:
+        entera = abs(importe - factura["total"]) < 0.005
+        renglones = (detalle_del_comprobante(factura)["renglones"] if entera else
+                     [[1, f"Anulación de lo que quedaba de la {nombre_f}"
+                       if abs(importe - queda) < 0.005 else f"Anulación parcial de la {nombre_f}",
+                       importe]])
+    detalle = {"renglones": renglones,
+               "condicion_de_venta": detalle_del_comprobante(factura)["condicion_de_venta"]}
     ok, texto, _id = _emitir(cfg, tipo, cliente, importes, factura["venta_id"],
-                             asociada=factura, nombre_cliente=factura["nombre_receptor"])
+                             asociada=factura, nombre_cliente=factura["nombre_receptor"],
+                             detalle=detalle)
     return ok, texto
 
 
@@ -519,6 +599,43 @@ def facturas_del_dia(dia=None):
     return [dict(f) for f in c.fetchall()]
 
 
+def meses_con_comprobantes(ambiente):
+    """["2026-11", "2026-10", …]: los meses con comprobantes autorizados, el último primero."""
+    c.execute("""SELECT DISTINCT substr(fecha, 1, 7) FROM facturas
+                 WHERE estado = 'autorizada' AND ambiente = ? ORDER BY 1 DESC""", (ambiente,))
+    return [f[0] for f in c.fetchall()]
+
+
+def comprobantes_para_el_contador(mes, ambiente):
+    """Los comprobantes autorizados de un mes («2026-11»), uno por renglón como los pide el
+    contador para el libro de IVA ventas: las notas de crédito en negativo, y el total al
+    final. [dict]."""
+    c.execute("""SELECT * FROM facturas WHERE estado = 'autorizada' AND ambiente = ?
+                   AND substr(fecha, 1, 7) = ? ORDER BY tipo, punto_de_venta, numero""",
+              (ambiente, mes))
+    filas, suma = [], {"Neto": 0.0, "IVA": 0.0, "Total": 0.0}
+    for f in c.fetchall():
+        signo = -1 if f["tipo"] in (3, 8, 13) else 1
+        que, letra = TIPOS_DE_COMPROBANTE[f["tipo"]]
+        cond = next((k for k, v in CONDICIONES_DEL_CLIENTE.items()
+                     if v == f["condicion_receptor"]), "")
+        importes = {"Neto": signo * f["neto"], "IVA": signo * f["iva"], "Total": signo * f["total"]}
+        for k, v in importes.items():
+            suma[k] += v
+        filas.append({"Fecha": f"{f['fecha'][8:10]}/{f['fecha'][5:7]}/{f['fecha'][:4]}",
+                      "Comprobante": f"{que} {letra}", "Código": f["tipo"],
+                      "Punto de venta": f["punto_de_venta"], "Número": f["numero"],
+                      "Cliente": f["nombre_receptor"] or cond,
+                      "Documento": documento_legible(f["doc_tipo"], f["doc_nro"]),
+                      "Condición frente al IVA": cond,
+                      **{k: round(v, 2) for k, v in importes.items()},
+                      "CAE": f["cae"], "Venta": f["venta_id"] or ""})
+    if filas:
+        filas.append({"Fecha": "", "Comprobante": "TOTAL DEL MES",
+                      **{k: round(v, 2) for k, v in suma.items()}})
+    return filas
+
+
 def url_del_qr(factura, cuit):
     """El QR de la factura (RG 4892): la dirección de ARCA con los datos del comprobante."""
     datos = {"ver": 1, "fecha": factura["fecha"], "cuit": int(cuit),
@@ -531,109 +648,220 @@ def url_del_qr(factura, cuit):
     return f"https://www.afip.gob.ar/fe/qr/?p={texto}"
 
 
+def detalle_del_comprobante(factura):
+    """{renglones, condicion_de_venta} de un comprobante: lo guardado al hacerlo. Los de antes
+    de guardarlo (no hubo ninguno en producción) se rearman de la venta."""
+    try:
+        detalle = json.loads(factura.get("detalle") or "{}")
+    except ValueError:
+        detalle = {}
+    if not detalle.get("renglones") and factura.get("venta_id"):
+        detalle["renglones"] = renglones_de_la_venta(factura["venta_id"])
+    detalle.setdefault("renglones", [])
+    if not detalle.get("condicion_de_venta"):
+        detalle["condicion_de_venta"] = (condicion_de_venta(factura["venta_id"])
+                                         if factura.get("venta_id") else "Contado")
+    return detalle
+
+
 def factura_para_descargar(factura_id):
-    """El PDF de un comprobante autorizado, con lo que pide ARCA: el negocio, la letra, el
-    número, el cliente, lo vendido, el CAE y el QR. bytes."""
+    """El PDF de un comprobante, armado como los de ARCA: arriba el negocio a la izquierda, la
+    letra en su recuadro al medio y el número a la derecha; el cliente con su condición y la
+    condición de venta; lo vendido; los totales (en la A, el neto y el IVA; en la B, el IVA
+    contenido de la Ley 27.743); y el CAE con el QR. bytes."""
     from fpdf import FPDF
     import qrcode
     cfg = configuracion_de_arca() or {}
     c.execute("SELECT * FROM facturas WHERE id = ?", (factura_id,))
     f = dict(c.fetchone())
     que, letra = TIPOS_DE_COMPROBANTE[f["tipo"]]
-    items = []
-    if f["venta_id"]:
-        c.execute("SELECT cantidad, marca, codigo, descripcion, precio FROM ventas_items "
-                  "WHERE venta_id = ? ORDER BY id", (f["venta_id"],))
-        items = [dict(i) for i in c.fetchall()]
+    detalle = detalle_del_comprobante(f)
+    discrimina = f["tipo"] in (1, 3)        # en la A el detalle va sin IVA
 
     def latin(texto):
         return str(texto or "").encode("latin-1", "replace").decode("latin-1")
+
+    def dia(iso):
+        iso = str(iso or "")
+        return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(iso) >= 10 else iso
+
     pdf = FPDF()
+    pdf.set_auto_page_break(True, margin=15)
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 22)
-    pdf.cell(0, 12, latin(f"{que.upper()}   {letra}"), align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, latin(f"Cód. {f['tipo']:03d}"), align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 7, latin(cfg.get("razon_social") or "El Chavo"), new_x="LMARGIN", new_y="NEXT")
+
+    def cortar(texto, ancho):
+        """Lo que entra en `ancho` mm, con «…» si no entra (la celda no corta sola)."""
+        texto = latin(texto)
+        if pdf.get_string_width(texto) <= ancho:
+            return texto
+        while texto and pdf.get_string_width(texto + "...") > ancho:
+            texto = texto[:-1]
+        return texto + "..."
+
+    # EL ENCABEZADO: un recuadro partido al medio, con la letra arriba en el centro.
+    x0, y0, ancho, alto = 10, 10, 190, 46
+    pdf.rect(x0, y0, ancho, alto)
+    pdf.line(105, y0 + 20, 105, y0 + alto)
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(96, y0, 18, 20, style="DF")
+    pdf.set_xy(96, y0 + 1)
+    pdf.set_font("Helvetica", "B", 26)
+    pdf.cell(18, 11, letra, align="C")
+    pdf.set_xy(96, y0 + 13)
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.cell(18, 4, f"COD. {f['tipo']:03d}", align="C")
+    # A la izquierda, el negocio.
+    pdf.set_xy(13, y0 + 5)
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.cell(80, 8, cortar(cfg.get("razon_social") or "El Chavo", 80))
     pdf.set_font("Helvetica", "", 9)
     condicion = ("Responsable Monotributo" if cfg.get("condicion") == "monotributo"
                  else "IVA Responsable Inscripto")
-    for renglon in (cfg.get("domicilio"), f"CUIT: {cfg.get('cuit', '')}  ·  {condicion}",
-                    f"Ingresos Brutos: {cfg.get('ingresos_brutos') or '-'}  ·  Inicio de "
-                    f"actividades: {cfg.get('inicio_de_actividades') or '-'}"):
-        if renglon:
-            pdf.cell(0, 5, latin(renglon), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(0, 6, latin(f"Punto de venta {f['punto_de_venta']:05d}   Número {f['numero']:08d}   "
-                         f"Fecha {f['fecha'][8:10]}/{f['fecha'][5:7]}/{f['fecha'][:4]}"),
-             new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 9)
+    y = y0 + 24
+    for rotulo, valor in (("Domicilio comercial", cfg.get("domicilio")),
+                          ("Condición frente al IVA", condicion)):
+        if valor:
+            pdf.set_xy(13, y)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.cell(pdf.get_string_width(latin(rotulo + ": ")) + 1, 5, latin(rotulo + ": "))
+            pdf.set_font("Helvetica", "", 9)
+            pdf.multi_cell(88 - pdf.get_string_width(latin(rotulo + ": ")), 5, latin(valor))
+            y = pdf.get_y() + 1
+    # A la derecha, el comprobante.
+    pdf.set_xy(117, y0 + 4)
+    pdf.set_font("Helvetica", "B", 17)
+    pdf.cell(80, 9, latin(que.upper()))
+    cuit = re.sub(r"\D", "", str(cfg.get("cuit") or ""))
+    renglones_derecha = [("Punto de venta", f"{f['punto_de_venta']:05d}",
+                          "Comp. Nro", f"{f['numero']:08d}"),
+                         ("Fecha de emisión", dia(f["fecha"])),
+                         ("CUIT", documento_legible(DOC_CUIT, cuit)[5:] if len(cuit) == 11 else cuit)]
+    if cfg.get("ingresos_brutos"):
+        renglones_derecha.append(("Ingresos Brutos", cfg["ingresos_brutos"]))
+    if cfg.get("inicio_de_actividades"):
+        renglones_derecha.append(("Inicio de actividades", cfg["inicio_de_actividades"]))
+    y = y0 + 22             # debajo del recuadro de la letra: más arriba se le metía encima
+    for pares in renglones_derecha:
+        pdf.set_xy(108, y)
+        for rotulo, valor in zip(pares[::2], pares[1::2]):
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.cell(pdf.get_string_width(latin(rotulo + ": ")) + 1, 5, latin(rotulo + ": "))
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(pdf.get_string_width(latin(valor)) + 6, 5, latin(valor))
+        y += 5.5
+
+    # EL CLIENTE, en su recuadro.
     cond_cliente = next((k for k, v in CONDICIONES_DEL_CLIENTE.items()
                          if v == f["condicion_receptor"]), "")
-    documento = ("" if f["doc_tipo"] == DOC_SIN_IDENTIFICAR else
-                 f"  ·  {'CUIT' if f['doc_tipo'] == DOC_CUIT else 'DNI'} {f['doc_nro']}")
-    pdf.cell(0, 5, latin(f"Cliente: {f['nombre_receptor'] or cond_cliente}  ·  {cond_cliente}"
-                         f"{documento}"), new_x="LMARGIN", new_y="NEXT")
+    asociada = None
     if f["asociada_a"]:
-        c.execute("SELECT tipo, punto_de_venta, numero FROM facturas WHERE id = ?",
+        c.execute("SELECT tipo, punto_de_venta, numero, fecha FROM facturas WHERE id = ?",
                   (f["asociada_a"],))
-        a = c.fetchone()
-        if a:
-            pdf.cell(0, 5, latin("Anula la " + nombre_del_comprobante(a["tipo"], a["punto_de_venta"],
-                                                                     a["numero"])),
-                     new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(3)
+        asociada = c.fetchone()
+    renglones_cliente = [
+        ("Cliente", (f["nombre_receptor"] or ("Consumidor final" if cond_cliente ==
+                                               "Consumidor final" else "")),
+         documento_legible(f["doc_tipo"], f["doc_nro"])),
+        ("Condición frente al IVA", cond_cliente, ""),
+        ("Condición de venta", detalle["condicion_de_venta"], ""),
+    ]
+    if asociada:
+        renglones_cliente.append(
+            ("Comprobante asociado", nombre_del_comprobante(asociada["tipo"],
+                                                            asociada["punto_de_venta"],
+                                                            asociada["numero"]),
+             f"del {dia(asociada['fecha'])}"))
+    y = y0 + alto + 3
+    pdf.rect(x0, y, ancho, 4 + 5.5 * len(renglones_cliente))
+    y += 2
+    for rotulo, valor, a_la_derecha in renglones_cliente:
+        pdf.set_xy(13, y)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(pdf.get_string_width(latin(rotulo + ": ")) + 1, 5, latin(rotulo + ": "))
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(110, 5, cortar(valor, 108))
+        if a_la_derecha:
+            pdf.set_xy(140, y)
+            pdf.cell(57, 5, latin(a_la_derecha), align="R")
+        y += 5.5
+
+    # LO VENDIDO.
+    pdf.set_xy(x0, y + 5)
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(18, 6, "Cant.", border="B")
-    pdf.cell(122, 6, latin("Descripción"), border="B")
-    pdf.cell(0, 6, "Importe", border="B", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_fill_color(230, 230, 230)
+    columnas = ((16, "Cant.", "C"), (104, "Descripción", "L"),
+                (35, "P. unit." + (" s/IVA" if discrimina else ""), "R"),
+                (35, "Importe" + (" s/IVA" if discrimina else ""), "R"))
+    for ancho_col, rotulo, alinear in columnas:
+        pdf.cell(ancho_col, 7, latin(rotulo), border=1, align=alinear, fill=True)
+    pdf.ln()
     pdf.set_font("Helvetica", "", 9)
-    # En la A el detalle va sin IVA; en la B y la C, con el precio final.
-    sin_iva = f["tipo"] in (1, 3)
-    for i in items:
-        importe = i["cantidad"] * (i["precio"] or 0)
-        if sin_iva:
-            importe = importe / (1 + IVA_GENERAL / 100)
-        pdf.cell(18, 6, str(i["cantidad"]))
-        pdf.cell(122, 6, latin(f"{i['marca']} {i['codigo']} - {i['descripcion'] or ''}"[:70]))
-        pdf.cell(0, 6, latin(formato_precio(importe)), align="R", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "", 10)
-    if f["tipo"] in (1, 3):
-        for rotulo, valor in (("Neto gravado", f["neto"]), (f"IVA {miles(IVA_GENERAL, 0)}%", f["iva"])):
-            pdf.cell(0, 6, latin(f"{rotulo}: {formato_precio(valor)}"), align="R",
-                     new_x="LMARGIN", new_y="NEXT")
+    for cantidad, texto, precio in detalle["renglones"]:
+        unitario = float(precio or 0) / ((1 + IVA_GENERAL / 100) if discrimina else 1)
+        pdf.cell(16, 6, miles(cantidad, 0), border="LR", align="C")
+        pdf.cell(104, 6, cortar(texto, 101), border="LR")
+        pdf.cell(35, 6, latin(formato_precio(unitario)), border="LR", align="R")
+        pdf.cell(35, 6, latin(formato_precio(unitario * cantidad)), border="LR", align="R",
+                 new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(ancho, 0, "", border="T", new_x="LMARGIN", new_y="NEXT")
+
+    # LOS TOTALES.
+    pdf.ln(3)
+    totales = ([("Importe neto gravado", f["neto"]), (f"IVA {miles(IVA_GENERAL, 0)}%", f["iva"])]
+               if discrimina else [])
+    for rotulo, valor in totales:
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(155, 6, latin(rotulo + ":"), align="R")
+        pdf.cell(35, 6, latin(formato_precio(valor)), align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, latin(f"TOTAL: {formato_precio(f['total'])}"), align="R",
-             new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(155, 8, "Importe total:", align="R")
+    pdf.cell(35, 8, latin(formato_precio(f["total"])), align="R", new_x="LMARGIN", new_y="NEXT")
     if f["tipo"] in (6, 8):
         pdf.set_font("Helvetica", "", 8)
-        pdf.cell(0, 5, latin(f"IVA contenido: {formato_precio(f['iva'])}"), align="R",
+        pdf.cell(0, 5, latin("Régimen de Transparencia Fiscal al Consumidor (Ley 27.743) - "
+                             f"IVA contenido: {formato_precio(f['iva'])}"), align="R",
                  new_x="LMARGIN", new_y="NEXT")
+
+    # EL CAE Y EL QR.
     if f["estado"] == "autorizada" and f["cae"]:
         imagen = io.BytesIO()
         qrcode.make(url_del_qr(f, cfg.get("cuit") or 0)).save(imagen, format="PNG")
         imagen.seek(0)
-        y = pdf.get_y() + 4
-        pdf.image(imagen, x=pdf.l_margin, y=y, w=32)
-        pdf.set_xy(pdf.l_margin + 38, y + 8)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 6, latin(f"CAE: {f['cae']}"), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_x(pdf.l_margin + 38)
-        pdf.set_font("Helvetica", "", 9)
-        vence = f["cae_vence"] or ""
-        pdf.cell(0, 5, latin(f"Vencimiento del CAE: {vence[8:10]}/{vence[5:7]}/{vence[:4]}"),
-                 new_x="LMARGIN", new_y="NEXT")
-        pdf.set_x(pdf.l_margin + 38)
-        pdf.cell(0, 5, "Comprobante autorizado por ARCA", new_x="LMARGIN", new_y="NEXT")
-        if f["ambiente"] != "produccion":
-            pdf.set_x(pdf.l_margin + 38)
+        y = pdf.get_y() + 6
+        if y > 245:
+            pdf.add_page()
+            y = 15
+        pdf.line(x0, y - 2, x0 + ancho, y - 2)
+        pdf.image(imagen, x=x0, y=y, w=32)
+        pdf.set_xy(x0 + 38, y + 5)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 6, latin("Comprobante autorizado por ARCA"), new_x="LMARGIN", new_y="NEXT")
+        for rotulo, valor in (("CAE N°", f["cae"]),
+                              ("Fecha de vencimiento del CAE", dia(f["cae_vence"]))):
+            pdf.set_x(x0 + 38)
             pdf.set_font("Helvetica", "B", 9)
-            pdf.cell(0, 5, latin("DE PRUEBA (homologación): no tiene validez fiscal"),
+            pdf.cell(pdf.get_string_width(latin(rotulo + ": ")) + 1, 5, latin(rotulo + ": "))
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(0, 5, latin(valor), new_x="LMARGIN", new_y="NEXT")
+        if f["ambiente"] != "produccion":
+            pdf.set_x(x0 + 38)
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(180, 0, 0)
+            pdf.cell(0, 6, latin("DE PRUEBA (homologación): no tiene validez fiscal"),
                      new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
     return bytes(pdf.output())
+
+
+def lo_que_conviene_completar():
+    """Los datos del negocio que no hacen falta para facturar pero sí para que el PDF diga todo
+    lo que pide ARCA: [en castellano]."""
+    datos = _secretos_de_arca()
+    return [que for clave, que in (("razon_social", "razon_social (el nombre del negocio)"),
+                                   ("domicilio", "domicilio (el comercial)"),
+                                   ("ingresos_brutos", "ingresos_brutos (el número)"),
+                                   ("inicio_de_actividades", "inicio_de_actividades (dd/mm/aaaa)"))
+            if not str(datos.get(clave) or "").strip()]
 
 
 def probar_la_conexion_con_arca():

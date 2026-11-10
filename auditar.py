@@ -2589,8 +2589,19 @@ for _n in ast.walk(ARBOL):
 #   - date('now', 'localtime'), que da el día UTC: el de acá es date('now', '-3 hours'), y una
 #     marca interna, date('now');
 #   - date.today(), que es el día UTC: hoy_aca();
-#   - la fecha y hora de ahora armada para mostrar con datetime.now(): ahora_aca().
+#   - la fecha y hora de ahora armada para mostrar con datetime.now(): ahora_aca();
+#   - el día de una fecha guardada con date(fecha) o substr(fecha, 1, 10), que es el día UTC: el
+#     interés por mora cargado el 31/3 después de las 21 quedaba del 1/4, y el próximo cálculo
+#     se comía un día (lo mostraron las pruebas corridas a las 21 de acá);
+#   - y en las pruebas, date.today() y datetime.now() para comparar: de noche (de 21 a 24 de
+#     acá) dan otro día que la app, y la prueba falla a esa hora y no a otra.
 _HORA_SIN_CONVERTIR = re.compile(r"substr\(\s*[\w.]+\s*,\s*12\s*,\s*5\s*\)", re.I)
+# Las columnas con fecha y hora se llaman fecha…, …_en, cuando o momento; las de un día solo
+# (vence, cheque_fecha) no se corren y no caen acá… salvo las que se llaman fecha y guardan
+# solo el día (la de facturas): esas no se pasan por date() ni se cortan.
+_DIA_UTC_DE_UNA_COLUMNA = re.compile(
+    r"\b(?:date\(\s*|substr\(\s*)(?:\w+\.)?(?:fecha\w*|\w+_en|cuando|momento)\s*"
+    r"(?:\)|,\s*1\s*,\s*10\s*\))", re.I)
 _DIA_UTC = re.compile(r"date\(\s*'now'\s*,\s*'localtime'\s*\)", re.I)
 _MODIFICADOR_DE_ACA = re.compile(r"'(-?\d+) hours'")
 for _n in ast.walk(ARBOL):
@@ -2601,6 +2612,9 @@ for _n in ast.walk(ARBOL):
         if _DIA_UTC.search(_n.value):
             reportar("ERROR", _n.lineno, "date('now', 'localtime') es el día UTC: el de acá es "
                                          "date('now', '-3 hours'); una marca interna, date('now')")
+        if _DIA_UTC_DE_UNA_COLUMNA.search(_n.value):
+            reportar("ERROR", _n.lineno, "el día de una fecha guardada sale en UTC: "
+                                         "date(col, '-3 hours') (A_LA_HORA_DE_ACA)")
         for _m in _MODIFICADOR_DE_ACA.finditer(_n.value):
             if _m.group(1) != "-3":
                 reportar("REVISAR", _n.lineno, f"«'{_m.group(1)} hours'»: la hora de acá es "
@@ -2613,6 +2627,24 @@ for _n in ast.walk(ARBOL):
             and getattr(_n.value.func.value, "id", None) == "datetime"):
         reportar("ERROR", _n.lineno, "la hora de ahora para mostrar va con ahora_aca(): "
                                      "datetime.now() es UTC")
+_CARPETA_DE_LAS_PRUEBAS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pruebas")
+for _nombre in sorted(os.listdir(_CARPETA_DE_LAS_PRUEBAS)):
+    if not _nombre.endswith(".py"):
+        continue
+    _arbol_prueba = ast.parse(open(os.path.join(_CARPETA_DE_LAS_PRUEBAS, _nombre),
+                                   encoding="utf-8").read())
+    for _n in ast.walk(_arbol_prueba):
+        if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) == "today"
+                and getattr(_n.func.value, "id", None) == "date"):
+            reportar("ERROR", 0, f"pruebas/{_nombre}:{_n.lineno}: date.today() es el día UTC y "
+                                 "de noche no es el de la app: ns[\"hoy_aca\"]()")
+        if (isinstance(_n, ast.FormattedValue) and isinstance(_n.value, ast.Call)
+                and getattr(_n.value.func, "attr", None) == "now"
+                and getattr(_n.value.func.value, "id", None) == "datetime"
+                and _n.format_spec is not None
+                and "%H" not in ast.unparse(_n.format_spec)):
+            reportar("ERROR", 0, f"pruebas/{_nombre}:{_n.lineno}: el día de datetime.now() es "
+                                 "UTC y de noche no es el de la app: ns[\"ahora_aca\"]()")
 
 # ============ Listas desplegables que hablan en inglés ============
 # Un st.multiselect sin placeholder dice «Choose options», y un st.selectbox que arranca vacío

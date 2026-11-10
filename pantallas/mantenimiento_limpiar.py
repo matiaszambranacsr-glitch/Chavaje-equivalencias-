@@ -63,7 +63,7 @@ if pagina == PAGINAS[3]:
                     aprobados = puentes_aprobados_ids()
                     if aprobados:
                         c.execute("""SELECT p.codigo_raw AS "Código", p.descripcion AS "Descripción",
-                                             pa.nota AS "Nota", substr(pa.fecha,1,10) AS "Aprobado el",
+                                             pa.nota AS "Nota", date(pa.fecha, '-3 hours') AS "Aprobado el",
                                              p.id AS "_id"
                                       FROM puentes_aprobados pa JOIN productos p ON p.id = pa.producto_id
                                       ORDER BY pa.fecha DESC""")

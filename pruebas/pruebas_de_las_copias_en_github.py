@@ -183,7 +183,7 @@ def probar(ns, gh, carpeta):
 
     # La ficha de la copia y la copia de hoy en el historial: el mismo archivo, sin subirlo de nuevo.
     from datetime import date, timedelta
-    hoy = date.today()
+    hoy = ns["hoy_aca"]()          # la carpeta va con el día de acá: ver «LA HORA DE ACÁ»
     arbol = gh.arbol_de(rama)
     esperar("la de hoy en el historial es el mismo archivo",
             arbol.get(f"historial/{hoy.isoformat()}/datos_iniciales.db.gz"),
@@ -309,7 +309,7 @@ def probar(ns, gh, carpeta):
     _r = ns["cuanto_perderias_si_reinicia"]()
     esperar("la copia frenada se ve atrasada, desde la última buena",
             (_r["atrasada"], _r["fecha_semilla"][:10], "🔓" in _r["por_que"]),
-            (True, f"{_ultima_buena[8:10]}/{_ultima_buena[5:7]}/{_ultima_buena[:4]}", True))
+            (True, f"{ns['a_la_hora_de_aca'](_ultima_buena):%d/%m/%Y}", True))
     esperar("y la salud dice de cuándo es la última copia buena",
             [f"la última copia que subió es del {ns['fecha_legible'](_ultima_buena[:19])}"
              in p["detalle"]

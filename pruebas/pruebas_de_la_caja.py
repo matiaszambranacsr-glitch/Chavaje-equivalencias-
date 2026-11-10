@@ -124,7 +124,7 @@ def probar(L):
              "a la cuenta de Taller Norte" in texto,
              "a la cuenta de Taller Norte" in ns["texto_del_comprobante"](v2)),
             (True, "A cuenta/10.0/900.0",
-             (900.0, f"Venta #{v2}", (date.today() + timedelta(days=15)).isoformat()), 900.0, True,
+             (900.0, f"Venta #{v2}", (ns["hoy_aca"]() + timedelta(days=15)).isoformat()), 900.0, True,
              True))
     # Devolverla: se le acredita a la cuenta, no sale del cajón.
     ok, texto = ns["devolver_de_una_venta"](item_v2, 1, "medida")
@@ -164,7 +164,9 @@ def probar(L):
     v5, _ = ns["cerrar_venta"]([item("C1", 3)], a_la_caja=True)
     c.execute("UPDATE ventas SET fecha = datetime('now', 'localtime', '-1 day') WHERE id = ?", (v5,))
     conn.commit()
-    ayer = (date.today() - timedelta(days=1)).isoformat()
+    # El día de acá (ver «LA HORA DE ACÁ»): con date.today(), entre las 21 y las 24 de acá
+    # «ayer» era hoy, y la prueba fallaba de noche.
+    ayer = (ns["hoy_aca"]() - timedelta(days=1)).isoformat()
     antes_ayer = ns["cierre_de_caja"](ayer)["a_cobrar"]
     cobrar(v5, "Efectivo")
     esperar("vendida ayer, cobrada hoy: cuenta hoy",

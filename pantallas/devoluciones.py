@@ -169,8 +169,12 @@ if pagina == PAGINAS[10]:
                         if _ok_dev:
                             avisar("success", f"↩️ {_texto_dev}")
                             if _con_nc:
+                                _it_nc = _devolvibles[_it_dev]
                                 _ok_nc, _texto_nc = nota_de_credito(
-                                    _fact_dev["id"], _devolvibles[_it_dev]["precio"] * _cant_dev)
+                                    _fact_dev["id"], _it_nc["precio"] * _cant_dev,
+                                    renglones=[[_cant_dev, f"{_it_nc['marca']} {_it_nc['codigo']}"
+                                                f" - {_it_nc['descripcion'] or ''}",
+                                                _it_nc["precio"]]])
                                 avisar("success" if _ok_nc else "warning", _texto_nc)
                             st.rerun()
                         st.warning(_texto_dev)
