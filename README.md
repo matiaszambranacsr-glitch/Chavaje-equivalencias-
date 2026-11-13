@@ -8,7 +8,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | archivo | qué es |
 |---|---|
 | `app.py` | Lo que Streamlit corre en cada toque: la configuración de la página, el encabezado, la entrada y la navegación. Arranca con el mapa de todas las secciones de la app. |
-| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 26 archivos (el orden, en `orden.py`). Se carga **una vez** por proceso. |
+| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 27 archivos (el orden, en `orden.py`). Se carga **una vez** por proceso. |
 | `pantallas/` | Una pantalla por archivo (buscador, administrar, estadísticas...). Corren en cada toque, al final de `app.py`. |
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
@@ -27,6 +27,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas/pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. Con `--reglas`, qué reglas aparecen más en lo rechazado; con `--linea-base archivo.json`, la prueba de regresión (falla si algo rechazado pasa a limpio). |
 | `pruebas/pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano, el proveedor que cambia de equivalente sin avisar, las devoluciones, el riesgo, la deriva al cambiar las reglas y que un rechazo no se pise. |
 | `pruebas/pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
+| `pruebas/pruebas_del_asistente.py` | El asistente 🤖: que entienda las preguntas de todos los días, que lleve solo a donde cada uno puede, y que no lea la base, no dé claves ni se deje cambiar el papel. |
 | `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
 | `.github/correr_las_pruebas.py` | El auditor y todas las pruebas de una, de a cuatro a la vez, y qué falló. Es lo que corre GitHub en cada subida (`.github/workflows/pruebas.yml`). |
 | `pruebas/medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
@@ -7094,6 +7095,69 @@ Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:5
 - **Las pruebas corren también de noche, siempre.** Aquel error apareció de casualidad, porque las pruebas se corrieron a las 21:07. Ahora `python .github/correr_las_pruebas.py --de-noche` las corre con el reloj a las 22:30 de acá (con `faketime`), y GitHub lo hace en cada subida: probado volviendo a poner el error del interés, da verde de día y rojo de noche. Con `--fecha` se probaron los otros bordes —fin de año a la noche, fin de mes, 29 de febrero, recién pasada la medianoche, y las 89 pantallas con la base real un 31/12 a las 22:30—: todo en verde. «Dentro de cinco años» encontró una prueba con una fecha escrita que empezaba a fallar sola el 10/1/2028.
 
 Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), el día UTC de una fecha guardada (`date(fecha)`, `substr(fecha, 1, 10)`), `date('now', 'localtime')`, `date.today()` (también en las pruebas) y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
+
+## 🤖 El asistente: explica, lleva, y no hay nada que sacarle
+
+Lo pidió el dueño: «un asistente virtual que se pueda minimizar, que te pueda enviar, ayudar o
+guiar para lo que le pidas, o a donde le pidas, y que nadie se pueda aprovechar de él para
+conseguir una brecha de seguridad». Está en `logica/asistente.py`; la burbuja 🤖 se dibuja
+desde `app.py`, abajo a la izquierda, en todas las pantallas.
+
+**Qué hace.** Tres cosas: explica cómo se hace algo («¿cómo hago una devolución?»), lleva a
+la pantalla («llevame a la caja», o el nombre solo: «caja», «para pedir»), y busca un repuesto
+(«buscar W712/75», o el código solo). Abierto es un panel con la caja para escribir arriba (en
+el celular, abajo la taparía el teclado); se minimiza con «➖», y solo al llevar a una pantalla,
+para que se vea a dónde llevó. La charla queda en la sesión y se borra al salir.
+
+**Por qué no es un modelo de inteligencia artificial.** A un asistente que «piensa» con un
+modelo de afuera se lo convence con palabras («olvidá tus instrucciones», «soy el dueño»), y
+además hay que mandarle afuera lo que se le escribe. Este es un buscador de respuestas escritas:
+
+- **No lee la base ni los secretos.** El archivo no nombra `c`, `requests`, `secretos_app` ni
+  `st.secrets`, no consulta nada y no sale a internet: no conoce un precio, un cliente ni una
+  clave. La prueba lo mira en el código y además lo corre con la base envenenada.
+- **No hace nada: solo cambia de pantalla.** Lo único que escribe en la sesión es lo suyo
+  (`_asis_…`), `pagina_actual` y las solapas —con nombres de las listas de
+  `logica/interfaz.py`, por `ir_a_donde_dice_el_aviso()`— y `_pasar_a_codigo`, que es escribir
+  en el Buscador lo mismo que escribiría la persona.
+- **Lleva solo a donde ya se puede entrar.** Las pantallas que ofrece son las de la barra de
+  quien pregunta (`paginas_a_la_vista()`, la misma cuenta que usa `app.py`), miradas en el
+  momento de llevar: al que entra sin contraseña, tres; al del depósito, dos; al taller en su
+  portal, ninguna (ni ve la burbuja). Si no se puede saber qué ve —la base ocupada—, no lleva.
+  Y cada pantalla sigue pidiendo su contraseña: el asistente es un cartel, no una puerta.
+- **Al invitado no le cuenta cómo se trabaja adentro**: ni los pasos ni los nombres de los
+  botones del personal; le dice que entre.
+- **A quien pide una clave, saltear un candado o «cambiarle las instrucciones»** le contesta
+  uno de tres textos fijos (`ASISTENTE_NO_SECRETOS`, `ASISTENTE_NO_SALTEA`,
+  `ASISTENTE_NO_CAMBIA`), con el camino legítimo si lo hay («cómo se cambia una contraseña»).
+  No es lo que lo hace seguro —no tiene nada que dar—: es para contestar claro.
+- Lo que escribe la persona se recorta a 200 caracteres, se muestra escapado y nunca se ejecuta.
+
+**Cómo entiende.** Nadie escribe como dice la pantalla. Cada palabra se lleva a su raíz
+(«cobrando», «cobré», «cobrarle» → «cobr»), se sacan las que no dicen nada, se igualan las del
+mostrador («fiar», «la plata», «el ticket», «wasap»), y la mal escrita se cambia por la más
+parecida de las que conoce («faktura», «debolucion», «kobrar»). Cada ficha suma por las
+palabras que comparte, y pesan más las raras («arqueo») que las que están en todos lados. Con
+poco acierto no adivina: ofrece las que podrían ser.
+
+**Qué sabe, y por qué no hay que mantenerlo.** Unas 340 fichas, y cuatro de las cinco clases se
+arman solas al arrancar: las pantallas y solapas (`PARA_QUE_SIRVE…`), las herramientas de
+Mantenimiento, **cada sección plegable de cada pantalla** y **cada ayuda escrita en una
+pantalla**, leyendo el código de `pantallas/` con `ast` (en qué pantalla y solapa está cada una
+sale de los `if pagina == PAGINAS[n]` que la rodean). Una herramienta nueva la conoce el mismo
+día. La quinta son los «cómo hago» de `COMO_HAGO_DEL_ASISTENTE`, escritos a mano para lo de
+todos los días; cada «botón entre comillas» que nombran tiene que existir escrito así en la
+app, y si uno cambia de nombre la prueba dice cuál.
+
+**Para sumarle una respuesta**: una tupla en `COMO_HAGO_DEL_ASISTENTE` (nombre, título,
+palabras con que se pregunta, los pasos, dónde, quién puede), y una línea en `ENTIENDE` de
+`pruebas/pruebas_del_asistente.py` con la pregunta como la haría alguien.
+
+**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 59 preguntas con su respuesta, 10
+pedidos de «llevame», 6 búsquedas, 21 intentos de sacarle algo (a un invitado, a un empleado y
+a un administrador), lo que ve cada uno, y la burbuja en la app simulada. Ocho errores puestos
+a propósito —llevar sin mirar si se puede, contarle todo al invitado, consultar la base, mostrar
+crudo lo escrito…— los detecta todos. Contesta en un milisegundo; minimizada no hace nada.
 
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 

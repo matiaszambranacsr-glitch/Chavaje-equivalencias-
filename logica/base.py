@@ -764,6 +764,50 @@ button:disabled { opacity: 0.45 !important; }
 }
 .menu-del-renglon button[disabled] { opacity: 0.45; cursor: not-allowed; }
 
+/* ==== EL ASISTENTE ====
+   La burbuja 🤖, fija abajo a la izquierda en todas las pantallas (abajo a la derecha Streamlit
+   pone su botón), y el panel en que se abre. Ver «LA BURBUJA DEL ASISTENTE» en
+   logica/asistente.py. La caja que la envuelve no ocupa lugar en la página. */
+[data-testid="stLayoutWrapper"]:has(> .st-key-asistente_minimizado),
+[data-testid="stLayoutWrapper"]:has(> .st-key-asistente_abierto) { display: contents; }
+.st-key-asistente_minimizado, .st-key-asistente_abierto {
+  position: fixed; left: 14px; bottom: 14px; z-index: 1000; width: auto !important;
+}
+.st-key-asistente_minimizado button {
+  width: 54px !important; height: 54px; min-height: 54px; padding: 0 !important;
+  border-radius: 50% !important; border: 0 !important; background: var(--accent) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55); opacity: 0.94;
+}
+.st-key-asistente_minimizado button:hover, .st-key-asistente_minimizado button:focus,
+.st-key-asistente_minimizado button:active {
+  background: var(--accent) !important; opacity: 1; transform: scale(1.07) !important;
+}
+.st-key-asistente_minimizado button p { font-size: 1.6rem; line-height: 1; }
+.st-key-asistente_abierto {
+  position: fixed; left: 14px; bottom: 14px; z-index: 1000; width: auto !important;
+}
+.st-key-asistente_minimizado button {
+  width: 54px; height: 54px; min-height: 54px; padding: 0; border-radius: 50%; border: 0;
+  background: var(--accent); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.st-key-asistente_minimizado button:hover { background: var(--accent); transform: scale(1.06); }
+.st-key-asistente_minimizado button p { font-size: 1.6rem; line-height: 1; }
+.st-key-asistente_abierto {
+  width: min(390px, calc(100vw - 28px)) !important; max-height: min(76vh, 640px);
+  overflow-y: auto; padding: 12px 14px 14px; gap: 0.55rem;
+  background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+.st-key-asistente_abierto p, .st-key-asistente_abierto li { font-size: 0.92rem; }
+.st-key-asis_minimizar button { min-height: 0; padding: 2px 10px; }
+.asis-pregunta {
+  width: fit-content; max-width: 88%; margin-left: auto; padding: 6px 12px;
+  border-radius: 14px 14px 4px 14px; background: var(--accent-soft); font-size: 0.92rem;
+  margin-bottom: 0.7rem;
+}
+/* Que lo último de la página no quede abajo de la burbuja. */
+.stMainBlockContainer { padding-bottom: 5.5rem; }
+
 /* ==== LO QUE SE MUEVE ====
    El dueño pidió una página más dinámica. Que se note que la app responde, sin marear:
    - Mientras trabaja, una barra ámbar finita arriba de todo. Recién después de un instante:

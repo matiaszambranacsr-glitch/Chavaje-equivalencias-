@@ -46,6 +46,7 @@ PARTES_DE_LA_LOGICA = [
     "ventas.py",
     "facturas.py",
     "mapa.py",
+    "asistente.py",
 ]
 
 # En el orden en que estaban: cada una empieza con su «if pagina == PAGINAS[n]:», así que

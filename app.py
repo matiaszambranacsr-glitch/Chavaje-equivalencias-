@@ -157,6 +157,14 @@ específico, y las pantallas quedan todas al final:
         · DÓNDE ESTÁ CADA COSA
         · LA COLA POR PISO
         · EL DIBUJO DEL PISO
+    logica/asistente.py
+        · EL ASISTENTE: QUÉ PUEDE Y QUÉ NO
+        · LO QUE SABE EL ASISTENTE: EL MAPA DE LA APP, ARMADO SOLO
+        · LOS «CÓMO HAGO» DEL ASISTENTE
+        · ENTENDER LO QUE SE LE ESCRIBE AL ASISTENTE
+        · LO QUE NO SE LE PUEDE SACAR AL ASISTENTE
+        · LA RESPUESTA DEL ASISTENTE
+        · LA BURBUJA DEL ASISTENTE
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL
@@ -518,12 +526,8 @@ if es_operador_o_admin() and not _es_del_deposito and obtener_usuario_actual():
                      duration="long")
 # En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin sesión ve solo lo
 # abierto (ver PAGINAS_ABIERTAS) y arranca en el Buscador.
-if _es_del_deposito:
-    _paginas_a_la_vista = PAGINAS_DEL_DEPOSITO
-elif solo_mirar():
-    _paginas_a_la_vista = [p for p in ORDEN_DE_LAS_PAGINAS if p in PAGINAS_ABIERTAS]
-else:
-    _paginas_a_la_vista = ORDEN_DE_LAS_PAGINAS
+# La cuenta es una sola, para esta barra y para el asistente: ver paginas_a_la_vista().
+_paginas_a_la_vista = paginas_a_la_vista(_es_del_deposito)
 if st.session_state.pop("_al_principio_de_la_barra", False):        # recién entró: ver
     st.session_state["pagina_actual"] = _paginas_a_la_vista[0]       # mostrar_login_inicial()
 if st.session_state.get("pagina_actual") not in _paginas_a_la_vista:
@@ -546,6 +550,12 @@ with st.container(key="nav_principal"):
              label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
+
+# EL ASISTENTE: la burbuja 🤖 de abajo, en todas las pantallas. Va acá, antes de la pantalla,
+# porque muchas cortan con st.stop() (las que piden contraseña) y lo de después no se dibuja;
+# dónde se ve lo decide el CSS, no este lugar (ver «LA BURBUJA DEL ASISTENTE» en
+# logica/asistente.py). Minimizada es un botón: no consulta nada.
+mostrar_el_asistente()
 
 # EL TÍTULO DE LA SECCIÓN: en la computadora la pantalla arranca diciendo dónde estás (en el
 # celular no: la barra ya marca la sección, y es un renglón menos para bajar). Para qué sirve

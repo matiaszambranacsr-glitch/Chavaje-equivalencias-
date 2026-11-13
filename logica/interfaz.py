@@ -491,8 +491,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-13"
+VERSION_DE_LO_NUEVO = "2026-11-13b"
 LO_NUEVO = (
+    ("🤖 Un asistente en todas las pantallas: preguntale cómo se hace algo («¿cómo hago una "
+     "devolución?»), pedile que te lleve («llevame a la caja») o que busque un repuesto. "
+     "Entiende sin acentos y con errores. No ve los datos ni las contraseñas, y lleva solo a "
+     "las pantallas que cada uno ya tiene.", "🤖 la burbuja de abajo a la izquierda"),
     ("🔥 Lo que más se busca en Mercado Libre en repuestos esta semana, contra tu catálogo: lo "
      "que no tenés va primero. Gratis, con la aplicación de Mercado Libre.",
      "📊 Estadísticas → 📌 Para pedir"),
@@ -789,7 +793,8 @@ def archivo_listo(archivo, etiqueta="archivo"):
 # Lo pidió el dueño: en la computadora, los botones de cada producto se despliegan con el click
 # derecho, y en 💵 Caja F10 cobra y F11 pone a cuenta. Streamlit no tiene ninguna de las dos
 # cosas enteras: las completa un script chico en el navegador (AYUDAS_DEL_NAVEGADOR), que app.py
-# pone en cada pasada. Ya que está, también F2 (a la búsqueda) y F9 (a la caja), el pitido
+# pone en cada pasada. Ya que está, también F1 (el asistente), F2 (a la búsqueda) y F9 (a la
+# caja), el pitido
 # cuando llega una venta a la caja o un pedido al depósito, y los textos que Streamlit escribe
 # en inglés, pasados al castellano. El script no inventa botones: el menú copia los botones de verdad del
 # renglón, y elegir una opción toca el botón de verdad —hace lo mismo y pasa por los mismos
@@ -816,7 +821,10 @@ AYUDAS_DEL_NAVEGADOR = r"""
   // escanear encima), F9 manda la venta a la caja (o la termina), F10 cobra y F11 pone a
   // cuenta. Si en la pantalla no está lo que la tecla toca, sigue de largo: F11 vuelve a ser la
   // pantalla completa del navegador.
-  var BOTONES = {F9: ".st-key-venta_terminar button", F10: ".st-key-caja_f10 button",
+  // F1 abre el asistente o lo minimiza (uno de los dos botones está): ver «LA BURBUJA DEL
+  // ASISTENTE» en logica/asistente.py. Al abrirlo, el cursor queda en su caja para escribir.
+  var BOTONES = {F1: ".st-key-asis_abrir button, .st-key-asis_minimizar button",
+                 F9: ".st-key-venta_terminar button", F10: ".st-key-caja_f10 button",
                  F11: ".st-key-caja_f11 button"};
   var BUSQUEDAS = [".st-key-venta_buscar input", ".st-key-busqueda_input input",
                    ".st-key-mapa_buscar input", ".st-key-ubicar_escaneo input",
@@ -842,6 +850,15 @@ AYUDAS_DEL_NAVEGADOR = r"""
     var foco = doc.activeElement;
     if (foco && foco !== doc.body && foco.blur) { foco.blur(); }
     window.setTimeout(function () { boton.click(); }, 80);
+    if (e.key === "F1") {
+      var vueltas = 0;
+      var espera = window.setInterval(function () {
+        var caja = doc.querySelector(".st-key-asistente_abierto textarea");
+        vueltas += 1;
+        if (caja) { caja.focus(); }
+        if (caja || vueltas > 25) { window.clearInterval(espera); }
+      }, 120);
+    }
   }, true);
 
   // EL PITIDO de lo que llega: cada cartel nuevo (una venta a la caja, un pedido al depósito)
