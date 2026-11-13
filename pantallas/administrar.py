@@ -1138,14 +1138,18 @@ if pagina == PAGINAS[3]:
             explicar(
                 "Cuentas creadas desde acá, sin necesidad de tocar la configuración de Streamlit Cloud.",
                 "'Admin' puede todo, incluso borrar y configurar. 'Operador' puede usar las funciones "
-                "de IA y cargar cosas, pero no borrar ni configurar nada sensible."
+                "de IA y cargar cosas, pero no borrar ni configurar nada sensible.\n\n"
+                "**Cada uno entra con su nombre de usuario y su contraseña.** El nombre es el de "
+                "esta lista (no importan las mayúsculas ni los acentos) y no se puede repetir; la "
+                "contraseña sí: dos personas pueden tener la misma sin cruzarse."
             )
             usuarios_actuales = listar_usuarios()
             if usuarios_actuales:
                 st.dataframe(usuarios_actuales, width="stretch", hide_index=True)
 
             cu1, cu2 = st.columns(2)
-            nombre_nuevo_usuario = cu1.text_input("Nombre:", key="nuevo_usuario_nombre")
+            nombre_nuevo_usuario = cu1.text_input("Nombre de usuario (con el que entra):",
+                                                  key="nuevo_usuario_nombre")
             password_nuevo_usuario = cu2.text_input("Contraseña:", type="password", key="nuevo_usuario_pass")
             rol_nuevo_usuario = st.selectbox("Rol:", ["operador", "admin"], key="nuevo_usuario_rol")
             # Ver «LOS DEL DEPÓSITO» en logica/base.py.
@@ -1166,7 +1170,7 @@ if pagina == PAGINAS[3]:
                     except sqlite3.IntegrityError as _err:
                         anotar_error("nivel principal", _err)
                         st.error("Ya existe un empleado con ese nombre.")
-                    except ValueError as _err:          # ver clave_ya_usada()
+                    except ValueError as _err:          # ver usuario_ya_usado()
                         st.error(el_error_en_castellano(_err))
 
             if usuarios_actuales:
@@ -1181,7 +1185,7 @@ if pagina == PAGINAS[3]:
                         try:
                             cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
                             st.success("Contraseña actualizada.")
-                        except ValueError as _err:      # ver clave_ya_usada()
+                        except ValueError as _err:
                             st.error(el_error_en_castellano(_err))
                     else:
                         st.warning("Escribí la nueva contraseña primero.")
@@ -1210,9 +1214,9 @@ if pagina == PAGINAS[3]:
             st.markdown("**🔧 Mecánicos externos: talleres, mayoristas y clientes con cuenta**",
                         help="Las cuentas a las que se les vende y se les lleva la cuenta "
                              "corriente. Con contraseña, además entran a su portal —solo ven eso, "
-                             "nunca las secciones internas—; sin contraseña, no entran. Cuando "
-                             f"hay más de {TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA} con portal, "
-                             "cada uno entra con su número de cuenta y su contraseña.")
+                             "nunca las secciones internas—; sin contraseña, no entran. Cada uno "
+                             "entra con su número de cuenta (o el nombre de la cuenta) y su "
+                             "contraseña.")
             mecanicos_actuales = listar_mecanicos()
             if mecanicos_actuales:
                 st.caption(f"{miles(len(mecanicos_actuales))} cuenta(s), "
@@ -1239,7 +1243,7 @@ if pagina == PAGINAS[3]:
                     except sqlite3.IntegrityError as _err:
                         anotar_error("nivel principal", _err)
                         st.error("Ya existe una cuenta con ese nombre.")
-                    except ValueError as _err:          # ver clave_ya_usada()
+                    except ValueError as _err:          # el nombre repetido o vacío
                         st.error(el_error_en_castellano(_err))
 
             # MUCHAS DE UNA VEZ, pegadas de una planilla: ver crear_cuentas_de_una_vez().
@@ -1302,14 +1306,15 @@ if pagina == PAGINAS[3]:
                 _clave_portal = _cp1.text_input(
                     "Contraseña del portal:", type="password", key=f"mecanico_clave_{mecanico_id_sel}",
                     placeholder="Nueva contraseña" if _con_portal else "Sin portal: ponele una para dárselo",
-                    help=f"Entra en {URL_DE_LA_APP}?cuenta={mecanico_id_sel} con su número de "
-                         f"cuenta ({mecanico_id_sel}) y esta contraseña.")
+                    help=f"Entra en {URL_DE_LA_APP}?cuenta={mecanico_id_sel} (el link ya trae su "
+                         f"usuario) o poniendo de usuario su número de cuenta ({mecanico_id_sel}) "
+                         "o el nombre de la cuenta, y esta contraseña.")
                 if _cp2.button("🔑 Guardar la contraseña", key="mecanico_guardar_clave",
                                disabled=not _clave_portal, width="stretch"):
                     try:
                         cambiar_password_mecanico(mecanico_id_sel, _clave_portal)
-                        avisar("success", f"{mecanico_elegido} entra al portal con su número de "
-                                          f"cuenta ({mecanico_id_sel}) y esa contraseña.")
+                        avisar("success", f"{mecanico_elegido} entra al portal con el usuario "
+                                          f"{mecanico_id_sel} (su número de cuenta) y esa contraseña.")
                         st.rerun()
                     except ValueError as _err:
                         st.error(el_error_en_castellano(_err))

@@ -106,6 +106,7 @@ def probar(url, clave, carpeta):
         _esperar(pagina, 3)
         pagina.get_by_text("🔑 Ingresar").first.click()
         _esperar(pagina, 0.5)
+        pagina.locator(".st-key-login_inicial_nombre input").fill("navegador")
         pagina.locator(".st-key-login_inicial_clave input").fill(clave)
         pagina.get_by_role("button", name="Ingresar con contraseña").click()
         _esperar(pagina, 3)

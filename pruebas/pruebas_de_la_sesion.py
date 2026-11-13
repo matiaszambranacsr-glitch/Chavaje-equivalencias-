@@ -19,7 +19,8 @@ import tempfile
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _entrar(at, clave):
+def _entrar(at, usuario, clave):
+    at.text_input(key="login_inicial_nombre").set_value(usuario)
     at.text_input(key="login_inicial_clave").set_value(clave)
     [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
 
@@ -39,7 +40,7 @@ def probar():
     ns["crear_usuario"]("ana", "clave-ana-1", "operador")
 
     # 1. Ana entra y deja cosas de ella en la sesión.
-    _entrar(at, "clave-ana-1")
+    _entrar(at, "ana", "clave-ana-1")
     esperar("Ana entró como operador", at.session_state["nivel_usuario"], "operador")
     at.session_state["busqueda_input"] = "W712/94"
     at.session_state["carrito"] = {1: {"codigo": "X", "marca": "Y", "descripcion": "",
@@ -64,7 +65,7 @@ def probar():
     esperar("la lista de WhatsApp vacía", at.session_state["lista_whatsapp"], [])
 
     # 2. Entra el dueño: no ve nada de Ana.
-    _entrar(at, "clave-duenio-1")
+    _entrar(at, "duenio", "clave-duenio-1")
     esperar("el dueño entró como admin", (at.session_state["nivel_usuario"],
                                           at.session_state["admin_nombre"]), ("admin", "duenio"))
     esperar("el dueño no ve el presupuesto de Ana", "carrito" in at.session_state
@@ -346,7 +347,7 @@ def probar():
     [b for b in at.button if b.label == "Salir"][0].click().run()
 
     # 3. Ana vuelve a entrar; mientras está adentro le cambian el rol, y después la desactivan.
-    _entrar(at, "clave-ana-1")
+    _entrar(at, "ana", "clave-ana-1")
     c = ns["c"]
     c.execute("UPDATE usuarios SET rol = 'admin' WHERE nombre = 'ana'")
     ns["conn"].commit()
@@ -402,7 +403,8 @@ def probar():
         nueva = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
         nueva.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
         nueva.run()
-        _entrar(nueva, clave)
+        # Las claves de esta prueba son «clave-<usuario>-1»: el usuario sale de ahí.
+        _entrar(nueva, clave.split("-")[1], clave)
         if pagina:
             nueva.session_state["pagina_actual"] = pagina
             nueva.run()

@@ -181,6 +181,7 @@ def toques(base, n):
     # Un empleado de prueba, solo en esta copia (que se borra al terminar).
     clave = f"clave-medir-{os.urandom(4).hex()}"
     ns["crear_usuario"](f"medir{clave[-4:]}", clave, "operador")
+    at.text_input(key="login_inicial_nombre").set_value(f"medir{clave[-4:]}")
     at.text_input(key="login_inicial_clave").set_value(clave)
     [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
     cuenta, mirando, propio = collections.Counter(), [True], threading.get_ident()

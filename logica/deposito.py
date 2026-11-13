@@ -484,12 +484,14 @@ def _quien_devuelve(persona, codigo):
         return "sin claves configuradas", obtener_usuario_actual()
     if not codigo:
         return None, f"Falta la contraseña de {persona}."
-    nombre, nivel, error = validar_password(codigo)
+    # La contraseña de quien lo tiene (se prueba contra él: ver «CADA UNO ENTRA CON SU USUARIO Y
+    # SU CONTRASEÑA» en logica/base.py) o la de cualquier administrador.
+    nombre, nivel, error = validar_password(codigo, usuario=persona, o_un_administrador=True)
     if error:
         return None, error
     if nivel == "admin":
         return "clave de administrador", nombre
-    if nivel and nombre == persona:
+    if nivel:
         return "su clave", nombre
     return None, f"Esa contraseña no es de {persona}, que es quien lo tiene (ni de un administrador)."
 

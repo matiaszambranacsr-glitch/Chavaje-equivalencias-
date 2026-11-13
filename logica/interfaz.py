@@ -493,6 +493,10 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-13"
 LO_NUEVO = (
+    ("🔑 Para entrar ahora se pone el usuario y la contraseña (el empleado, su nombre de "
+     "usuario; el taller o cliente, su número de cuenta): dos personas pueden tener la misma "
+     "contraseña sin cruzarse. Los nombres de usuario están acá.",
+     "🗂️ Administrar → 👥 Usuarios"),
     ("🔎 Las cuentas se buscan: en «🧾 Atendiendo a», la caja y Cuentas corrientes escribís una "
      "parte del nombre, el CUIT o el número y quedan unas pocas para tocar. Y para sumar miles: "
      "una cuenta ya no necesita contraseña (solo si va a entrar al portal), y se cargan muchas "

@@ -1251,47 +1251,65 @@ def verificar_password(password, guardado, salt):
     return hmac.compare_digest(viejo, str(guardado)), True
 
 
-# CADA CUENTA CON SU CLAVE. Al entrar no se escribe el nombre: la contraseña sola dice quién
-# sos. Con dos cuentas con la misma clave, entraba siempre la primera que se encontraba —un
-# taller como otro taller, o peor, un taller como un empleado— (lo señaló una revisión con
-# ChatGPT). Al crear una cuenta o cambiarle la clave, se mira que nadie más la use.
-TEXTO_CLAVE_REPETIDA = ("Esa contraseña ya la usa otra cuenta. Cada cuenta necesita la suya: al "
-                        "entrar, la contraseña sola dice quién sos.")
+# CADA UNO ENTRA CON SU USUARIO Y SU CONTRASEÑA. Lo pidió el dueño: «necesito que cada usuario
+# con contraseña tenga que poner también el usuario, ya que si no capaz que en algún momento dos
+# personas ponen la misma contraseña y se cruzarían».
+# Antes no se escribía el nombre: la contraseña sola decía quién eras. Por eso ninguna se podía
+# repetir, y la app tenía que avisar «esa contraseña ya la usa otra cuenta» —que es decirle a uno
+# la clave de otro—; y con dos iguales entraba siempre la primera que se encontraba, un taller
+# como otro taller o, peor, como un empleado (lo había señalado una revisión con ChatGPT).
+# Ahora:
+#   · EL EMPLEADO pone su nombre, como figura en 👥 Usuarios o en los secretos. Sin importar
+#     mayúsculas ni acentos: «matias» es «Matías».
+#   · EL TALLER o cliente pone su número de cuenta, o el nombre de su cuenta.
+#   · La contraseña se prueba SOLO contra ese usuario: dos personas pueden tener la misma sin
+#     cruzarse, y entrar ya no tarda más por haber muchas cuentas (ver «CON MILES DE CUENTAS»).
+#   · Lo que no se puede repetir es el NOMBRE entre los empleados (ver usuario_ya_usado()).
+#   · Los candados de adentro (borrar, configurar, tocar precios) piden lo mismo: quién y su
+#     contraseña.
+def normalizar_usuario(nombre):
+    """El nombre de usuario como se compara: sin acentos, en mayúsculas y sin espacios de más."""
+    texto = unicodedata.normalize("NFKD", str(nombre or "")).encode("ascii", "ignore").decode("ascii")
+    return " ".join(texto.upper().split())
 
 
-def clave_ya_usada(password, excepto_usuario=None, excepto_mecanico=None, para_un_taller=False):
-    """True si alguna cuenta activa —de los Secrets, de empleado o de taller— ya usa esa clave.
-    `para_un_taller` (o `excepto_mecanico`): la clave es para un taller."""
+def _usuarios_de_los_secretos():
+    """({nombre: clave} de los administradores, {nombre: clave} de los operadores) de Streamlit
+    Secrets. La forma anterior de una sola clave (admin_password) es el usuario «admin».
+    Sin las claves de la copia a GitHub: pegadas al final de los secretos quedan adentro de la
+    última sección (ver config_github()), y leídas como usuarios, el nombre del repositorio
+    —que no es ningún secreto— entraba como contraseña de administrador."""
     secretos = secretos_app()
-    de_los_secretos = [p for seccion in ("admin_passwords", "operador_passwords")
-                       for n, p in dict(secretos.get(seccion, {})).items()
-                       if es_un_usuario_de_los_secretos(n)]
+    administradores = {n: p for n, p in dict(secretos.get("admin_passwords", {})).items()
+                       if es_un_usuario_de_los_secretos(n)}
     if secretos.get("admin_password"):
-        de_los_secretos.append(secretos["admin_password"])
-    if any(hmac.compare_digest(str(p), str(password)) for p in de_los_secretos):
+        administradores.setdefault("admin", secretos["admin_password"])
+    operadores = {n: p for n, p in dict(secretos.get("operador_passwords", {})).items()
+                  if es_un_usuario_de_los_secretos(n)}
+    return administradores, operadores
+
+
+def usuario_ya_usado(nombre, excepto_usuario=None):
+    """¿Ya hay un empleado con ese nombre de usuario (en los secretos o en 👥 Usuarios)?
+    Comparado como al entrar: «ANA», «ana» y «Ána» son el mismo."""
+    quien = normalizar_usuario(nombre)
+    administradores, operadores = _usuarios_de_los_secretos()
+    if any(normalizar_usuario(n) == quien for n in list(administradores) + list(operadores)):
         return True
-    # Contra los empleados, siempre: son pocos, y entran con la clave sola. Contra los talleres,
-    # si es la clave de un empleado (un taller no puede tener la de alguien del negocio) o
-    # mientras los talleres también entren con la clave sola. Con muchos (ver «CON MILES DE
-    # CUENTAS») entran con su número, y dos talleres pueden tener la misma: no se prueba una
-    # contra miles (61 ms cada una).
-    de_un_taller = excepto_mecanico is not None or para_un_taller
-    tablas = [("usuarios", excepto_usuario)]
-    if not de_un_taller or not los_talleres_entran_con_su_numero():
-        tablas.append(("mecanicos", excepto_mecanico))
-    for tabla, excepto in tablas:
-        c.execute(f"SELECT id, password_hash, salt FROM {tabla} WHERE activo = 1 AND id IS NOT ? "
-                  "AND password_hash <> ''", (excepto,))
-        if any(verificar_password(password, f["password_hash"], f["salt"])[0]
-               for f in c.fetchall()):
-            return True
-    return False
+    c.execute("SELECT nombre FROM usuarios WHERE id IS NOT ?", (excepto_usuario,))
+    return any(normalizar_usuario(f[0]) == quien for f in c.fetchall())
+
+
+TEXTO_USUARIO_REPETIDO = ("Ya hay un usuario con ese nombre. Cada uno entra con su nombre y su "
+                          "contraseña: el nombre no se puede repetir (la contraseña sí).")
 
 
 def crear_usuario(nombre, password, rol="operador", solo_deposito=False):
     exigir_nivel("admin", "crear empleados")
-    if clave_ya_usada(password):
-        raise ValueError(TEXTO_CLAVE_REPETIDA)
+    if not normalizar_usuario(nombre):
+        raise ValueError("El usuario necesita un nombre: es con lo que entra.")
+    if usuario_ya_usado(nombre):
+        raise ValueError(TEXTO_USUARIO_REPETIDO)
     h, salt = hash_password(password)
     with db_lock:
         c.execute("""INSERT INTO usuarios (nombre, password_hash, salt, rol, solo_deposito)
@@ -1339,9 +1357,16 @@ def cambiar_solo_deposito(usuario_id, valor):
     return bool(cambio)
 
 
-def validar_password_usuario(password):
+def validar_password_usuario(password, usuario, probadas=None):
+    """(nombre, rol) del empleado `usuario` si esa es su contraseña; (None, None) si no. La
+    contraseña se prueba solo contra él. `probadas`: una lista donde se anota cada contraseña
+    guardada que se comparó (ver el final de validar_password())."""
+    quien = normalizar_usuario(usuario)
     c.execute("SELECT id, nombre, password_hash, salt, rol FROM usuarios WHERE activo = 1")
-    for fila in c.fetchall():
+    calzan = []
+    for fila in [f for f in c.fetchall() if normalizar_usuario(f["nombre"]) == quien]:
+        if probadas is not None:
+            probadas.append(fila["id"])
         coincide, hay_que_actualizar = verificar_password(password, fila["password_hash"],
                                                            fila["salt"])
         if coincide:
@@ -1355,14 +1380,14 @@ def validar_password_usuario(password):
                         conn.commit()
                 except sqlite3.Error as _err:
                     anotar_error("validar_password_usuario", _err)
-            return fila["nombre"], fila["rol"]
-    return None, None
+            calzan.append((fila["nombre"], fila["rol"]))
+    # Dos empleados cargados antes con el mismo nombre («Ana» y «ana») y la misma contraseña:
+    # no se elige uno al azar.
+    return calzan[0] if len(calzan) == 1 else (None, None)
 
 
 def cambiar_password_usuario(usuario_id, nueva_password):
     exigir_nivel("admin", "cambiar contraseñas")
-    if clave_ya_usada(nueva_password, excepto_usuario=usuario_id):
-        raise ValueError(TEXTO_CLAVE_REPETIDA)
     h, salt = hash_password(nueva_password)
     with db_lock:
         c.execute("UPDATE usuarios SET password_hash=?, salt=? WHERE id=?", (h, salt, usuario_id))
@@ -1397,32 +1422,16 @@ def eliminar_usuario(usuario_id):
 # Lo dijo el dueño: «se van a sumar más de 2000 cuentas». Una cuenta (un taller, un mayorista,
 # un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para
 # diez. Lo que no escalaba:
-#   · EL INGRESO. No se escribe el nombre: la contraseña se prueba contra cada cuenta hasta que
-#     una calza, y cada prueba cuesta 61 ms a propósito (ver VUELTAS_CLAVE). Con 2.000 cuentas,
-#     una contraseña mal tipeada —la de cualquiera, también la del dueño— dejaba la app dos
-#     minutos colgada. Ahora:
-#       - una cuenta puede NO TENER CONTRASEÑA: se le vende y se le lleva la cuenta corriente,
-#         y no entra al portal. Es lo que son casi todas, y no cuestan nada al ingresar;
-#       - hasta TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA con portal, todo sigue como siempre; con
-#         más, el taller entra con su NÚMERO DE CUENTA y su contraseña (se prueba una sola).
+#   · EL INGRESO. No se escribía el nombre: la contraseña se probaba contra cada cuenta hasta
+#     que una calzaba, y cada prueba cuesta 61 ms a propósito (ver VUELTAS_CLAVE). Con 2.000
+#     cuentas, una contraseña mal tipeada —la de cualquiera, también la del dueño— dejaba la app
+#     dos minutos colgada. Ahora cada uno pone su usuario (ver «CADA UNO ENTRA CON SU USUARIO Y
+#     SU CONTRASEÑA») y se prueba contra una sola. Y una cuenta puede NO TENER CONTRASEÑA: se le
+#     vende y se le lleva la cuenta corriente, y no entra al portal. Es lo que son casi todas.
 #   · CREARLAS. De a una, con una contraseña distinta cada una, y mirando contra todas las
 #     demás que no se repitiera: ver crear_cuentas_de_una_vez() en logica/mecanico.py.
 #   · ELEGIRLAS de una lista desplegable: ver «ELEGIR UNA CUENTA ENTRE MILES» en
 #     logica/deposito.py.
-TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA = 30
-
-
-def talleres_con_portal():
-    """Cuántas cuentas activas tienen contraseña (entran al portal)."""
-    c.execute("SELECT COUNT(*) FROM mecanicos WHERE activo = 1 AND password_hash <> ''")
-    return c.fetchone()[0]
-
-
-def los_talleres_entran_con_su_numero():
-    """¿Hay tantos talleres con portal que la clave sola ya no alcanza para saber cuál es?"""
-    return talleres_con_portal() > TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA
-
-
 def crear_mecanico(nombre, password=""):
     """Una cuenta de taller, mayorista o cliente. Sin contraseña no entra al portal: se le vende
     y se le lleva la cuenta corriente igual (ver «CON MILES DE CUENTAS»). Devuelve su número."""
@@ -1430,10 +1439,13 @@ def crear_mecanico(nombre, password=""):
     nombre = " ".join(str(nombre or "").split())
     if not nombre:
         raise ValueError("La cuenta necesita un nombre.")
+    # El nombre también sirve para entrar al portal: dos que se escriben igual sin los acentos
+    # ni las mayúsculas («Taller García» y «TALLER GARCIA») no se sabría cuál es.
+    c.execute("SELECT nombre FROM mecanicos")
+    if any(normalizar_usuario(f[0]) == normalizar_usuario(nombre) for f in c.fetchall()):
+        raise ValueError("Ya existe una cuenta con ese nombre.")
     h, salt = "", ""
     if password:
-        if clave_ya_usada(password, para_un_taller=True):
-            raise ValueError(TEXTO_CLAVE_REPETIDA)
         h, salt = hash_password(password)
     with db_lock:
         c.execute("INSERT INTO mecanicos (nombre, password_hash, salt) VALUES (?, ?, ?)",
@@ -1449,8 +1461,6 @@ def cambiar_password_mecanico(mecanico_id, nueva_password):
     exigir_nivel("admin", "cambiar la contraseña de un taller")
     h, salt = "", ""
     if nueva_password:
-        if clave_ya_usada(nueva_password, excepto_mecanico=mecanico_id):
-            raise ValueError(TEXTO_CLAVE_REPETIDA)
         h, salt = hash_password(nueva_password)
     with db_lock:
         c.execute("UPDATE mecanicos SET password_hash = ?, salt = ? WHERE id = ?",
@@ -1470,25 +1480,32 @@ def listar_mecanicos():
     return filas_a_listas(c)
 
 
-def validar_password_mecanico(password, cuenta=None):
-    """(id, nombre) del taller con esa clave, o (None, None). NO tiene freno propio: el ingreso
-    la llama desde validar_password(con_mecanicos=True), detrás del freno de intentos.
-
-    Con `cuenta` (su número) se prueba solo contra esa. Sin número, contra todas las que tienen
-    portal, mientras sean pocas: con muchas no se prueba ninguna (ver «CON MILES DE CUENTAS») y
-    el ingreso le pide el número. Si la clave calza con más de una —puede pasar si hubo muchas
-    y volvieron a ser pocas—, tampoco entra sin el número: no se elige una al azar."""
+def validar_password_mecanico(password, cuenta=None, nombre=None, probadas=None):
+    """(id, nombre) del taller si esa es su contraseña, o (None, None). El taller se dice por su
+    número de `cuenta` o por el `nombre` de la cuenta (sin importar mayúsculas ni acentos), y la
+    contraseña se prueba solo contra ese. NO tiene freno propio: el ingreso la llama desde
+    validar_password(con_mecanicos=True), detrás del freno de intentos. `probadas`: ver
+    validar_password_usuario()."""
     if cuenta is not None:
         c.execute("SELECT id, nombre, password_hash, salt FROM mecanicos "
                   "WHERE activo = 1 AND password_hash <> '' AND id = ?", (cuenta,))
-    elif los_talleres_entran_con_su_numero():
-        return None, None
-    else:
+        filas = c.fetchall()
+    elif normalizar_usuario(nombre):
+        quien = normalizar_usuario(nombre)
         c.execute("SELECT id, nombre, password_hash, salt FROM mecanicos "
                   "WHERE activo = 1 AND password_hash <> ''")
-    # verificar_password() compara con compare_digest; acá estaba con ==.
-    calzan = [(fila["id"], fila["nombre"]) for fila in c.fetchall()
-              if verificar_password(password, fila["password_hash"], fila["salt"])[0]]
+        filas = [f for f in c.fetchall() if normalizar_usuario(f["nombre"]) == quien]
+    else:
+        return None, None
+    calzan = []
+    for fila in filas:
+        if probadas is not None:
+            probadas.append(fila["id"])
+        # verificar_password() compara con compare_digest; acá estaba con ==.
+        if verificar_password(password, fila["password_hash"], fila["salt"])[0]:
+            calzan.append((fila["id"], fila["nombre"]))
+    # Dos cuentas de antes que se escriben igual sin los acentos, con la misma contraseña: no se
+    # elige una al azar; entra con su número.
     return calzan[0] if len(calzan) == 1 else (None, None)
 
 
@@ -1567,39 +1584,33 @@ def _anotar_intento(acerto):
         anotar_error("_anotar_intento", _err)
 
 
-def validar_password(clave, con_mecanicos=False, cuenta=None):
-    """Chequea la contraseña contra los secrets de admin/operador Y contra las cuentas creadas
-    desde la propia app (tabla usuarios). Devuelve (nombre, nivel, error) — nivel es 'admin',
-    'operador', o None si no matcheó ninguna.
+def validar_password(clave, con_mecanicos=False, cuenta=None, usuario=None,
+                     o_un_administrador=False):
+    """¿Esa es la contraseña de `usuario`? Devuelve (nombre, nivel, error): nivel es 'admin',
+    'operador', 'mecanico' o None si no es. Ver «CADA UNO ENTRA CON SU USUARIO Y SU CONTRASEÑA».
 
-    con_mecanicos=True (solo el ingreso): también las claves de los talleres, que dan nivel
-    'mecanico'. Van ADENTRO y no después, a propósito: el ingreso probaba la clave de los
-    mecánicos aparte, aunque este freno hubiera dicho «esperá», así que contra el portal de
-    mecánicos se podían probar claves sin límite —y cada una calculaba un PBKDF2 por taller—, y
-    un mecánico que acertaba no reiniciaba la cuenta de fallos (lo encontró una revisión con
-    ChatGPT). Las pantallas que piden clave para una acción no los incluyen: la clave de un
-    taller no autoriza nada adentro del negocio.
+    `usuario`: quién dice ser. Se busca entre los de los secretos ([admin_passwords] y
+    [operador_passwords], cada una con nombre = clave) y los empleados creados en la app, sin
+    importar mayúsculas ni acentos; la contraseña se prueba SOLO contra ese.
 
-    `cuenta`: el número de cuenta que puso un taller en el ingreso. Con número se prueba SOLO
-    contra esa cuenta —no contra los empleados—: quien pone un número de cuenta entra como
-    taller o no entra."""
-    secretos = secretos_app()
-    # [admin_passwords] / [operador_passwords] en Streamlit Secrets, cada una con nombre:clave.
-    # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
-    # Sin las claves de la copia a GitHub: pegadas al final de los secretos quedan adentro de
-    # la última sección (ver config_github()), y leídas como usuarios, el nombre del
-    # repositorio —que no es ningún secreto— entraba como contraseña de administrador.
-    admin_passwords = {n: p for n, p in dict(secretos.get("admin_passwords", {})).items()
-                       if es_un_usuario_de_los_secretos(n)}
-    clave_unica = secretos.get("admin_password")
-    if clave_unica:
-        admin_passwords.setdefault("admin", clave_unica)
-    operador_passwords = {n: p for n, p in dict(secretos.get("operador_passwords", {})).items()
-                          if es_un_usuario_de_los_secretos(n)}
+    con_mecanicos=True (solo el ingreso): también los talleres, que dan nivel 'mecanico'. El
+    taller pone su número de cuenta o el nombre de su cuenta. Van ADENTRO y no después, a
+    propósito: el ingreso probaba la clave de los mecánicos aparte, aunque este freno hubiera
+    dicho «esperá», así que contra el portal se podían probar claves sin límite, y un mecánico
+    que acertaba no reiniciaba la cuenta de fallos (lo encontró una revisión con ChatGPT). Las
+    pantallas que piden clave para una acción no los incluyen: la clave de un taller no autoriza
+    nada adentro del negocio. Un taller que se llama como un empleado entra con su número: por
+    el nombre, ese usuario es el empleado.
 
-    # El freno va ANTES de comparar nada, y también antes de validar_password_usuario(), que
-    # calcula un PBKDF2 por cada empleado activo: sin el freno, cada intento fallido le cuesta
-    # al servidor 25 ms por empleado y eso lo paga la app entera, que es un solo proceso.
+    `cuenta`: el número de cuenta, si ya se sabe que es un taller: se prueba solo contra esa.
+
+    `o_un_administrador`: vale también la contraseña de CUALQUIER administrador (devuelve su
+    nombre y 'admin'). Para lo que autoriza «él o un administrador» con un solo campo, como
+    devolver al stock lo que alguien tiene del depósito."""
+    administradores, operadores = _usuarios_de_los_secretos()
+
+    # El freno va ANTES de comparar nada: sin él, cada intento fallido le cuesta al servidor un
+    # PBKDF2 (61 ms) y eso lo paga la app entera, que es un solo proceso.
     _faltan = _segundos_de_espera_por_intentos()
     if _faltan:
         # El intento rechazado TAMBIÉN cuenta, y eso es lo que hace que el freno sirva de algo.
@@ -1614,44 +1625,69 @@ def validar_password(clave, con_mecanicos=False, cuenta=None):
             "bloqueada, la espera pasa sola."
         )
 
+    probadas = []       # las contraseñas guardadas contra las que se comparó (ver al final)
     if con_mecanicos and cuenta is not None:
-        _mecanico_id, nombre_mecanico = validar_password_mecanico(clave, cuenta)
+        _mecanico_id, nombre_mecanico = validar_password_mecanico(clave, cuenta, probadas=probadas)
+        if not probadas:
+            _gastar_lo_que_una_prueba(clave)
         _anotar_intento(bool(_mecanico_id))
         return (nombre_mecanico, "mecanico", None) if _mecanico_id else (None, None, None)
 
+    quien = normalizar_usuario(usuario)
+    if not quien:
+        # No es un intento: sin usuario no hay contra quién probar.
+        return None, None, "Poné tu usuario además de la contraseña: así se sabe quién sos."
+
     # compare_digest y no ==, por el mismo motivo que está escrito en verificar_password():
     # comparar de a byte tarda distinto según cuántos caracteres coincidan, y con muchos
-    # intentos eso deja adivinar la clave de a un carácter. Acá estaba con == a secas, así que
-    # el cuidado que se había tomado con las claves de la base no valía para las de los secrets.
-    nombre_admin = next((n for n, p in admin_passwords.items()
-                         if hmac.compare_digest(str(p), str(clave))), None)
-    if nombre_admin:
-        _anotar_intento(True)
-        return nombre_admin, "admin", None
-    nombre_operador = next((n for n, p in operador_passwords.items()
-                            if hmac.compare_digest(str(p), str(clave))), None)
-    if nombre_operador:
-        _anotar_intento(True)
-        return nombre_operador, "operador", None
+    # intentos eso deja adivinar la clave de a un carácter.
+    for nivel, de_los_secretos in (("admin", administradores), ("operador", operadores)):
+        nombre = next((n for n, p in de_los_secretos.items() if normalizar_usuario(n) == quien
+                       and hmac.compare_digest(str(p), str(clave))), None)
+        if nombre:
+            _anotar_intento(True)
+            return nombre, nivel, None
 
     # Cuentas creadas desde la propia app (además de las de Secrets)
-    nombre_db, rol_db = validar_password_usuario(clave)
+    nombre_db, rol_db = validar_password_usuario(clave, usuario, probadas)
     if nombre_db:
         _anotar_intento(True)
         return nombre_db, rol_db, None
 
     if con_mecanicos:
-        _mecanico_id, nombre_mecanico = validar_password_mecanico(clave)
+        c.execute("SELECT nombre FROM usuarios WHERE activo = 1")
+        es_un_empleado = quien in ({normalizar_usuario(n) for n in list(administradores)
+                                    + list(operadores)}
+                                   | {normalizar_usuario(f[0]) for f in c.fetchall()})
+        numero = re.fullmatch(r"#?\s*(\d{1,9})", str(usuario or "").strip())
+        _mecanico_id, nombre_mecanico = validar_password_mecanico(
+            clave, cuenta=int(numero.group(1)) if numero else None,
+            nombre=None if (numero or es_un_empleado) else usuario, probadas=probadas)
         if _mecanico_id:
             _anotar_intento(True)
             return nombre_mecanico, "mecanico", None
 
-    if not admin_passwords and not operador_passwords:
+    if o_un_administrador:
+        nombre = next((n for n, p in administradores.items()
+                       if hmac.compare_digest(str(p), str(clave))), None)
+        if not nombre:
+            c.execute("SELECT id, nombre, password_hash, salt FROM usuarios "
+                      "WHERE activo = 1 AND rol = 'admin'")
+            for fila in c.fetchall():
+                probadas.append(fila["id"])
+                if verificar_password(clave, fila["password_hash"], fila["salt"])[0]:
+                    nombre = fila["nombre"]
+                    break
+        if nombre:
+            _anotar_intento(True)
+            return nombre, "admin", None
+
+    if not administradores and not operadores:
         c.execute("SELECT COUNT(*) FROM usuarios")
         _sin_usuarios = c.fetchone()[0] == 0
         # Con talleres cargados SÍ hay contra qué acertar en el ingreso: un fallo cuenta.
         if _sin_usuarios and con_mecanicos:
-            c.execute("SELECT COUNT(*) FROM mecanicos WHERE activo = 1")
+            c.execute("SELECT COUNT(*) FROM mecanicos WHERE activo = 1 AND password_hash <> ''")
             _sin_usuarios = c.fetchone()[0] == 0
         if _sin_usuarios:
             # No es un intento fallido: no hay contra qué acertar. Contarlo acá dejaría a una
@@ -1660,8 +1696,19 @@ def validar_password(clave, con_mecanicos=False, cuenta=None):
                 "No configuraste todavía ninguna contraseña en Streamlit Cloud (Settings → Secrets) "
                 "ni creaste ningún usuario desde la app. Sin eso, nadie puede entrar a las secciones protegidas."
             )
+    # QUE NO SE NOTE SI EL USUARIO EXISTE. Con un usuario que no existe no había nada contra qué
+    # probar y la respuesta salía al instante; con uno que existe, 61 ms después. Midiendo eso
+    # se podía sacar la lista de usuarios de una app que está en una dirección pública.
+    if not probadas:
+        _gastar_lo_que_una_prueba(clave)
     _anotar_intento(False)
     return None, None, None
+
+
+def _gastar_lo_que_una_prueba(clave):
+    """Tarda lo que tarda comparar una contraseña guardada, sin comparar nada (ver el final de
+    validar_password())."""
+    hashlib.pbkdf2_hmac("sha256", str(clave or "").encode("utf-8"), b"nadie", VUELTAS_CLAVE)
 
 
 def candado(motivo, disparador, clave, nivel="admin"):
@@ -1717,11 +1764,13 @@ def pedir_password_operador_o_admin(motivo=""):
 
     st.warning(f"🔒 Para esto hace falta entrar como empleado{(' — ' + motivo) if motivo else ''}.")
     with st.form(f"login_empleado_{motivo}"):
+        quien = st.text_input("Usuario:", value=_quien_esta_en_la_pantalla(),
+                              placeholder="Tu nombre de usuario")
         clave = st.text_input("Contraseña (de operador o de administrador):", type="password")
         entrar = st.form_submit_button("Ingresar")
 
     if entrar:
-        nombre, nivel, error = validar_password(clave)
+        nombre, nivel, error = validar_password(clave, usuario=quien)
         if error:
             st.error(error)
         elif nivel in ("admin", "operador"):
@@ -1729,8 +1778,14 @@ def pedir_password_operador_o_admin(motivo=""):
             st.session_state.admin_nombre = nombre
             st.rerun()
         else:
-            st.error("Contraseña incorrecta.")
+            st.error("Usuario o contraseña incorrectos.")
     return False
+
+
+def _quien_esta_en_la_pantalla():
+    """El usuario que ya entró con su contraseña, para dejarlo puesto en los candados: el que
+    tiene que poner otra contraseña casi siempre es él mismo. "" si entró sin contraseña."""
+    return str(st.session_state.get("admin_nombre") or "")
 
 
 # Lo que se pega al final de los secretos queda ADENTRO de la última sección (así es TOML), y
@@ -1828,11 +1883,15 @@ def pedir_password_admin(motivo=""):
 
     st.warning(f"🔒 Esta sección está protegida{(' — ' + motivo) if motivo else ''}.")
     with st.form(f"login_admin_{motivo}"):
+        # Vacío de entrada: el que está en la pantalla no es administrador (si lo fuera no se
+        # le pediría nada), y quien autoriza es otro.
+        quien = st.text_input("Usuario del administrador:", placeholder="El nombre de usuario "
+                                                                         "de un administrador")
         clave = st.text_input("Contraseña de administrador:", type="password")
         entrar = st.form_submit_button("Ingresar")
 
     if entrar:
-        nombre, nivel, error = validar_password(clave)
+        nombre, nivel, error = validar_password(clave, usuario=quien)
         if error:
             st.error(error)
         elif nivel == "admin":
@@ -1840,9 +1899,9 @@ def pedir_password_admin(motivo=""):
             st.session_state.admin_nombre = nombre
             st.rerun()
         elif nivel == "operador":
-            st.error("Esa es una contraseña de operador — para esto hace falta la de administrador completo.")
+            st.error("Ese usuario es un operador — para esto hace falta un administrador completo.")
         else:
-            st.error("Contraseña incorrecta.")
+            st.error("Usuario o contraseña incorrectos.")
     return False
 
 
@@ -1853,39 +1912,32 @@ def mostrar_login_inicial():
     # Va adentro de «🔑 Ingresar», arriba de todo (ver app.py): ya no es una pantalla que hay
     # que pasar para llegar al buscador.
     st.caption(
-        "Tu nombre separa tus búsquedas recientes de las de tus compañeros. Es opcional: "
-        "sin nombre figurás como «Invitado»."
+        "Con contraseña: poné tu usuario y tu contraseña. Sin contraseña podés seguir igual: "
+        "el nombre es opcional (separa tus búsquedas de las de tus compañeros) y sin nombre "
+        "figurás como «Invitado»."
     )
+    # EL LINK DE UN TALLER (…/?cuenta=123) trae su número de cuenta puesto como usuario.
+    _cuenta_del_link = str(st.query_params.get("cuenta", "") or "").strip()
+    if _cuenta_del_link.isdigit() and "login_inicial_nombre" not in st.session_state:
+        st.session_state["login_inicial_nombre"] = _cuenta_del_link
     with st.form("login_inicial"):
-        nombre_usuario = st.text_input("Tu nombre:", placeholder="Ej: Matías", key="login_inicial_nombre")
-        st.markdown("---")
-        st.caption(
-            "Si tenés contraseña (de administrador completo o de operador), ingresala acá. "
-            "Un operador puede usar las funciones de IA y cargar cosas, pero no borrar ni configurar."
-        )
+        nombre_usuario = st.text_input(
+            "Usuario:", placeholder="Tu nombre — un taller o cliente: su número de cuenta",
+            key="login_inicial_nombre",
+            help="El empleado, su nombre de usuario (como lo cargó el administrador; no importan "
+                 "las mayúsculas ni los acentos). El taller o cliente con cuenta, su número de "
+                 "cuenta o el nombre de su cuenta.")
         clave = st.text_input("Contraseña (opcional):", type="password", key="login_inicial_clave")
-        # EL NÚMERO DE CUENTA, para los talleres, cuando son tantos que la clave sola no alcanza
-        # (ver «CON MILES DE CUENTAS»), o si entró con su link (…/?cuenta=123), que lo trae puesto.
-        _cuenta_del_link = str(st.query_params.get("cuenta", "") or "").strip()
-        cuenta_txt = ""
-        if _cuenta_del_link.isdigit() or los_talleres_entran_con_su_numero():
-            cuenta_txt = st.text_input(
-                "N.º de cuenta (solo talleres y clientes):", key="login_inicial_cuenta",
-                value=_cuenta_del_link if _cuenta_del_link.isdigit() else "",
-                placeholder="Ej: 1234",
-                help="Si sos un taller o un cliente con cuenta, poné tu número de cuenta y tu "
-                     "contraseña. Los empleados lo dejan vacío.")
         col_a, col_b = st.columns(2)
         entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary", width="stretch")
         seguir = col_b.form_submit_button("👤 Continuar sin contraseña", width="stretch")
 
     if entrar:
-        _numero = re.sub(r"\D", "", cuenta_txt or "")
-        if (cuenta_txt or "").strip() and not _numero:
-            st.error("El número de cuenta son solo números.")
+        if not nombre_usuario.strip():
+            st.error("Poné tu usuario además de la contraseña: así se sabe quién sos. Un taller "
+                     "o cliente, su número de cuenta.")
             return
-        nombre, nivel, error = validar_password(clave, con_mecanicos=True,
-                                                cuenta=int(_numero) if _numero else None)
+        nombre, nivel, error = validar_password(clave, con_mecanicos=True, usuario=nombre_usuario)
         if nivel == "mecanico":
             # El nombre del taller es único (ver la tabla mecanicos).
             c.execute("SELECT id FROM mecanicos WHERE nombre = ? AND activo = 1", (nombre,))
@@ -1903,11 +1955,8 @@ def mostrar_login_inicial():
             st.rerun()
         elif error:
             st.error(error)
-        elif not _numero and los_talleres_entran_con_su_numero():
-            st.error("Contraseña incorrecta. Si sos un taller o un cliente con cuenta, poné "
-                     "también tu número de cuenta.")
         else:
-            st.error("Contraseña incorrecta.")
+            st.error("Usuario o contraseña incorrectos.")
     if seguir:
         st.session_state.usuario_nombre = nombre_usuario.strip() or "Invitado"
         st.rerun()

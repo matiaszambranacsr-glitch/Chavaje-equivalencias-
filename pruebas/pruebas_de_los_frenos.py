@@ -175,16 +175,27 @@ def probar(L):
     ns["crear_mecanico"]("Taller Freno", "clave-del-taller-7")
     ns["guardar_config"]("login_fallidos", "8")
     ns["guardar_config"]("login_ultimo_fallo", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    nombre, nivel, error = ns["validar_password"]("clave-del-taller-7", con_mecanicos=True)
+    nombre, nivel, error = ns["validar_password"]("clave-del-taller-7", con_mecanicos=True,
+                                                  usuario="Taller Freno")
     esperar("frenado: ni la clave correcta de un taller entra", (nivel, bool(error)), (None, True))
     ns["guardar_config"]("login_fallidos", "1")
-    nombre, nivel, error = ns["validar_password"]("clave-del-taller-7", con_mecanicos=True)
-    esperar("sin freno, el taller entra", (nombre, nivel), ("Taller Freno", "mecanico"))
+    nombre, nivel, error = ns["validar_password"]("clave-del-taller-7", con_mecanicos=True,
+                                                  usuario="taller freno")
+    esperar("sin freno, el taller entra (con el nombre de su cuenta, como lo escriba)",
+            (nombre, nivel), ("Taller Freno", "mecanico"))
     esperar("y acertar reinicia la cuenta de fallos", ns["obtener_config"]("login_fallidos"), "0")
-    ns["validar_password"]("otra-clave-cualquiera", con_mecanicos=True)
+    ns["validar_password"]("otra-clave-cualquiera", con_mecanicos=True, usuario="Taller Freno")
     esperar("una clave equivocada cuenta como fallo", ns["obtener_config"]("login_fallidos"), "1")
+    ns["validar_password"]("clave-del-taller-7", con_mecanicos=True, usuario="Nadie que exista")
+    esperar("y un usuario que no existe también", ns["obtener_config"]("login_fallidos"), "2")
+    ns["guardar_config"]("login_fallidos", "0")
     esperar("la clave de un taller no autoriza acciones adentro",
-            ns["validar_password"]("clave-del-taller-7")[1], None)
+            ns["validar_password"]("clave-del-taller-7", usuario="Taller Freno")[1], None)
+    ns["guardar_config"]("login_fallidos", "0")
+    esperar("sin usuario no se prueba nada (ni cuenta como intento): pide el usuario",
+            (ns["validar_password"]("clave-del-taller-7", con_mecanicos=True)[1:2],
+             "usuario" in (ns["validar_password"]("clave-del-taller-7", con_mecanicos=True)[2] or ""),
+             ns["obtener_config"]("login_fallidos")), ((None,), True, "0"))
 
     # 8. Los errores: sin datos sensibles, con categoría, renglón y código.
     tapado = ns["tapar_lo_sensible"](
@@ -267,23 +278,56 @@ def probar(L):
             (chequeo["Productos sin descripción"], chequeo["Vínculos pendientes que ya están aprobados"],
              chequeo["Equivalencias de un producto consigo mismo"]), (1, 1, 0))
 
-    # 12. Cada cuenta con su clave: la contraseña sola dice quién entra.
-    def repetida(funcion, *args):
+    # 12. Cada uno entra con su usuario y su contraseña (ver esa sección en logica/base.py): la
+    # contraseña se puede repetir, el nombre de usuario no, y dos con la misma no se cruzan.
+    def no_deja(funcion, *args):
         try:
             funcion(*args)
             return False
         except ValueError:
             return True
-    esperar("un taller con la clave de otro taller", repetida(ns["crear_mecanico"], "Otro Taller",
-                                                              "clave-del-taller-7"), True)
-    esperar("un empleado con la clave de un taller", repetida(ns["crear_usuario"], "zoe",
-                                                              "clave-del-taller-7"), True)
-    esperar("con una clave nueva, sí", repetida(ns["crear_usuario"], "zoe", "clave-de-zoe-1"), False)
+    esperar("un taller con la clave de otro taller, y un empleado con la de un taller: se puede",
+            (no_deja(ns["crear_mecanico"], "Otro Taller", "clave-del-taller-7"),
+             no_deja(ns["crear_usuario"], "zoe", "clave-del-taller-7")), (False, False))
+    esperar("otro empleado con el mismo nombre, lo escriba como lo escriba, no; ni sin nombre",
+            [no_deja(ns["crear_usuario"], n, "otra-clave-1") for n in ("zoe", "ZOE", " Zoé ", "  ")],
+            [True] * 4)
+    esperar("otra cuenta que se escribe igual sin acentos ni mayúsculas, tampoco",
+            no_deja(ns["crear_mecanico"], "OTRO  TALLER", ""), True)
+    ns["guardar_config"]("login_fallidos", "0")
+    esperar("tres con la misma contraseña: cada uno entra a lo suyo, sin cruzarse",
+            [ns["validar_password"]("clave-del-taller-7", con_mecanicos=True, usuario=u)[:2]
+             for u in ("ZOE", "Taller Freno", "otro taller")],
+            [("zoe", "operador"), ("Taller Freno", "mecanico"), ("Otro Taller", "mecanico")])
     zoe = c.execute("SELECT id FROM usuarios WHERE nombre = 'zoe'").fetchone()[0]
-    esperar("cambiarle la clave a la de un taller, no",
-            repetida(ns["cambiar_password_usuario"], zoe, "clave-del-taller-7"), True)
-    esperar("volver a ponerle la suya, sí",
-            repetida(ns["cambiar_password_usuario"], zoe, "clave-de-zoe-1"), False)
+    ns["cambiar_password_usuario"](zoe, "clave-de-zoe-1")
+    esperar("con la contraseña de otro y su propio usuario, no entra; con la suya, sí",
+            (ns["validar_password"]("clave-del-taller-7", con_mecanicos=True, usuario="zoe")[1],
+             ns["validar_password"]("clave-de-zoe-1", con_mecanicos=True, usuario="zoe")[1]),
+            (None, "operador"))
+    # Un taller que se llama como un empleado entra con su número: por el nombre, es el empleado.
+    homonimo = ns["crear_mecanico"]("Zoe", "clave-de-zoe-1")
+    ns["guardar_config"]("login_fallidos", "0")
+    esperar("un taller que se llama como un empleado: por el nombre entra el empleado; el taller, "
+            "con su número",
+            (ns["validar_password"]("clave-de-zoe-1", con_mecanicos=True, usuario="Zoe")[:2],
+             ns["validar_password"]("clave-de-zoe-1", con_mecanicos=True, usuario=str(homonimo))[:2],
+             ns["validar_password"]("clave-de-zoe-1", con_mecanicos=True,
+                                    usuario=f"#{homonimo}")[1]),
+            (("zoe", "operador"), ("Zoe", "mecanico"), "mecanico"))
+    # Que no se note si el usuario existe: el que no existe tarda lo mismo que el que sí.
+    import time as _time
+    ns["guardar_config"]("login_fallidos", "0")
+    _t0 = _time.time()
+    ns["validar_password"]("cualquiera", con_mecanicos=True, usuario="zoe")
+    _existe = _time.time() - _t0
+    ns["guardar_config"]("login_fallidos", "0")
+    _t0 = _time.time()
+    ns["validar_password"]("cualquiera", con_mecanicos=True, usuario="nadie con ese nombre")
+    _no_existe = _time.time() - _t0
+    ns["guardar_config"]("login_fallidos", "0")
+    esperar("el usuario que no existe no contesta más rápido que el que existe",
+            _no_existe > _existe * 0.5, True)
 
     # 13. Completar medidas no pisa lo que alguien cargó a mano mientras se revisaba.
     pid = c.execute("SELECT MAX(id) FROM productos").fetchone()[0]

@@ -538,6 +538,7 @@ def probar(L):
             os.path.abspath(__file__))), "app.py"), default_timeout=300)
         at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
         at.run()
+        at.text_input(key="login_inicial_nombre").set_value("duenio")
         at.text_input(key="login_inicial_clave").set_value("clave-duenio-1")
         [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
         at.session_state["caja_recien"] = v5

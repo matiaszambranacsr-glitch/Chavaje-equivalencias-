@@ -89,7 +89,8 @@ def probar():
                  else f"clave-medir-{os.urandom(4).hex()}")
     ns["crear_usuario"](f"ana{clave_ana[-4:]}", clave_ana, "operador")
 
-    def entrar(clave):
+    def entrar(usuario, clave):
+        at.text_input(key="login_inicial_nombre").set_value(usuario)
         at.text_input(key="login_inicial_clave").set_value(clave)
         [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
 
@@ -340,7 +341,7 @@ def probar():
         # puede haber OTROS productos que dicen P716 de otra forma: esos sí van.
         fallas.append("un código que una descripción nombra: aparece dos veces")
     recorrer("sin contraseña")
-    entrar(clave_ana)
+    entrar(f"ana{clave_ana[-4:]}", clave_ana)
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):
         fallas.append("con sesión, la barra no tiene todas las secciones")
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
@@ -518,6 +519,10 @@ def probar():
             # Acá se está como operador: el candado pide la del administrador, y se pone.
             _candado = [x for x in at.text_input if x.label == "Contraseña de administrador:"]
             if _candado:
+                # El candado pide quién y su contraseña (ver «CADA UNO ENTRA CON SU USUARIO Y
+                # SU CONTRASEÑA» en logica/base.py).
+                [x for x in at.text_input if x.label == "Usuario del administrador:"][0] \
+                    .set_value("duenio")
                 _candado[0].set_value("clave-duenio-1")
                 [b for b in at.button if b.label == "Ingresar"][0].click().run()
                 at.run()
@@ -538,6 +543,8 @@ def probar():
             _prender[0].click().run()
             _candado_c = [x for x in at.text_input if x.label == "Contraseña de administrador:"]
             if _candado_c:
+                [x for x in at.text_input if x.label == "Usuario del administrador:"][0] \
+                    .set_value("duenio")
                 _candado_c[0].set_value("clave-duenio-1")
                 [b for b in at.button if b.label == "Ingresar"][0].click().run()
                 at.run()
@@ -666,7 +673,7 @@ def probar():
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()
-    entrar("clave-duenio-1")
+    entrar("duenio", "clave-duenio-1")
     recorrer("administrador")
     tiempos.sort(reverse=True)
     if len(abiertos) < 5:

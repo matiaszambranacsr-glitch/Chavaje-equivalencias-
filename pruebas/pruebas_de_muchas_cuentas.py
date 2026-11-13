@@ -28,7 +28,6 @@ def _cargar_la_logica(carpeta):
 def probar(L):
     ns = L.todo_lo_de_la_logica()
     c, conn, st = ns["c"], ns["conn"], ns["st"]
-    g = ns["validar_password"].__globals__
     fallas = []
 
     def esperar(nombre, real, esperado):
@@ -41,6 +40,12 @@ def probar(L):
 
     def sin_freno():
         ns["guardar_config"]("login_fallidos", "0")
+
+    def _que_pasa(hacer):
+        try:
+            return hacer()
+        except ValueError as e:
+            return e
 
     st.session_state["admin_nombre"], st.session_state["nivel_usuario"] = "ana", "admin"
     try:
@@ -146,85 +151,51 @@ def probar(L):
                 (distintas, len(resumen) >= 100), ([], True))
         esperar("y rápido con dos mil cuentas", tardo < 1.0, True)
 
-        # 5. EL INGRESO. Con dos mil cuentas sin portal, una contraseña mal puesta no tarda: no
-        # se prueba contra ninguna. Con pocas con portal, el taller entra con la clave sola,
-        # como siempre.
+        # 5. EL INGRESO, con usuario y contraseña (ver «CADA UNO ENTRA CON SU USUARIO Y SU
+        # CONTRASEÑA» en logica/base.py). Con dos mil cuentas no tarda: la contraseña se prueba
+        # contra una sola. El taller entra con su número de cuenta o con el nombre de su cuenta.
         ns["crear_usuario"]("beto", "clave-de-beto-1")
         ns["cambiar_password_mecanico"](garcia, "clave-garcia-1")
+        # Las dos mil con contraseña (un hash cualquiera: alcanza para medir): si se probara
+        # contra todas serían dos minutos.
+        c.execute("UPDATE mecanicos SET password_hash = ?, salt = ? WHERE password_hash = ''",
+                  ("pbkdf2$100000$" + "ab" * 32, "cd" * 16))
+        conn.commit()
         sin_freno()
         inicio = time.time()
-        esperar("mal puesta, con dos mil cuentas: no entra, y enseguida",
-                (ns["validar_password"]("cualquier-cosa", con_mecanicos=True)[1],
-                 time.time() - inicio < 2), (None, True))
+        esperar("mal puesta, con dos mil cuentas con portal: no entra, y enseguida",
+                ([ns["validar_password"]("cualquier-cosa", con_mecanicos=True, usuario=u)[1]
+                  for u in ("beto", str(garcia), "Taller García", "nadie")], time.time() - inicio < 3),
+                ([None] * 4, True))
         sin_freno()
-        esperar("pocas con portal: el taller entra con la clave sola, y el empleado también",
-                (ns["validar_password"]("clave-garcia-1", con_mecanicos=True)[:2],
-                 ns["validar_password"]("clave-de-beto-1", con_mecanicos=True)[:2]),
-                (("Taller García", "mecanico"), ("beto", "operador")))
-        mal = []
-        for hacer in (lambda: ns["crear_mecanico"]("Otro taller", "clave-de-beto-1"),
-                      lambda: ns["cambiar_password_mecanico"](nandu, "clave-de-beto-1"),
-                      lambda: ns["cambiar_password_mecanico"](nandu, "clave-garcia-1"),
-                      lambda: ns["crear_mecanico"]("", "x")):
-            try:
-                hacer()
-                mal.append("pasó")
-            except ValueError:
-                mal.append("no")
-        esperar("un taller no puede tener la clave de un empleado ni (siendo pocos) la de otro "
-                "taller, ni una cuenta ir sin nombre", mal, ["no"] * 4)
-
-        # Con muchos con portal (acá, más de dos): cada uno entra con su número y su clave.
-        _tope = g["TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA"]
-        g["TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA"] = 2
-        try:
-            ns["cambiar_password_mecanico"](nandu, "clave-nandu-1")
-            sosa = ns["crear_mecanico"]("Taller Sosa nuevo", "clave-sosa-1")
-            esperar("con muchos con portal, la clave sola ya no alcanza",
-                    ns["los_talleres_entran_con_su_numero"](), True)
-            sin_freno()
-            esperar("sin el número no entra; con su número, sí; con el de otro, no",
-                    (ns["validar_password"]("clave-garcia-1", con_mecanicos=True)[:2],
-                     ns["validar_password"]("clave-garcia-1", con_mecanicos=True, cuenta=garcia)[:2],
-                     ns["validar_password"]("clave-garcia-1", con_mecanicos=True, cuenta=nandu)[:2]),
-                    ((None, None), ("Taller García", "mecanico"), (None, None)))
-            sin_freno()
-            esperar("con un número de cuenta no entra un empleado, ni una cuenta sin portal",
-                    (ns["validar_password"]("clave-de-beto-1", con_mecanicos=True, cuenta=garcia)[1],
-                     ns["validar_password"]("", con_mecanicos=True,
-                                            cuenta=uno("SELECT id FROM mecanicos WHERE "
-                                                       "password_hash = '' LIMIT 1"))[1]),
-                    (None, None))
-            sin_freno()
-            esperar("el empleado sigue entrando con la clave sola",
-                    ns["validar_password"]("clave-de-beto-1", con_mecanicos=True)[:2],
-                    ("beto", "operador"))
-            # Entre muchos, dos talleres pueden tener la misma (cada uno entra con su número);
-            # la de un empleado, nunca.
-            ns["cambiar_password_mecanico"](sosa, "clave-garcia-1")
-            try:
-                ns["cambiar_password_mecanico"](sosa, "clave-de-beto-1")
-                _con_la_del_empleado = "pasó"
-            except ValueError:
-                _con_la_del_empleado = "no"
-            sin_freno()
-            esperar("dos con la misma: cada uno entra a la suya; la de un empleado, no se puede",
-                    (ns["validar_password"]("clave-garcia-1", con_mecanicos=True, cuenta=sosa)[0],
-                     ns["validar_password"]("clave-garcia-1", con_mecanicos=True, cuenta=garcia)[0],
-                     _con_la_del_empleado), ("Taller Sosa nuevo", "Taller García", "no"))
-        finally:
-            g["TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA"] = _tope
-        # Vuelven a ser pocos y quedaron dos con la misma clave: sin el número no se elige una.
+        esperar("el taller entra con su número o con el nombre de su cuenta; el empleado, con el suyo",
+                ([ns["validar_password"]("clave-garcia-1", con_mecanicos=True, usuario=u)[:2]
+                  for u in (str(garcia), f"#{garcia}", "taller garcia", "TALLER GARCÍA")],
+                 ns["validar_password"]("clave-de-beto-1", con_mecanicos=True, usuario="Beto")[:2]),
+                ([("Taller García", "mecanico")] * 4, ("beto", "operador")))
         sin_freno()
-        esperar("pocos otra vez, con una clave repetida: sin número no entra ninguno; con número, sí",
-                (ns["validar_password"]("clave-garcia-1", con_mecanicos=True)[1],
-                 ns["validar_password"]("clave-garcia-1", con_mecanicos=True, cuenta=garcia)[0]),
-                (None, "Taller García"))
+        esperar("con el número de otra cuenta, o el usuario de otro, no entra",
+                ([ns["validar_password"]("clave-garcia-1", con_mecanicos=True, usuario=u)[1]
+                  for u in (str(nandu), "beto", "Mecánica Ñandú")],
+                 ns["validar_password"]("clave-de-beto-1", con_mecanicos=True, usuario=str(garcia))[1]),
+                ([None] * 3, None))
+        # Dos con la misma contraseña no se cruzan: cada uno entra a lo suyo.
+        ns["cambiar_password_mecanico"](nandu, "clave-garcia-1")
+        sosa = ns["crear_mecanico"]("Taller Sosa nuevo", "clave-de-beto-1")
+        sin_freno()
+        esperar("la misma contraseña en dos talleres y en un empleado: cada uno entra a lo suyo",
+                [ns["validar_password"](clave, con_mecanicos=True, usuario=u)[0]
+                 for clave, u in (("clave-garcia-1", str(garcia)), ("clave-garcia-1", str(nandu)),
+                                  ("clave-de-beto-1", str(sosa)), ("clave-de-beto-1", "beto"))],
+                ["Taller García", "Mecánica Ñandú", "Taller Sosa nuevo", "beto"])
+        sin_freno()
+        esperar("una cuenta no va sin nombre",
+                [isinstance(e, ValueError) for e in [_que_pasa(lambda: ns["crear_mecanico"]("", "x"))]],
+                [True])
         ns["cambiar_password_mecanico"](sosa, "")
-        sin_freno()
         esperar("sacarle el portal: la cuenta sigue, y ya no entra",
                 (uno("SELECT activo FROM mecanicos WHERE id = ?", sosa),
-                 ns["validar_password"]("clave-garcia-1", con_mecanicos=True, cuenta=sosa)[1],
+                 ns["validar_password"]("clave-de-beto-1", con_mecanicos=True, usuario=str(sosa))[1],
                  ns["configuracion_de_cuenta"](sosa)["pide_codigo"]), (1, None, False))
         sin_freno()
 
@@ -236,6 +207,7 @@ def probar(L):
             os.path.abspath(__file__))), "app.py"), default_timeout=300)
         at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
         at.run()
+        at.text_input(key="login_inicial_nombre").set_value("duenio")
         at.text_input(key="login_inicial_clave").set_value("clave-duenio-1")
         [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
         at.session_state["pagina_actual"] = ns["PAGINAS"][0]
@@ -278,32 +250,40 @@ def probar(L):
                  [len(x.options) < 50 for x in at.selectbox if x.key == "venta_cuenta_sel"]),
                 ([], [True]))
 
-        # 7. EL INGRESO, EN LA PANTALLA: con muchos con portal aparece el número de cuenta, y el
-        # taller entra con su número y su clave.
-        g["TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA"] = 1
-        try:
+        # 7. EL INGRESO, EN LA PANTALLA: sin usuario no entra y lo pide; el taller entra con su
+        # número de cuenta y su contraseña, y el link de su portal ya trae el número puesto.
+        def pantalla_de_entrada():
             entrada = AppTest.from_file(os.path.join(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__))), "app.py"), default_timeout=300)
             entrada.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
-            entrada.run()
-            esperar("con muchos con portal, el ingreso pide el número de cuenta",
-                    len([x for x in entrada.text_input if x.key == "login_inicial_cuenta"]), 1)
-            entrada.text_input(key="login_inicial_clave").set_value("clave-garcia-1")
-            [b for b in entrada.button if "Ingresar con contraseña" in b.label][0].click().run()
-            esperar("sin el número no entra, y le dice que lo ponga",
-                    (entrada.session_state["nivel_usuario"] if "nivel_usuario" in entrada.session_state
-                     else None, any("número de cuenta" in x.value for x in entrada.error)),
-                    (None, True))
-            sin_freno()
-            entrada.text_input(key="login_inicial_clave").set_value("clave-garcia-1")
-            entrada.text_input(key="login_inicial_cuenta").set_value(str(garcia))
-            [b for b in entrada.button if "Ingresar con contraseña" in b.label][0].click().run()
-            esperar("con su número y su clave, entra a su portal",
-                    (entrada.session_state["nivel_usuario"], entrada.session_state["mecanico_id"],
-                     [e.value for e in entrada.exception]), ("mecanico", garcia, []))
-        finally:
-            g["TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA"] = _tope
-            sin_freno()
+            return entrada
+        entrada = pantalla_de_entrada().run()
+        entrada.text_input(key="login_inicial_clave").set_value("clave-garcia-1")
+        [b for b in entrada.button if "Ingresar con contraseña" in b.label][0].click().run()
+        esperar("sin el usuario no entra, y le dice que lo ponga",
+                ("nivel_usuario" in entrada.session_state
+                 and entrada.session_state["nivel_usuario"] or None,
+                 any("usuario" in x.value for x in entrada.error),
+                 ns["obtener_config"]("login_fallidos", "0")), (None, True, "0"))
+        entrada.text_input(key="login_inicial_nombre").set_value(str(garcia))
+        entrada.text_input(key="login_inicial_clave").set_value("clave-garcia-1")
+        [b for b in entrada.button if "Ingresar con contraseña" in b.label][0].click().run()
+        esperar("con su número de cuenta y su contraseña, entra a su portal",
+                (entrada.session_state["nivel_usuario"], entrada.session_state["mecanico_id"],
+                 [e.value for e in entrada.exception]), ("mecanico", garcia, []))
+        del_link = pantalla_de_entrada()
+        del_link.query_params["cuenta"] = str(nandu)
+        del_link.run()
+        esperar("el link del portal trae el número de cuenta puesto como usuario",
+                del_link.text_input(key="login_inicial_nombre").value, str(nandu))
+        mal = pantalla_de_entrada().run()
+        mal.text_input(key="login_inicial_nombre").set_value("duenio")
+        mal.text_input(key="login_inicial_clave").set_value("clave-garcia-1")
+        [b for b in mal.button if "Ingresar con contraseña" in b.label][0].click().run()
+        esperar("el usuario de uno con la contraseña de otro: no entra",
+                ("nivel_usuario" in mal.session_state and mal.session_state["nivel_usuario"] or None,
+                 [x.value for x in mal.error]), (None, ["Usuario o contraseña incorrectos."]))
+        sin_freno()
     finally:
         for k in ("admin_nombre", "nivel_usuario"):
             st.session_state.pop(k, None)

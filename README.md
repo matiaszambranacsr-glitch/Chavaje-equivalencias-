@@ -7109,15 +7109,26 @@ Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porq
 
 **Lo que se rompía con 2.000, además de la lista:**
 
-- **El ingreso se colgaba dos minutos.** Para entrar no se escribe el nombre: la contraseña se prueba contra cada cuenta hasta que una calza, y cada prueba tarda 61 ms a propósito (es lo que las protege si alguien se lleva la base). Con 2.000 cuentas, una contraseña mal tipeada —la de cualquiera, también la del dueño— eran 2.000 pruebas: 122 segundos con la app entera parada. Ahora:
-  - **una cuenta puede no tener contraseña**: se le vende y se le lleva la cuenta corriente, y no entra al portal. Es lo que van a ser casi todas, y en el ingreso no cuestan nada;
-  - con hasta 30 cuentas con portal, todo sigue igual (la contraseña sola dice quién sos); **con más, el taller entra con su número de cuenta y su contraseña**, y se prueba contra una sola. El campo del número aparece solo cuando hace falta, o si entra con su link (`…/?cuenta=123`, que lo trae puesto). Quien pone un número de cuenta entra como taller o no entra: nunca como empleado.
-  - Un taller nunca puede tener la contraseña de un empleado; entre muchos talleres, dos pueden tener la misma (cada uno entra con su número). Si después vuelven a ser pocos y quedó una repetida, sin el número no entra ninguno de los dos: no se elige uno al azar.
+- **El ingreso se colgaba dos minutos.** Para entrar no se escribía el nombre: la contraseña se probaba contra cada cuenta hasta que una calzaba, y cada prueba tarda 61 ms a propósito (es lo que las protege si alguien se lleva la base). Con 2.000 cuentas, una contraseña mal tipeada —la de cualquiera, también la del dueño— eran 2.000 pruebas: 122 segundos con la app entera parada. Ahora **una cuenta puede no tener contraseña** (se le vende y se le lleva la cuenta corriente, y no entra al portal: es lo que van a ser casi todas), y **cada uno entra con su usuario y su contraseña** (ver abajo): se prueba contra una sola.
 - **Crearlas era de a una y con contraseña obligatoria**, mirando contra todas las demás que no se repitiera (cada vez más lento). Ahora la contraseña es opcional, y **«📋 Cargar muchas cuentas de una vez»** (Administrar → 👥 Usuarios) recibe las columnas pegadas de Excel —**Nombre**, CUIT, Límite, Descuento %, Días de plazo; solo el nombre es obligatorio—: 2.000 entran en un momento, las que ya existen no se tocan, y lo que no entra (un CUIT que no cierra, un descuento de más) se dice renglón por renglón. El portal se le da después a la que lo pida («🔑 Guardar la contraseña»), o se le saca.
 - **Una cuenta sin portal no podía comprar a cuenta**: de entrada toda cuenta pide el código de retiro, que el taller genera en su portal. Sin portal no lo puede generar: ahora no se le pide.
 - **Cuentas corrientes hacía tres consultas por cuenta** en cada toque (6.000 con 2.000 cuentas) para armar el resumen: ahora es una sola. Y la tabla mostraba «None» en «Límite» y «Disponible» de las que no tienen límite: ahora va escrita como plata, con el hueco vacío.
 
 `pruebas_de_muchas_cuentas.py` lo controla con 2.000 cuentas: el pegado de la planilla, el buscador (acentos, orden, número, CUIT, cuántas muestra y que no tarde), el resumen igual que cuenta por cuenta, el ingreso (que una clave mal puesta no tarde, con pocas y con muchas con portal, la clave repetida), y las pantallas dibujadas sin la lista de dos mil. Las 89 pantallas con la base real y 2.000 cuentas cargadas: en verde.
+
+## 🔑 Cada uno entra con su usuario y su contraseña
+
+Lo pidió el dueño: «necesito que cada usuario con contraseña tenga que poner también el usuario, ya que si no capaz que en algún momento dos personas ponen la misma contraseña y se cruzarían». Tenía razón, y era peor: como la contraseña sola decía quién eras, ninguna se podía repetir, y para evitarlo la app avisaba **«esa contraseña ya la usa otra cuenta»** —que es decirle a uno la contraseña de otro—.
+
+- **El empleado** pone su nombre de usuario —el de **👥 Usuarios**, o el que tiene en los secretos (`[admin_passwords]` y `[operador_passwords]`, cada renglón es `usuario = "contraseña"`; la forma vieja de una sola clave es el usuario `admin`)— y su contraseña. No importan las mayúsculas ni los acentos: «matias» entra como «Matías».
+- **El taller o cliente con cuenta** pone su **número de cuenta** (con o sin «#») o el nombre de su cuenta. El link de su portal (`…/?cuenta=123`) ya trae el número puesto.
+- **La contraseña se prueba solo contra ese usuario.** Dos personas pueden tener la misma sin cruzarse: cada una entra a lo suyo. Y entrar ya no tarda más por haber muchas cuentas.
+- **Lo que no se repite es el nombre de usuario** entre los empleados («Ana», «ANA» y «Ána» son el mismo), ni el nombre entre las cuentas. Un taller que se llama como un empleado entra con su número: por el nombre, ese usuario es el empleado.
+- **Sin usuario no se prueba nada** (y no cuenta como intento fallido): pide el usuario.
+- **Los candados de adentro** —borrar, configurar, tocar precios— piden lo mismo: el usuario del administrador y su contraseña. Para devolver al stock lo que alguien tiene del depósito sigue siendo un solo campo: la contraseña de quien lo tiene (se prueba contra él) o la de un administrador.
+- **Que no se note si un usuario existe.** Con un usuario que no existe no había nada contra qué probar y la respuesta salía al instante; con uno que existe, 61 ms después. Midiendo eso se podía sacar la lista de usuarios de una app que está en una dirección pública: ahora tarda lo mismo. El freno de intentos fallidos sigue igual.
+
+`pruebas_de_los_frenos.py` y `pruebas_de_muchas_cuentas.py` lo controlan: tres con la misma contraseña entra cada uno a lo suyo, el usuario de uno con la contraseña de otro no entra, el nombre repetido no se deja crear, el taller homónimo de un empleado, y el ingreso en la pantalla (sin usuario, con el número de cuenta, con el link).
 
 ## 🎲 La caja, al azar: que la plata, el stock y las cuentas cierren siempre
 
