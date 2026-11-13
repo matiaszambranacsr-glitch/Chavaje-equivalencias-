@@ -36,6 +36,10 @@ import orden
 #     que ya tiene en la barra (ver paginas_a_la_vista()): al que entra sin contraseña, tres;
 #     al del depósito, dos. Y aunque llevara de más, cada pantalla vuelve a pedir su contraseña
 #     (ver seccion_permitida()): el asistente no es una puerta, es un cartel.
+#   · AL INVITADO LO AYUDA SOLO CON LO QUE VE SIN CONTRASEÑA. Lo pidió el dueño: «que lo tenga
+#     al asistente, pero que lo ayude solamente en las pantallas que ven sin contraseña». De
+#     lo demás no le cuenta los pasos ni el nombre de la pantalla, y de sus tres pantallas
+#     tampoco le ofrece lo que la pantalla le esconde (ver _asis_candado_de()).
 #   · RESPUESTAS ESCRITAS, NO INVENTADAS. Elige entre textos que están en este archivo o en
 #     la app; lo que escribió la persona nunca se ejecuta ni se dibuja como HTML, y se recorta.
 #   · A quien pide una contraseña, saltear un candado o «cambiar las instrucciones» le
@@ -126,15 +130,75 @@ def _asis_lugar_de(condicion, lugar):
     return nuevo
 
 
+# Las preguntas con que una pantalla decide si muestra algo: lo de adentro de «if
+# es_empleado_o_abierto():» o de «if not solo_mirar():» no lo ve quien entró sin contraseña.
+_ASIS_SOLO_EL_PERSONAL = {"es_empleado_o_abierto": "empleado", "es_operador_o_admin": "empleado",
+                          "es_admin": "admin"}
+
+
+def _asis_pregunta_del_candado(nodo):
+    """El nombre de la función si el nodo es «es_admin()», «solo_mirar()»… (sin argumentos)."""
+    return (getattr(nodo.func, "id", None)
+            if isinstance(nodo, ast.Call) and not nodo.args else None)
+
+
+def _asis_candado_de(condicion, con_candado):
+    """Quién ve lo de adentro de un «if», y quién lo de su «else»: ("empleado" | "admin" |
+    None, lo mismo). Mira la condición sola o las partes de un «a and b»: la pregunta misma
+    («if es_admin():», «if not solo_mirar():») o una variable que se armó con una
+    (`con_candado`: «_parecido_aca = … if es_operador_o_admin() else None» y más abajo «if
+    _parecido_aca is not None:»). Ante la duda, del personal: de más no le muestra nada a
+    nadie. Y que no se le escape ninguna lo mira la prueba, con la pantalla dibujada para un
+    invitado."""
+    partes = (condicion.values if isinstance(condicion, ast.BoolOp)
+              and isinstance(condicion.op, ast.And) else [condicion])
+    adentro = None
+    for parte in partes:
+        quien = _ASIS_SOLO_EL_PERSONAL.get(_asis_pregunta_del_candado(parte))
+        if (isinstance(parte, ast.UnaryOp) and isinstance(parte.op, ast.Not)
+                and _asis_pregunta_del_candado(parte.operand) == "solo_mirar"):
+            quien = "empleado"
+        variable = parte.left if isinstance(parte, ast.Compare) else parte
+        if isinstance(variable, ast.Name) and variable.id in con_candado:
+            quien = con_candado[variable.id]
+        if quien and adentro != "admin":
+            adentro = quien
+    return adentro, ("empleado" if _asis_pregunta_del_candado(condicion) == "solo_mirar"
+                     else None)
+
+
+def _asis_con_candado(lugar, quien):
+    """El lugar con ese candado puesto (el de administrador no se afloja a empleado)."""
+    if not quien or lugar.get("_quien") == "admin":
+        return lugar
+    return {**lugar, "_quien": quien}
+
+
 def _asis_andar(nodo, lugar, seccion, plegables, sale):
-    """Recorre el código de una pantalla anotando títulos y ayudas con dónde están."""
+    """Recorre el código de una pantalla anotando títulos y ayudas con dónde están.
+    `plegables` es lo que se va sabiendo del archivo: {variable: título del plegable que
+    guarda} y, en «candados», {variable: quién ve lo que depende de ella}."""
+    con_candado = plegables.setdefault("candados", {})
     if isinstance(nodo, ast.If):
-        adentro = _asis_lugar_de(nodo.test, lugar)
+        del_cuerpo, del_si_no = _asis_candado_de(nodo.test, con_candado)
+        adentro = _asis_con_candado(_asis_lugar_de(nodo.test, lugar), del_cuerpo)
         for hijo in nodo.body:
             _asis_andar(hijo, adentro, seccion, plegables, sale)
         for hijo in nodo.orelse:
-            _asis_andar(hijo, lugar, seccion, plegables, sale)
+            _asis_andar(hijo, _asis_con_candado(lugar, del_si_no), seccion, plegables, sale)
         return
+    if isinstance(nodo, ast.Assign):
+        # Una variable armada preguntando quién está («a, b = (… if es_operador_o_admin() else
+        # …)»): lo que después dependa de ella es de ese personal.
+        preguntas = {_asis_pregunta_del_candado(parte) for parte in ast.walk(nodo.value)}
+        quien = ("admin" if "es_admin" in preguntas
+                 else "empleado" if preguntas & (set(_ASIS_SOLO_EL_PERSONAL) | {"solo_mirar"})
+                 else None)
+        if quien:
+            for destino in nodo.targets:
+                for nombre in ast.walk(destino):
+                    if isinstance(nombre, ast.Name):
+                        con_candado[nombre.id] = quien
     if isinstance(nodo, ast.Assign) and isinstance(nodo.value, ast.Call):
         # «x = st.expander(…, on_change="rerun")» y más abajo «with x:»: el plegable perezoso.
         titulo = _asis_titulo_de(nodo.value)
@@ -147,7 +211,7 @@ def _asis_andar(nodo, lugar, seccion, plegables, sale):
                 expr = item.context_expr
                 titulo = (_asis_titulo_de(expr) if isinstance(expr, ast.Call)
                           else plegables.get(expr.id) if isinstance(expr, ast.Name) else None)
-                if titulo:
+                if isinstance(titulo, str) and titulo:
                     adentro = titulo
         else:
             # «@st.dialog("💳 Cobrar la venta")» arriba de una función.
@@ -224,8 +288,8 @@ def _asis_frases_enteras(texto):
 
 def _asis_cosecha():
     """Lo que dicen las pantallas de sí mismas: [(qué, texto, destino, sección, clave para
-    abrirla)]. Se lee una vez por proceso (y de nuevo si cambia un archivo de pantallas/): son
-    unos 15.000 renglones."""
+    abrirla, quién lo ve)]. Se lee una vez por proceso (y de nuevo si cambia un archivo de
+    pantallas/): son unos 15.000 renglones."""
     carpeta = os.path.join(orden.AQUI, "pantallas")
     rutas = [os.path.join(carpeta, nombre) for nombre in orden.PANTALLAS]
     huella = tuple(os.path.getmtime(r) for r in rutas if os.path.exists(r))
@@ -244,7 +308,7 @@ def _asis_cosecha():
         for que, texto, lugar, seccion, abrir in crudo:
             destino = _asis_destino_del_lugar(lugar)
             if destino:
-                sale.append((que, texto, destino, seccion, abrir))
+                sale.append((que, texto, destino, seccion, abrir, lugar.get("_quien", "")))
     _ASIS_MEMORIA.clear()
     _ASIS_MEMORIA.update(huella=huella, cosecha=sale)
     return sale
@@ -404,7 +468,7 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Dos caminos. En el Buscador, en cada resultado, «📦 Pedir al depósito / 🛒 presupuesto» lo "
      "suma al «🛒 Presupuesto en armado» de arriba. O pegá todos los códigos que pidió el "
      "cliente en la Lista WhatsApp: arma el mensaje con las marcas y los precios, y el PDF.",
-     "📋 Lista WhatsApp", ""),
+     "📋 Lista WhatsApp", "empleado"),
     # ---- devoluciones ----
     ("devolucion_cliente", "Devolver algo que trajo un cliente",
      "devolucion devolver devuelve cliente trajo cambio cambiar garantia reintegro plata "
@@ -476,6 +540,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "lo relaciona con otro, en Vincular manual está «🔎 ¿Por qué estos dos códigos no se "
      "relacionan?».",
      "🔎 Búsquedas sin resultado", ""),
+    ("no_esta", "No encuentro el repuesto que busco",
+     "no aparece encuentro encuentra existe sale codigo falta sin resultado nada",
+     "Probá el código sin puntos ni espacios, o escribí qué es —«filtro aceite gol»— y busca "
+     "por la descripción. Si tenés la pieza en la mano, por sus medidas. Y si no aparece, "
+     "consultalo en el mostrador: puede que todavía no esté cargado.",
+     "🔍 Buscador", ""),
     ("medidas", "Buscar un repuesto por sus medidas",
      "medidas medida diametro largo alto rosca milimetros mm sin codigo medir",
      "En el Buscador, abajo, abrí «📐 Buscar por medidas mecánicas (cuando no hay código ni "
@@ -560,7 +630,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "«Gestionar un empleado existente», elige a la persona y le pone una nueva.",
      "👥 Usuarios", "admin"),
     ("entrar", "Entrar con mi usuario, o salir",
-     "entrar ingresar login iniciar sesion loguear salir cerrar desloguear usuario",
+     "entrar ingresar login iniciar sesion loguear salir cerrar desloguear usuario taller "
+     "cuenta portal numero",
      "Arriba a la derecha, «🔑 Ingresar»: tu usuario y tu contraseña (un taller, su número de "
      "cuenta). Para salir, tocá tu nombre («👤») y «Salir». La sesión se cierra sola después "
      "de unas horas sin uso.",
@@ -685,10 +756,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Pasa torque, presión y medidas de un sistema al otro.",
      "🧮 Conversor de unidades", ""),
     # ---- mensajes ----
-    ("whatsapp", "Mandar una cotización por WhatsApp",
-     "whatsapp wasap mandar enviar mensaje cotizacion cliente lista pdf",
-     "Pegá los códigos que pidió el cliente, o sumalos desde el Buscador con «📋 Agregar a "
-     "lista de WhatsApp». Arma el mensaje con las marcas y los precios, o el PDF.",
+    ("whatsapp", "Armar una lista de repuestos y mandarla por WhatsApp",
+     "whatsapp wasap mandar enviar mensaje cotizacion cotizar presupuesto pedir pedido lista "
+     "pdf varios codigos",
+     "Pegá los códigos —uno por renglón o separados por coma— y tocá «➕ Agregar todos a la "
+     "lista». Se arma el mensaje con las equivalencias y los precios de cada marca, para "
+     "mandar por WhatsApp o bajar como PDF.",
      "📋 Lista WhatsApp", ""),
     ("alias", "Cambiar el alias de cobro o el texto del mensaje",
      "alias cbu transferencia qr texto mensaje whatsapp saludo firma cobro datos",
@@ -700,6 +773,10 @@ COMO_HAGO_DEL_ASISTENTE = (
      "F1 me abre y me minimiza; F2 va a la caja de búsqueda de la pantalla; F9 termina la "
      "venta o la manda a la caja; en la caja, F10 cobra y F11 pone a cuenta. En la "
      "computadora, el click derecho sobre un producto abre sus botones.",
+     None, "empleado"),
+    ("teclas_de_todos", "Las teclas que sirven sin entrar",
+     "teclas atajos teclado f1 f2 rapido",
+     "F1 me abre y me minimiza, y F2 va a la caja de búsqueda de la pantalla.",
      None, ""),
     ("vista", "Cambiar entre la vista de celular y la de computadora",
      "vista celular computadora telefono pantalla chica grande modo se ve mal",
@@ -715,10 +792,15 @@ COMO_HAGO_DEL_ASISTENTE = (
      "lenta lento tarda demora cuelga colgo colgada error falla fallo anda funciona rompio "
      "trabo traba cargando problema bug blanco internet conexion corto cayo wifi senal",
      "Si una pantalla tarda, esperá a que termine la barrita de arriba antes de tocar de "
-     "nuevo. Si sale un cartel de error con un código, pasáselo al administrador: con ese "
-     "código se encuentra qué pasó. Y si se recargó la página, la venta o el presupuesto que "
-     "estabas armando quedan guardados: te avisa dónde recuperarlos.",
+     "nuevo. Si sale un cartel de error con un código, pasáselo a la gente del negocio: con "
+     "ese código se encuentra qué pasó.",
      None, ""),
+    ("recuperar", "Se recargó la página y perdí lo que estaba armando",
+     "recargo recarga refresco actualizo f5 perdi perdio borro venta armando presupuesto "
+     "recuperar medio",
+     "No se pierde. La venta a medio armar queda guardada: al volver a Ventas aparece con "
+     "«↩️ Recuperarla». Y el presupuesto, en el Buscador, con «↩️ Recuperarlo».",
+     "🧾 Ventas", ""),
     ("fotos", "Ponerle fotos a los productos",
      "fotos foto imagen imagenes productos cargar bajar subir",
      "Las fotos se bajan solas de los catálogos, y a mano se le pone una a cada producto en "
@@ -891,16 +973,28 @@ def fichas_del_asistente():
     # caja», en el del arqueo) llega con ella abierta. El primero y no cualquiera: el de crear
     # una cuenta nombra al final «Cargar muchas cuentas», y no es a eso a lo que se va.
     se_abren = {(destino["pagina"], _asis_titulo_limpio(texto)): abrir
-                for que, texto, destino, _seccion, abrir in cosecha
+                for que, texto, destino, _seccion, abrir, _quien in cosecha
                 if abrir and _asis_titulo_limpio(texto)}
+    # Y las que una pantalla abierta le muestra solo al personal: {(pantalla, título): quién}.
+    # Un «cómo hago» que nombra una («🎙️ Buscar por voz») es de ese mismo personal: al
+    # invitado no se le explica algo que en su pantalla no está.
+    del_personal = {(destino["pagina"], _asis_titulo_limpio(texto)): quien
+                    for que, texto, destino, _seccion, _abrir, quien in cosecha
+                    if quien and que != "ayuda" and _asis_titulo_limpio(texto)}
     for ficha in fichas:
         if ficha["tipo"] == "como" and ficha["destino"]:
-            primero = (re.findall(r"«([^»]+)»", ficha["texto"]) or [""])[0]
-            clave = se_abren.get((ficha["destino"]["pagina"], _asis_titulo_limpio(primero)))
+            nombrados = re.findall(r"«([^»]+)»", ficha["texto"])
+            clave = se_abren.get((ficha["destino"]["pagina"],
+                                  _asis_titulo_limpio((nombrados or [""])[0])))
             if clave:
                 ficha["destino"] = {**ficha["destino"], "abrir": clave}
+            for nombrado in nombrados:
+                quien = del_personal.get((ficha["destino"]["pagina"],
+                                          _asis_titulo_limpio(nombrado)))
+                if quien and ficha["quien"] != "admin":
+                    ficha["quien"] = quien
     vistas = {ficha["titulo"] for ficha in fichas}
-    for que, texto, destino, seccion, abrir in cosecha:
+    for que, texto, destino, seccion, abrir, quien in cosecha:
         if que in ("seccion", "titulo"):
             titulo = _asis_titulo_limpio(texto)
             if not titulo or titulo in vistas:
@@ -910,7 +1004,7 @@ def fichas_del_asistente():
                 f"seccion:{titulo}", "seccion", titulo, "",
                 "Es una sección de esa pantalla: se abre tocando su título."
                 if que == "seccion" else "Está en esa pantalla, con ese título.",
-                {**destino, "seccion": titulo, **({"abrir": abrir} if abrir else {})}))
+                {**destino, "seccion": titulo, **({"abrir": abrir} if abrir else {})}, quien))
         else:
             entero = _asis_frases_enteras(texto)
             if len(entero) < 60:
@@ -921,7 +1015,8 @@ def fichas_del_asistente():
             if titulo in vistas:
                 titulo += " (sigue)"
             vistas.add(titulo)
-            fichas.append(_asis_ficha(f"ayuda:{len(fichas)}", "ayuda", titulo, "", entero, donde))
+            fichas.append(_asis_ficha(f"ayuda:{len(fichas)}", "ayuda", titulo, "", entero, donde,
+                                      quien))
     # Cuánto pesa cada palabra: las que están en pocas fichas dicen más.
     en_cuantas = collections.Counter()
     for ficha in fichas:
@@ -1105,6 +1200,9 @@ _ASIS_GRACIAS = re.compile(r"^(muchas |mil )?(gracias+|genial|perfecto|buenisimo
                            r"barbaro|dale gracias|ok gracias)\b")
 _ASIS_SI = re.compile(r"^(si|sip|dale|ok|oka|okey|bueno|de una|hacelo|llevame|llevame ahi|ir|"
                       r"vamos|ahi|eso|ese|esa|andá|anda|por favor)$")
+_ASIS_VOLVER = re.compile(r"^(volver|volve|volveme|volvamos|atras|para atras|regresar|"
+                          r"regresa|donde estaba|a donde estaba|volver atras|volver a donde "
+                          r"estaba)$")
 _ASIS_QUE_SOS = re.compile(r"\b(quien sos|que sos|quien eres|que eres|como te llamas|sos un "
                            r"robot|sos una persona|sos humano|sos ia|sos una ia)\b")
 _ASIS_QUE_HACES = re.compile(r"^(ayuda|ayudame|help|que podes hacer|que sabes hacer|que haces|"
@@ -1164,20 +1262,30 @@ def _asis_respuesta_de(ficha, contexto):
             "ficha": ficha["nombre"]}
 
 
-def _asis_no_se_puede(ficha, contexto):
-    """Para quien no ve esa pantalla: que existe y cómo se llega, sin los pasos."""
-    if contexto.get("nivel") == "invitado":
-        texto = ("🔒 Eso es para el personal del negocio. Entrá con tu usuario y tu contraseña "
-                 "—«🔑 Ingresar», arriba— y te llevo.")
-    else:
-        texto = ("🔒 Con tu usuario no tenés esa pantalla: ves "
-                 + ", ".join(contexto.get("visibles") or ["lo abierto"])
-                 + ". Eso lo hace otra persona del negocio.")
-    return {"texto": texto, "botones": [], "ir": None, "buscar": None, "ficha": None}
-
-
 def _asis_simple(texto, botones=()):
     return {"texto": texto, "botones": list(botones), "ir": None, "buscar": None, "ficha": None}
+
+
+def _asis_lo_abierto(contexto):
+    """Las pantallas de quien pregunta, en una frase: «🔍 Buscador, 📋 Lista WhatsApp y 🛠️ Modo
+    Mecánico»."""
+    visibles = list(contexto.get("visibles") or [])
+    if len(visibles) < 2:
+        return "".join(visibles) or "lo que está abierto"
+    return ", ".join(visibles[:-1]) + " y " + visibles[-1]
+
+
+def _asis_no_se_puede(ficha, contexto):
+    """Para quien no ve esa pantalla: con qué SÍ se lo puede ayudar, sin los pasos de lo otro
+    ni el nombre de la pantalla. Al invitado, además, ejemplos de lo suyo para tocar."""
+    if contexto.get("nivel") == "invitado":
+        return _asis_simple(
+            f"🔒 Sin entrar te ayudo con **{_asis_lo_abierto(contexto)}**. Lo demás es del "
+            "personal del negocio: si sos del negocio, entrá con tu usuario y tu contraseña "
+            "(«🔑 Ingresar», arriba).",
+            [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)[:3]])
+    return _asis_simple(f"🔒 Con tu usuario no tenés esa pantalla: ves "
+                        f"{_asis_lo_abierto(contexto)}. Eso lo hace otra persona del negocio.")
 
 
 def ejemplos_del_asistente(contexto):
@@ -1195,12 +1303,14 @@ def responder_del_asistente(pregunta, contexto):
 
     `contexto`: {"visibles": las pantallas que quien pregunta tiene en la barra, "pagina": en
     cuál está, "nivel": "invitado" | "operador" | "admin", "ultima": el nombre de la ficha de la
-    respuesta anterior}."""
+    respuesta anterior, "volver": la pantalla de la que lo sacó la última vez}."""
     visibles = list(contexto.get("visibles") or [])
     contexto = {**contexto, "visibles": visibles}
     escrito = limpiar_lo_escrito(pregunta)
     if not escrito:
         return _asis_simple("Escribime qué querés hacer o a dónde querés ir.")
+    if not _sin_emoji(escrito):          # «?», «…», un emoji solo
+        escrito = "ayuda"
     no = lo_que_no_se_le_saca(escrito)
     if no:
         botones = []
@@ -1218,30 +1328,55 @@ def responder_del_asistente(pregunta, contexto):
         if ficha and ficha["destino"] and _asis_se_puede(ficha, contexto):
             return {**_asis_simple(f"Te llevo a {camino_del_asistente(ficha['destino'])}."),
                     "ir": ficha["nombre"]}
+    # Al invitado se le habla de lo suyo: los ejemplos no nombran la caja ni las cuentas.
+    invitado = contexto.get("nivel") == "invitado"
+    # «volver»: a la pantalla de la que lo sacó.
+    if _ASIS_VOLVER.match(llano):
+        anterior = indice["por_nombre"].get(f"pantalla:{contexto.get('volver')}")
+        if anterior and _asis_se_puede(anterior, contexto):
+            return {**_asis_simple(f"Volvemos a {anterior['titulo']}."),
+                    "ir": anterior["nombre"]}
+        return _asis_simple("Todavía no te llevé a ningún lado. Decime a dónde querés ir.")
     if _ASIS_SALUDO.match(llano) and len(llano.split()) <= 4:
         return _asis_simple(
-            "¡Hola! 👋 Decime qué querés hacer —«cobrar una venta», «dónde cargo una lista»— o "
-            "a dónde querés ir, y te explico o te llevo.",
+            ("¡Hola! 👋 Te ayudo a buscar un repuesto y lo que sirve en su lugar, a armar la "
+             "lista para pedir por WhatsApp o a identificar un auto. Decime qué necesitás."
+             if invitado else
+             "¡Hola! 👋 Decime qué querés hacer —«cobrar una venta», «dónde cargo una lista»— o "
+             "a dónde querés ir, y te explico o te llevo."),
             [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)])
     if _ASIS_GRACIAS.match(llano):
         return _asis_simple("¡De nada! Acá estoy cuando me necesites. 🙌")
     if _ASIS_QUE_SOS.search(llano):
         return _asis_simple(
-            "🤖 Soy el asistente de la app. Conozco todas las pantallas y cómo se hace cada "
-            "cosa, y te llevo a donde me pidas. No veo los datos del negocio ni las "
-            "contraseñas: solo sé dónde está cada cosa.")
+            (f"🤖 Soy el asistente de la app. Sin entrar te ayudo con {_asis_lo_abierto(contexto)}: "
+             "te explico cómo se usan, te llevo y te busco un repuesto. No veo datos ni "
+             "contraseñas."
+             if invitado else
+             "🤖 Soy el asistente de la app. Conozco todas las pantallas y cómo se hace cada "
+             "cosa, y te llevo a donde me pidas. No veo los datos del negocio ni las "
+             "contraseñas: solo sé dónde está cada cosa."))
     if _ASIS_QUE_HACES.match(llano):
         return _asis_simple(
-            "Me podés pedir tres cosas:\n\n"
-            "- **Que te lleve**: «llevame a la caja», «abrí cuentas corrientes».\n"
-            "- **Que te explique**: «¿cómo hago una devolución?», «¿dónde cambio un precio?».\n"
-            "- **Que busque un repuesto**: «buscar W712/75».\n\n"
-            "Escribí como te salga: entiendo sin acentos y con errores.",
+            (f"Sin entrar te ayudo con **{_asis_lo_abierto(contexto)}**:\n\n"
+             "- **Buscar un repuesto**: «buscar W712/75», o el código solo.\n"
+             "- **Explicarte**: «¿qué bujía le va?», «¿cómo busco por medidas?».\n"
+             "- **Llevarte**: «llevame al modo mecánico», «códigos de falla».\n\n"
+             "Escribí como te salga: entiendo sin acentos y con errores."
+             if invitado else
+             "Me podés pedir tres cosas:\n\n"
+             "- **Que te lleve**: «llevame a la caja», «abrí cuentas corrientes».\n"
+             "- **Que te explique**: «¿cómo hago una devolución?», «¿dónde cambio un precio?».\n"
+             "- **Que busque un repuesto**: «buscar W712/75».\n\n"
+             "Después de llevarte, «volver» te trae de nuevo. Escribí como te salga: entiendo "
+             "sin acentos y con errores."),
             [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)])
 
     # «¿qué hay de nuevo?»: lo último de LO_NUEVO, para quien entró (cuenta cómo se trabaja
     # adentro: al invitado, no).
-    if _ASIS_NOVEDADES.search(llano) and contexto.get("nivel") != "invitado" and visibles:
+    if _ASIS_NOVEDADES.search(llano) and visibles:
+        if contexto.get("nivel") == "invitado":
+            return _asis_no_se_puede(None, contexto)
         return _asis_simple("**Lo último que se sumó:**\n\n" + "\n".join(
             f"- {_asis_escapar(texto)} *({donde})*" for texto, donde in LO_NUEVO[:4]))
     # «¿qué puedo hacer acá?»: la pantalla en la que está.
@@ -1252,7 +1387,7 @@ def responder_del_asistente(pregunta, contexto):
         if solapas:
             texto += "\n\nTiene estas solapas: " + ", ".join(solapas[0]) + "."
         aca = [f for f in indice["fichas"] if f["tipo"] == "como" and f["destino"]
-               and f["destino"]["pagina"] == pagina][:4]
+               and f["destino"]["pagina"] == pagina and _asis_se_puede(f, contexto)][:4]
         return _asis_simple(texto, [(f["titulo"], "ver", f["nombre"]) for f in aca])
 
     # «buscar W712/75», o un código solo. Lo buscado va como se escribió (con sus mayúsculas,
@@ -1319,16 +1454,17 @@ def responder_del_asistente(pregunta, contexto):
                                "buscar", _asis_para_buscar(escrito)))
         return _asis_simple(
             "No encontré nada con esas palabras. Probá decirlo de otra forma, con una o dos "
-            "palabras —«devolución», «lista de precios», «backup»—, o mirá estos ejemplos.",
-            botones)
+            "palabras —" + ("«bujía», «medidas», «patente»" if invitado
+                           else "«devolución», «lista de precios», «backup»")
+            + "—, o mirá estos ejemplos.", botones)
 
     acierto, primera = mejores[0]
     if not _asis_se_puede(primera, contexto):
-        # ¿Hay otra, casi tan buena, que sí pueda ver?
-        otra = next(((a, f) for a, f in mejores[1:5]
-                     if _asis_se_puede(f, contexto) and a >= max(ASISTENTE_SEGURO,
-                                                                 acierto * 0.85)), None)
-        if not otra:
+        # Si entre lo suyo hay una respuesta casi tan buena, es esa: «un presupuesto», para el
+        # invitado, es la lista de WhatsApp. Casi tan buena y no cualquiera: a «cómo creo un
+        # usuario» no se le contesta cómo se entra. Si no la hay, con qué sí se lo ayuda.
+        otra = next(((a, f) for a, f in mejores if _asis_se_puede(f, contexto)), None)
+        if not otra or otra[0] < max(ASISTENTE_SEGURO, acierto * 0.7):
             return _asis_no_se_puede(primera, contexto)
         acierto, primera = otra
     # Las otras que podrían ser: van como botones. Una ayuda del mismo lugar no suma nada.
@@ -1375,7 +1511,8 @@ def _asis_contexto():
     charla = st.session_state.get("_asis_charla") or []
     return {"visibles": visibles, "pagina": st.session_state.get("pagina_actual"),
             "nivel": ("admin" if es_admin() else "invitado" if solo_mirar() else "operador"),
-            "ultima": charla[-1]["r"].get("ficha") if charla else None}
+            "ultima": charla[-1]["r"].get("ficha") if charla else None,
+            "volver": st.session_state.get("_asis_volver")}
 
 
 def llevar_con_el_asistente(nombre_de_la_ficha):
@@ -1390,6 +1527,8 @@ def llevar_con_el_asistente(nombre_de_la_ficha):
     if destino["pagina"] not in _asis_contexto()["visibles"]:
         return None
     camino = camino_del_asistente({k: v for k, v in destino.items() if k != "seccion"})
+    if st.session_state.get("pagina_actual") != destino["pagina"]:
+        st.session_state["_asis_volver"] = st.session_state.get("pagina_actual")
     ir_a_donde_dice_el_aviso(camino)
     st.session_state["pagina_actual"] = destino["pagina"]
     if str(destino.get("abrir") or "").startswith("exp_"):

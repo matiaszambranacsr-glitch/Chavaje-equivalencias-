@@ -78,6 +78,7 @@ ENTIENDE = (
     ("mandar cotizacion por wasap", "como:whatsapp"),
     ("atajos de teclado", "como:teclas"),
     ("la app anda lenta", "como:problema"),
+    ("se recargo la pagina y perdi la venta", "como:recuperar"),
     ("se corto internet", "como:problema"),
     ("codigo de retiro", "como:codigo_retiro"),
     ("tasa del bcra", "como:limite"),
@@ -290,6 +291,15 @@ def probar(L):
            responder("que hay de nuevo", empleado)["texto"].startswith("**Lo último"))
     cierto("al invitado, no",
            not responder("que hay de nuevo", invitado)["texto"].startswith("**Lo último"))
+    esperar("al invitado, las teclas de la caja no: las suyas",
+            responder("atajos de la caja", invitado)["ficha"], "como:teclas_de_todos")
+    # «volver»: a la pantalla de la que lo sacó; sin haber ido a ningún lado, lo dice.
+    esperar("«volver» lleva a donde estaba",
+            responder("volver", {**empleado, "volver": "🧾 Ventas"})["ir"], "pantalla:🧾 Ventas")
+    esperar("«volver» sin haber ido a ningún lado", responder("volver", empleado)["ir"], None)
+    esperar("«volver» a una pantalla que ya no ve, no",
+            responder("volver", {**invitado, "volver": "💵 Caja"})["ir"], None)
+    cierto("«?» es pedir ayuda", "Me podés pedir" in responder("?", empleado)["texto"])
     # Dónde está parado.
     r = responder("que puedo hacer aca", empleado)
     cierto("«qué puedo hacer acá» habla de la pantalla en la que está",
@@ -307,25 +317,81 @@ def probar(L):
     por_pregunta = (time.perf_counter() - antes) / len(ENTIENDE)
     cierto("contesta en milisegundos", por_pregunta < 0.05, f"{por_pregunta * 1000:.1f} ms")
 
-    # 3. A CADA UNO, LO SUYO. El invitado: nada del personal, ni los pasos.
-    for pregunta in ("como cobro una venta", "llevame a la caja", "hacer un backup",
-                     "como creo un usuario", "cuanto me debe un cliente", "caja",
-                     "ir a usuarios", "como pido algo al deposito"):
-        r = responder(pregunta, invitado)
-        esperar(f"invitado, «{pregunta}»: no lleva, no explica", (r["ir"], r["ficha"], r["botones"]),
-                (None, None, []))
-        cierto(f"invitado, «{pregunta}»: le dice que entre", "🔑 Ingresar" in r["texto"],
-               r["texto"][:50])
-        cierto(f"invitado, «{pregunta}»: sin los pasos", "«💳" not in r["texto"]
-               and "➕" not in r["texto"] and "Administrar" not in r["texto"], r["texto"])
-    r = responder("buscar W712/75", invitado)
-    esperar("el invitado sí puede buscar un repuesto", r["buscar"], "W712/75")
-    esperar("y preguntar por lo abierto", responder("que bujia le va", invitado)["ficha"],
-            "como:bujia")
-    for ejemplo in ns["ejemplos_del_asistente"](invitado):
+    # 3. A CADA UNO, LO SUYO. EL INVITADO TIENE ASISTENTE, PERO SOLO PARA LO QUE VE SIN
+    # CONTRASEÑA (lo pidió el dueño): el Buscador, la lista de WhatsApp y el Modo Mecánico.
+    # De lo demás, ni los pasos, ni los botones, ni el nombre de la pantalla: con qué sí lo
+    # ayuda, y ejemplos de lo suyo.
+    ejemplos_del_invitado = ns["ejemplos_del_asistente"](invitado)
+    cierto("el invitado tiene ejemplos", len(ejemplos_del_invitado) >= 3, ejemplos_del_invitado)
+    for ejemplo in ejemplos_del_invitado:
         ficha = next(f for f in indice["fichas"] if f["titulo"] == ejemplo)
         cierto(f"el ejemplo «{ejemplo}» es de lo que el invitado ve",
                ficha["destino"]["pagina"] in abiertas and not ficha["quien"])
+        esperar(f"y tocar el ejemplo «{ejemplo}» le contesta eso",
+                responder(ejemplo, invitado)["ficha"], ficha["nombre"])
+    for pregunta in ("como cobro una venta", "llevame a la caja", "hacer un backup",
+                     "como creo un usuario", "cuanto me debe un cliente", "caja",
+                     "ir a usuarios", "como pido algo al deposito", "buscar por voz",
+                     "reconocer una pieza con una foto", "favoritos", "que hay de nuevo",
+                     "cargar muchas cuentas", "papelera"):
+        r = responder(pregunta, invitado)
+        esperar(f"invitado, «{pregunta}»: no lleva, no explica", (r["ir"], r["buscar"], r["ficha"]),
+                (None, None, None))
+        cierto(f"invitado, «{pregunta}»: le dice con qué sí, y que entre si es del negocio",
+               all(p in r["texto"] for p in abiertas) and "🔑 Ingresar" in r["texto"],
+               r["texto"][:60])
+        esperar(f"invitado, «{pregunta}»: los botones son ejemplos de lo suyo",
+                [b for b in r["botones"] if b[1] != "preguntar"
+                 or b[2] not in ejemplos_del_invitado], [])
+    # Lo suyo, sí: buscar, preguntar, que lo lleven, y hasta «un presupuesto», que para él es la
+    # lista de WhatsApp (la respuesta del personal no compite).
+    r = responder("buscar W712/75", invitado)
+    esperar("el invitado sí puede buscar un repuesto", r["buscar"], "W712/75")
+    for pregunta, ficha in (("que bujia le va", "como:bujia"),
+                            ("no encuentro un repuesto", "como:no_esta"),
+                            ("quiero un presupuesto", "como:whatsapp"),
+                            ("mandar una lista por wasap", "como:whatsapp"),
+                            ("codigo de falla del escaner", "como:dtc"),
+                            ("que auto es por la patente", "como:patente"),
+                            ("buscar por medidas", "como:medidas"),
+                            ("teclas", "como:teclas_de_todos"),
+                            ("como entro a mi cuenta de taller", "como:entrar")):
+        esperar(f"invitado, «{pregunta}»", responder(pregunta, invitado)["ficha"], ficha)
+    esperar("y lo lleva a lo abierto", responder("llevame al modo mecanico", invitado)["ir"],
+            "pantalla:🛠️ Modo Mecánico")
+    esperar("al empleado «no me aparece un código» le sigue contestando lo del negocio",
+            responder("no me aparece un codigo", empleado)["ficha"], "como:no_encuentro")
+    esperar("y las teclas, todas", responder("teclas", empleado)["ficha"], "como:teclas")
+    # Le habla de lo suyo: el saludo, «qué podés hacer», «quién sos», «acá» y lo que no
+    # entiende no nombran una sola pantalla del personal, ni un botón de adentro.
+    ocultas = [re.sub(r"^\W+", "", p) for p in ns["PAGINAS"] if p not in abiertas]
+    de_adentro = ocultas + ["cuentas corrientes", "devolución", "lista de precios", "backup",
+                            "cobrar", "«💳", "«📒", "➕ Crear", "arqueo", "Usuarios"]
+    todo_lo_que_pregunta = ([p for p, _ in ENTIENDE + LLEVA + BUSCA + NO_SE_DEJA]
+                            + ["hola", "que podes hacer", "quien sos", "que puedo hacer aca",
+                               "?", "ayuda", "asdfgh qwerty", "si", "volver", "gracias",
+                               "que hay de nuevo", "novedades"])
+    for pregunta in todo_lo_que_pregunta:
+        r = responder(pregunta, invitado)
+        ficha = por_nombre.get(r["ficha"] or r["ir"] or "")
+        cierto(f"invitado, «{pregunta}»: contesta con una ficha que puede ver",
+               ficha is None or (not ficha["quien"] and (
+                   not ficha["destino"] or ficha["destino"]["pagina"] in abiertas)),
+               ficha and ficha["nombre"])
+        for boton in r["botones"]:
+            de_boton = por_nombre.get(boton[2]) if boton[1] in ("ir", "ver") else None
+            cierto(f"invitado, «{pregunta}»: el botón «{boton[0]}» es de lo suyo",
+                   boton[1] in ("buscar", "preguntar") or (
+                       de_boton and not de_boton["quien"] and (
+                           not de_boton["destino"]
+                           or de_boton["destino"]["pagina"] in abiertas)), boton)
+        # Las ayudas que la app ya le muestra al invitado en su pantalla dicen lo que dicen;
+        # lo que escribe el asistente por su cuenta no nombra lo de adentro.
+        if not (ficha and ficha["tipo"] == "ayuda"):
+            textos = r["texto"] + " " + " ".join(b[0] for b in r["botones"])
+            nombradas = [x for x in de_adentro if re.search(
+                rf"(?<![a-záéíóúñ]){re.escape(x)}(?![a-záéíóúñ])", textos)]
+            esperar(f"invitado, «{pregunta}»: no nombra lo de adentro", nombradas, [])
     # El del depósito: lo del depósito sí, lo demás no.
     esperar("el del depósito: entregar", responder("entregar un pedido", deposito)["ficha"],
             "como:entregar")
@@ -485,6 +551,8 @@ def probar(L):
         esperar("al arqueo: la caja, con el cierre abierto",
                 (st.session_state.get("pagina_actual"),
                  st.session_state.get("exp_ventas_cierre_caja_hoy")), ("💵 Caja", True))
+        esperar("y se acuerda de dónde lo sacó", st.session_state.get("_asis_volver"),
+                "🗂️ Administrar")
         esperar("una ficha que no existe no lleva", llevar("pantalla:💣 Inventada"), None)
         esperar("ni un texto cualquiera", llevar("'; DROP TABLE x; --"), None)
         esperar("una ficha sin lugar (las teclas) no lleva", llevar("como:teclas"), None)
@@ -571,6 +639,37 @@ def probar(L):
                 (at.session_state["pagina_actual"], at.text_input(key="busqueda_input").value),
                 ("🔍 Buscador", "W712/75"))
         cierto("y se minimizó", boton(at, "asis_abrir") is not None)
+        preguntar_de_nuevo = boton(at, "asis_abrir")
+        preguntar_de_nuevo.click().run()
+        preguntar(at, "como cobro una venta")
+        cierto("al invitado, de lo del personal: con qué sí lo ayuda",
+               any("Sin entrar te ayudo con" in m.value for m in at.markdown))
+        cierto("y ejemplos de lo suyo para tocar",
+               [b.label for b in at.button if b.key and b.key.startswith("asis_boton_")]
+               == ns["ejemplos_del_asistente"](invitado)[:3])
+        # LO QUE LE OFRECE AL INVITADO ESTÁ EN SU PANTALLA. Se dibuja cada pantalla abierta (y
+        # cada solapa) para un invitado, y cada sección que el asistente le ofrecería ahí tiene
+        # que estar dibujada: si mañana una se esconde con una condición que la lectura del
+        # código no entiende, esto lo dice. (Al revés —se ve y no la ofrece— no es una falla.)
+        se_puede = ns["_asis_se_puede"]
+        for pagina in abiertas:
+            solapas, clave = ns["SOLAPAS_DE_LA_PAGINA"].get(pagina, ([None], None))
+            for solapa in solapas:
+                at = app()
+                at.session_state["pagina_actual"] = pagina
+                if solapa:
+                    at.session_state[clave] = solapa
+                at.run()
+                cierto(f"{pagina} / {solapa}: se dibuja para el invitado", not at.exception,
+                       at.exception)
+                dibujado = [e.label for e in at.expander] + [x.value for x in at.subheader]
+                for ficha in indice["fichas"]:
+                    destino = ficha["destino"]
+                    if (ficha["tipo"] == "seccion" and destino["pagina"] == pagina
+                            and destino.get("solapa") == solapa and se_puede(ficha, invitado)):
+                        cierto(f"le ofrece «{destino['seccion']}» y el invitado no la ve en "
+                               f"{pagina} / {solapa}",
+                               any(d.startswith(destino["seccion"]) for d in dibujado))
         # Con sesión: explica, lleva con el botón, y lleva directo si se lo piden.
         at = app()
         at.session_state["nivel_usuario"], at.session_state["admin_nombre"] = "admin", "duenio"

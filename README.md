@@ -7106,7 +7106,8 @@ desde `app.py`, abajo a la izquierda, en todas las pantallas.
 **Qué hace.** Tres cosas: explica cómo se hace algo («¿cómo hago una devolución?»), lleva a
 la pantalla («llevame a la caja», o el nombre solo: «caja», «para pedir»), y busca un repuesto
 («buscar W712/75», o el código solo; una patente o un código de falla del escáner los reconoce
-y ofrece lo suyo). También «¿qué puedo hacer acá?» y «¿qué hay de nuevo?». Se abre con la
+y ofrece lo suyo). También «¿qué puedo hacer acá?», «¿qué hay de nuevo?» y, después de que te
+llevó, «volver». Se abre con la
 burbuja o con **F1**. Abierto es un panel con la caja para escribir arriba (en
 el celular, abajo la taparía el teclado); se minimiza con «➖» o F1, y solo al llevar a una
 pantalla, para que se vea a dónde llevó. Si a donde lleva hay una sección plegable («📋 Ventas
@@ -7129,8 +7130,22 @@ además hay que mandarle afuera lo que se le escribe. Este es un buscador de res
   momento de llevar: al que entra sin contraseña, tres; al del depósito, dos; al taller en su
   portal, ninguna (ni ve la burbuja). Si no se puede saber qué ve —la base ocupada—, no lleva.
   Y cada pantalla sigue pidiendo su contraseña: el asistente es un cartel, no una puerta.
-- **Al invitado no le cuenta cómo se trabaja adentro**: ni los pasos ni los nombres de los
-  botones del personal; le dice que entre.
+- **El invitado tiene asistente, pero solo para lo que ve sin contraseña** (lo pidió el dueño):
+  el Buscador, la lista de WhatsApp y el Modo Mecánico. De lo demás no le cuenta los pasos, ni
+  los botones, ni el nombre de la pantalla: le dice con qué sí lo ayuda, con ejemplos de lo suyo
+  para tocar, y que entre si es del negocio. Y le habla de lo suyo: el saludo y «qué podés
+  hacer» del invitado no nombran la caja ni las cuentas.
+  - **Tampoco le ofrece lo que esas tres pantallas le esconden.** «🎙️ Buscar por voz» o
+    «⭐ Favoritos» están en el Buscador, pero adentro de un `if es_empleado_o_abierto():` o un
+    `if not solo_mirar():`. La misma lectura del código que arma el mapa anota ese candado
+    (también el de una variable armada con una de esas preguntas, como `_parecido_aca`), y la
+    ficha queda del personal; un «cómo hago» que nombra una sección así hereda el candado.
+    Ante la duda, del personal.
+  - **Y se comprueba con la pantalla dibujada**: la prueba dibuja cada pantalla abierta y cada
+    solapa para un invitado, y cada sección que el asistente le ofrecería ahí tiene que estar
+    en lo dibujado. Si mañana una se esconde de una forma que la lectura no entiende, falla.
+  - Lo que no puede ver no compite: «un presupuesto», para el invitado, es la lista de
+    WhatsApp; a «cómo creo un usuario» no se le contesta cómo se entra.
 - **A quien pide una clave, saltear un candado o «cambiarle las instrucciones»** le contesta
   uno de tres textos fijos (`ASISTENTE_NO_SECRETOS`, `ASISTENTE_NO_SALTEA`,
   `ASISTENTE_NO_CAMBIA`), con el camino legítimo si lo hay («cómo se cambia una contraseña»).
@@ -7157,10 +7172,12 @@ app, y si uno cambia de nombre la prueba dice cuál.
 palabras con que se pregunta, los pasos, dónde, quién puede), y una línea en `ENTIENDE` de
 `pruebas/pruebas_del_asistente.py` con la pregunta como la haría alguien.
 
-**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 74 preguntas con su respuesta, 10
+**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 75 preguntas con su respuesta, 10
 pedidos de «llevame», 6 búsquedas, 21 intentos de sacarle algo (a un invitado, a un empleado y
-a un administrador), lo que ve cada uno, y la burbuja en la app simulada. Ocho errores puestos
-a propósito —llevar sin mirar si se puede, contarle todo al invitado, consultar la base, mostrar
+a un administrador), lo que ve cada uno, y la burbuja en la app simulada. Todas esas preguntas
+se le hacen además como invitado: ninguna respuesta ni botón sale de sus tres pantallas ni
+nombra una de adentro. Dieciséis errores puestos a propósito —llevar sin mirar si se puede,
+contarle todo al invitado, no mirar los candados de la pantalla, consultar la base, mostrar
 crudo lo escrito…— los detecta todos. Contesta en un milisegundo; minimizada no hace nada.
 En el navegador de verdad (PC y celular) se probó abrir con F1, preguntar, llevar con la
 sección abierta, el cartel de «te llevé a…» y que F2 siga yendo a la búsqueda.

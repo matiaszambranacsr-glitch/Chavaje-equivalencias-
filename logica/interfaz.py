@@ -491,12 +491,13 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-13b"
+VERSION_DE_LO_NUEVO = "2026-11-13c"
 LO_NUEVO = (
     ("🤖 Un asistente en todas las pantallas: preguntale cómo se hace algo («¿cómo hago una "
      "devolución?»), pedile que te lleve («llevame a la caja») o que busque un repuesto. "
      "Entiende sin acentos y con errores. No ve los datos ni las contraseñas, y lleva solo a "
-     "las pantallas que cada uno ya tiene. Se abre también con F1.",
+     "las pantallas que cada uno ya tiene: el que entra sin contraseña lo tiene para el "
+     "Buscador, la lista de WhatsApp y el Modo Mecánico, y nada más. Se abre también con F1.",
      "🤖 la burbuja de abajo a la izquierda"),
     ("🔥 Lo que más se busca en Mercado Libre en repuestos esta semana, contra tu catálogo: lo "
      "que no tenés va primero. Gratis, con la aplicación de Mercado Libre.",
