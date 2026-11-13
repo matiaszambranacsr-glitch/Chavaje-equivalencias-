@@ -1336,16 +1336,25 @@ def _hash_del_codigo(codigo, salt):
 
 def configuracion_de_cuenta(mecanico_id):
     """{limite, dias_de_plazo, pide_codigo, descuento, cobra_mora}. Sin configurar: sin
-    límite, 30 días, pide código, sin descuento y sin recargo por mora."""
-    c.execute("SELECT limite, dias_de_plazo, pide_codigo, descuento, cobra_mora "
-              "FROM cuentas_de_taller WHERE mecanico_id = ?", (mecanico_id,))
+    límite, 30 días, pide código, sin descuento y sin recargo por mora.
+
+    UNA CUENTA SIN PORTAL NO PIDE CÓDIGO DE RETIRO, diga lo que diga su configuración: el código
+    lo genera el taller en su portal, y sin contraseña no entra. Pidiéndoselo, a esa cuenta no
+    se le podía vender nunca (ver «CON MILES DE CUENTAS» en logica/base.py)."""
+    c.execute("""SELECT t.mecanico_id AS configurada, t.limite, t.dias_de_plazo, t.pide_codigo,
+                        t.descuento, t.cobra_mora,
+                        COALESCE(m.password_hash, '') <> '' AS con_portal
+                 FROM mecanicos m LEFT JOIN cuentas_de_taller t ON t.mecanico_id = m.id
+                 WHERE m.id = ?""", (mecanico_id,))
     f = c.fetchone()
-    return {"limite": float(f["limite"] or 0) if f else 0.0,
-            "dias_de_plazo": (int(f["dias_de_plazo"]) if f and f["dias_de_plazo"] is not None
-                              else 30),
-            "pide_codigo": bool(f["pide_codigo"]) if f else True,
-            "descuento": float(f["descuento"] or 0) if f else 0.0,
-            "cobra_mora": bool(f["cobra_mora"]) if f else False}
+    configurada = bool(f and f["configurada"] is not None)
+    return {"limite": float(f["limite"] or 0) if configurada else 0.0,
+            "dias_de_plazo": (int(f["dias_de_plazo"])
+                              if configurada and f["dias_de_plazo"] is not None else 30),
+            "pide_codigo": bool(f and f["con_portal"]
+                                and (f["pide_codigo"] if configurada else True)),
+            "descuento": float(f["descuento"] or 0) if configurada else 0.0,
+            "cobra_mora": bool(f["cobra_mora"]) if configurada else False}
 
 
 # El descuento más alto que se acepta. Un 100% es regalar, y un 1.000% escrito de más daría
@@ -1976,18 +1985,113 @@ def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None
 def resumen_de_cuentas():
     """Una fila por taller con movimientos o con la cuenta configurada, los que más deben
     vencido primero."""
-    c.execute("""SELECT id, nombre FROM mecanicos WHERE id IN (
-                    SELECT mecanico_id FROM movimientos_de_cuenta
-                    UNION SELECT mecanico_id FROM cuentas_de_taller)""")
+    # TODAS EN UNA CONSULTA. Antes se pedía el estado de cada cuenta por separado (tres
+    # consultas por cuenta): con diez talleres no se notaba; con dos mil eran seis mil consultas
+    # en cada toque de la pantalla. Las mismas cuentas que estado_de_cuenta(), cuenta por cuenta.
+    c.execute("""SELECT m.id, m.nombre, COALESCE(t.limite, 0) AS limite,
+                        COALESCE(SUM(CASE WHEN x.anulado = 0 THEN x.importe END), 0) AS saldo,
+                        COALESCE(SUM(CASE WHEN x.anulado = 0 AND x.importe > 0
+                                           AND x.vence >= date('now', '-3 hours')
+                                          THEN x.importe END), 0) AS a_vencer,
+                        COALESCE(SUM(CASE WHEN x.anulado = 0 AND x.medio = 'Cheque'
+                                           AND x.cheque_fecha > date('now', '-3 hours')
+                                          THEN -x.importe END), 0) AS cheques
+                 FROM mecanicos m
+                 LEFT JOIN cuentas_de_taller t ON t.mecanico_id = m.id
+                 LEFT JOIN movimientos_de_cuenta x ON x.mecanico_id = m.id
+                 WHERE t.mecanico_id IS NOT NULL OR x.id IS NOT NULL
+                 GROUP BY m.id""")
     salida = []
     for f in c.fetchall():
-        e = estado_de_cuenta(f["id"])
-        salida.append({"ID": f["id"], "Taller": f["nombre"], "Saldo": e["saldo"],
-                       "Vencido": e["vencido"], "Límite": e["limite"] or None,
-                       "Disponible": e["disponible"],
-                       "Cheques en cartera": e["cheques_en_cartera"] or None})
+        saldo, limite = float(f["saldo"]), float(f["limite"] or 0)
+        salida.append({"ID": f["id"], "Taller": f["nombre"], "Saldo": saldo,
+                       "Vencido": max(0.0, min(saldo, saldo - float(f["a_vencer"]))),
+                       "Límite": limite or None,
+                       "Disponible": (limite - saldo) if limite else None,
+                       "Cheques en cartera": float(f["cheques"]) or None})
     salida.sort(key=lambda x: (-x["Vencido"], -x["Saldo"]))
     return salida
+
+
+# De a cuántas cuentas se cargan de una vez como mucho: una lista más larga que esto es un
+# archivo equivocado.
+MAXIMO_DE_CUENTAS_DE_UNA_VEZ = 5000
+
+
+def crear_cuentas_de_una_vez(texto):
+    """MUCHAS CUENTAS, PEGADAS DE UNA PLANILLA (ver «CON MILES DE CUENTAS» en logica/base.py):
+    una por renglón, con las columnas separadas por tabulación (como salen al copiar de Excel)
+    o por punto y coma:
+
+        Nombre ; CUIT ; Límite ; Descuento % ; Días de plazo
+
+    Solo el nombre es obligatorio. Entran sin contraseña (sin portal): se les vende y se les
+    lleva la cuenta corriente; el portal se le da después a la que lo pida. Un nombre que ya
+    existe no se toca. Todo o nada si algo falla al guardar. Devuelve {"creadas": n,
+    "ya_estaban": [nombres], "con_problemas": [(renglón, qué)]}."""
+    exigir_nivel("admin", "crear cuentas de taller")
+
+    def numero(valor, defecto=0.0):
+        valor = str(valor or "").strip().replace("$", "").replace("%", "").replace(" ", "")
+        if not valor:
+            return defecto
+        if "," in valor:                      # 1.500.000,50
+            valor = valor.replace(".", "").replace(",", ".")
+        elif valor.count(".") > 1 or re.fullmatch(r"\d{1,3}(\.\d{3})+", valor):   # 1.500.000
+            valor = valor.replace(".", "")
+        return float(valor)
+
+    renglones = [r for r in str(texto or "").replace("\r", "").split("\n") if r.strip()]
+    if len(renglones) > MAXIMO_DE_CUENTAS_DE_UNA_VEZ:
+        raise ValueError(f"Son {miles(len(renglones))} renglones: de a "
+                         f"{miles(MAXIMO_DE_CUENTAS_DE_UNA_VEZ)} como mucho.")
+    c.execute("SELECT nombre FROM mecanicos")
+    existentes = {normalizar_texto(f[0]) for f in c.fetchall()}
+    nuevas, ya_estaban, con_problemas = [], [], []
+    for n, renglon in enumerate(renglones, 1):
+        partes = [p.strip() for p in re.split(r"\t|;", renglon)]
+        nombre = " ".join(partes[0].split())
+        if n == 1 and normalizar_texto(nombre) in ("NOMBRE", "CUENTA", "CLIENTE", "RAZON SOCIAL"):
+            continue                          # el renglón de los títulos
+        if not nombre:
+            con_problemas.append((n, "sin nombre"))
+            continue
+        if normalizar_texto(nombre) in existentes:
+            ya_estaban.append(nombre)
+            continue
+        partes += [""] * (5 - len(partes))
+        cuit = re.sub(r"\D", "", partes[1])
+        if cuit and not cuit_valido(cuit):
+            con_problemas.append((n, f"{nombre}: el CUIT {partes[1]} no cierra"))
+            continue
+        try:
+            limite, descuento = numero(partes[2]), numero(partes[3])
+            plazo = int(numero(partes[4], 30))
+        except ValueError:
+            con_problemas.append((n, f"{nombre}: el límite, el descuento o el plazo no es un número"))
+            continue
+        if limite < 0 or not 0 <= descuento <= DESCUENTO_MAXIMO or not 0 <= plazo <= 3650:
+            con_problemas.append((n, f"{nombre}: el límite, el descuento o el plazo está fuera "
+                                     "de lo que se acepta"))
+            continue
+        existentes.add(normalizar_texto(nombre))
+        nuevas.append((nombre, cuit, limite, descuento, plazo))
+    with db_lock, transaccion():
+        for nombre, cuit, limite, descuento, plazo in nuevas:
+            c.execute("INSERT INTO mecanicos (nombre, password_hash, salt) VALUES (?, '', '')",
+                      (nombre,))
+            cuenta = c.lastrowid
+            if limite or descuento or plazo != 30:
+                c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, limite, dias_de_plazo,
+                                                            pide_codigo, descuento)
+                             VALUES (?, ?, ?, 0, ?)""", (cuenta, limite, plazo, descuento))
+            if cuit:
+                c.execute("INSERT INTO configuracion (clave, valor) VALUES (?, ?) "
+                          "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                          (f"cuit_taller_{cuenta}", cuit))
+        if nuevas:
+            anotar_cambio("creó cuentas de una vez", "taller", "", despues={"cuentas": len(nuevas)})
+    return {"creadas": len(nuevas), "ya_estaban": ya_estaban, "con_problemas": con_problemas}
 
 
 def mostrar_portal_mecanico():

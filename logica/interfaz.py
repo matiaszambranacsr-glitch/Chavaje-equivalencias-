@@ -491,8 +491,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-08"
+VERSION_DE_LO_NUEVO = "2026-11-13"
 LO_NUEVO = (
+    ("🔎 Las cuentas se buscan: en «🧾 Atendiendo a», la caja y Cuentas corrientes escribís una "
+     "parte del nombre, el CUIT o el número y quedan unas pocas para tocar. Y para sumar miles: "
+     "una cuenta ya no necesita contraseña (solo si va a entrar al portal), y se cargan muchas "
+     "de una vez pegándolas de Excel.", "🗂️ Administrar → 👥 Usuarios"),
     ("🧾 Factura electrónica de ARCA, solo cuando la cajera la pide: «Con factura» al cobrar, o "
      "después desde el comprobante o el cierre; con nota de crédito para anularla (al devolver, "
      "por lo devuelto) y la planilla del mes para el contador. Falta el certificado de ARCA: "

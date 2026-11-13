@@ -103,9 +103,8 @@ if pagina == PAGINAS[11]:
             if not _cuentas:
                 st.warning(f"No hay cuentas: se crean en {miga_hasta('Usuarios')}.")
                 return
-            _mid = st.selectbox("Es de Mostrador: ¿a qué cuenta va?", list(_cuentas),
-                                format_func=_cuentas.get, index=None,
-                                placeholder="El taller o mayorista", key=f"cta_cual_{venta_id}")
+            _mid = elegir_cuenta(f"cta_{venta_id}", "Es de Mostrador: ¿a qué cuenta va?",
+                                 cuentas=list(_cuentas.items()))
             if not _mid:
                 return
         c.execute("SELECT nombre FROM mecanicos WHERE id = ?", (_mid,))

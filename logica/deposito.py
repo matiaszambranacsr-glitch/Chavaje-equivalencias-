@@ -770,6 +770,132 @@ def tiempos_del_deposito(dias=7):
 
 
 # ============================================================================================
+# ELEGIR UNA CUENTA ENTRE MILES
+# ============================================================================================
+# Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar
+# más de 2000 cuentas, sería una locura scrollear para encontrar cada una». La cuenta se elegía
+# de una lista desplegable con todas: con diez talleres alcanza; con dos mil, no.
+#   · Se escribe una parte del nombre —sin acentos, en cualquier orden, «gar taller» encuentra
+#     «Taller García»—, el CUIT o el número de la cuenta, y quedan unas pocas para tocar.
+#   · Sin escribir nada salen las últimas que atendió quien está en la pantalla: en el
+#     mostrador casi siempre es uno de los de siempre.
+#   · Con pocas cuentas (hasta CUENTAS_PARA_ELEGIR_SIN_BUSCAR) sigue la lista de antes: un
+#     toque menos.
+# Es una sola pieza (elegir_cuenta()) para todos los lugares donde se elige una: «🧾 Atendiendo
+# a», poner a cuenta en la caja, «👥 Cada cuenta», Cuentas corrientes y los talleres de Usuarios.
+CUENTAS_PARA_ELEGIR_SIN_BUSCAR = 12
+# Pocas a la vista: en el celular, con más, el botón de abajo quedaba fuera de la pantalla.
+CUENTAS_QUE_SE_MUESTRAN = 6
+
+
+def cuits_de_las_cuentas():
+    """{mecanico_id: CUIT} de las cuentas que lo tienen cargado (en su cuenta corriente, o de la
+    primera factura que se les hizo)."""
+    c.execute("SELECT clave, valor FROM configuracion WHERE clave LIKE 'cuit_taller_%'")
+    cuits = {}
+    for f in c.fetchall():
+        numero = f["clave"][len("cuit_taller_"):]
+        if numero.isdigit() and f["valor"]:
+            cuits[int(numero)] = re.sub(r"\D", "", str(f["valor"]))
+    return cuits
+
+
+def buscar_cuentas(texto, cuentas=None, tope=CUENTAS_QUE_SE_MUESTRAN):
+    """Las cuentas que calzan con lo escrito: ([(id, nombre)] las mejores primero, cuántas
+    calzan en total). Todas las palabras tienen que estar en el nombre, sin importar acentos,
+    mayúsculas ni el orden; un número busca también por CUIT y por número de cuenta. Primero la
+    que tiene ese número, después las que empiezan con lo escrito, las que tienen una palabra
+    que empieza así, y el resto; a igual puesto, por nombre."""
+    cuentas = cuentas_para_pedir() if cuentas is None else cuentas
+    palabras = normalizar_texto(texto).split()
+    if not palabras:
+        return [], 0
+    entero = normalizar_texto(texto)
+    numero = re.sub(r"[\s.\-]", "", str(texto or ""))
+    numero = numero.lstrip("#") if numero.lstrip("#").isdigit() else ""
+    cuits = cuits_de_las_cuentas() if numero else {}
+    encontradas = []
+    for cuenta_id, nombre in cuentas:
+        limpio = normalizar_texto(nombre)
+        por_nombre = all(p in limpio for p in palabras)
+        por_numero = bool(numero) and (str(cuenta_id) == numero
+                                       or (len(numero) >= 4 and numero in cuits.get(cuenta_id, "")))
+        if not (por_nombre or por_numero):
+            continue
+        puesto = (0 if numero and str(cuenta_id) == numero
+                  else 1 if limpio.startswith(entero)
+                  else 2 if all(any(w.startswith(p) for w in limpio.split()) for p in palabras)
+                  else 3)
+        encontradas.append((puesto, limpio, cuenta_id, nombre))
+    encontradas.sort()
+    return [(i, n) for _p, _l, i, n in encontradas[:tope]], len(encontradas)
+
+
+def cuentas_recientes(persona=None, tope=6):
+    """[(id, nombre)] de las últimas cuentas activas que atendió esa persona (quien está en la
+    pantalla, si no se dice): a las que les vendió o les pidió algo al depósito, la última
+    primero."""
+    persona = persona or obtener_usuario_actual()
+    c.execute("""SELECT m.id, m.nombre, MAX(x.cuando) AS ultima FROM (
+                     SELECT mecanico_id, fecha AS cuando FROM ventas
+                     WHERE usuario = ? AND mecanico_id IS NOT NULL AND anulada = 0
+                     UNION ALL
+                     SELECT mecanico_id, pedido_en FROM pedidos_deposito
+                     WHERE pedido_por = ? AND mecanico_id IS NOT NULL) x
+                 JOIN mecanicos m ON m.id = x.mecanico_id AND m.activo = 1
+                 GROUP BY m.id ORDER BY ultima DESC LIMIT ?""", (persona, persona, tope))
+    return [(f["id"], f["nombre"]) for f in c.fetchall()]
+
+
+def elegir_cuenta(clave, etiqueta="Cuenta:", cuentas=None, vacia="El taller o mayorista",
+                  elegida=None):
+    """El campo para elegir una cuenta: devuelve su id, o None si todavía no se eligió. Con
+    pocas, la lista de siempre; con muchas, el buscador (ver «ELEGIR UNA CUENTA ENTRE MILES»).
+    `cuentas`: [(id, nombre)] entre las que se elige (las activas, si no se dice). `elegida`: la
+    que arranca elegida donde siempre hay una a la vista (Cuentas corrientes)."""
+    cuentas = cuentas_para_pedir() if cuentas is None else cuentas
+    nombres = dict(cuentas)
+    if len(cuentas) <= CUENTAS_PARA_ELEGIR_SIN_BUSCAR:
+        ids = list(nombres)
+        return st.selectbox(etiqueta, ids, format_func=nombres.get,
+                            index=ids.index(elegida) if elegida in nombres else None,
+                            placeholder=vacia, key=f"cuenta_sel_{clave}")
+    texto = st.text_input(f"🔎 {etiqueta}", key=f"cuenta_buscar_{clave}",
+                          placeholder="Parte del nombre, CUIT o número de cuenta",
+                          help=f"Hay {miles(len(cuentas))} cuentas: escribí una parte del nombre "
+                               "(«gar taller» encuentra «Taller García»), el CUIT o el número. "
+                               "Sin escribir nada, las últimas que atendiste.")
+    if texto.strip():
+        encontradas, cuantas = buscar_cuentas(texto, cuentas)
+        if not encontradas:
+            st.caption("No hay ninguna cuenta con eso. Probá con menos letras o con otra parte "
+                       "del nombre.")
+            return None
+        titulo = "Encontradas:" if cuantas > 1 else "Encontrada:"
+    else:
+        encontradas = [x for x in cuentas_recientes() if x[0] in nombres]
+        titulo = "Las últimas que atendiste:" if encontradas else "A la vista:"
+        if elegida in nombres and elegida not in dict(encontradas):
+            encontradas.insert(0, (elegida, nombres[elegida]))
+        cuantas = len(encontradas)
+        if not encontradas:
+            return None
+    opciones = [i for i, _n in encontradas]
+    # Elegida sola la única que calza, o la que ya estaba: un toque menos.
+    de_entrada = (0 if len(opciones) == 1 else opciones.index(elegida) if elegida in opciones
+                  else None)
+    # La clave lleva lo buscado: con una sola, el redondel se quedaba con la elegida de la
+    # búsqueda anterior aunque ya no estuviera entre las de ahora.
+    cual = st.radio(titulo, opciones, index=de_entrada,
+                    format_func=lambda i: f"{nombres[i]}  ·  N.º {i}",
+                    key=f"cuenta_cual_{clave}_{normalizar_texto(texto)}")
+    if cuantas > len(encontradas):
+        st.caption(f"…y {miles(cuantas - len(encontradas))} más: escribí algo más para "
+                   "achicar la lista.")
+    return cual
+
+
+# ============================================================================================
 # A QUIÉN SE ESTÁ ATENDIENDO
 # ============================================================================================
 # La cuenta se elige UNA vez, antes de empezar a pedir o a armar el presupuesto, y queda para
@@ -833,8 +959,7 @@ def mostrar_cuenta_elegida(clave):
             return
         st.caption("Elegila antes de pedir o de armar el presupuesto: todo lo que pidas al "
                    "depósito va a esa cuenta, sin elegirla de nuevo en cada producto.")
-        nueva = st.selectbox("Cuenta:", list(nombres), format_func=nombres.get, index=None,
-                             placeholder="El taller o mayorista", key=f"cuenta_sel_{clave}")
+        nueva = elegir_cuenta(clave, cuentas=list(nombres.items()))
         codigo = ""
         if nueva and configuracion_de_cuenta(nueva)["pide_codigo"]:
             codigo = st.text_input("Código de retiro", max_chars=6, key=f"cuenta_cod_{clave}",

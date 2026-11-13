@@ -963,7 +963,7 @@ if pagina == PAGINAS[3]:
             # ventas (las notas de crédito en negativo y el total al final).
             _meses_arca = meses_con_comprobantes(_cfg_arca["ambiente"])
             if _meses_arca:
-                _m1, _m2 = cols([2, 1])
+                _m1, _m2 = cols([2, 1], abajo=True)
                 _mes_arca = _m1.selectbox("📊 Comprobantes del mes, para el contador:", _meses_arca,
                                           key="arca_mes_contador",
                                           format_func=lambda m: f"{m[5:7]}/{m[:4]}")
@@ -1207,36 +1207,117 @@ if pagina == PAGINAS[3]:
                         st.rerun()
 
             st.markdown("---")
-            st.markdown("**🔧 Mecánicos externos**",
-                        help="Cuentas separadas para mecánicos que no son empleados tuyos — solo ven "
-                             "su propio portal para armar presupuestos con su mano de obra, nunca "
-                             "las secciones internas.")
+            st.markdown("**🔧 Mecánicos externos: talleres, mayoristas y clientes con cuenta**",
+                        help="Las cuentas a las que se les vende y se les lleva la cuenta "
+                             "corriente. Con contraseña, además entran a su portal —solo ven eso, "
+                             "nunca las secciones internas—; sin contraseña, no entran. Cuando "
+                             f"hay más de {TALLERES_QUE_ENTRAN_CON_LA_CLAVE_SOLA} con portal, "
+                             "cada uno entra con su número de cuenta y su contraseña.")
             mecanicos_actuales = listar_mecanicos()
             if mecanicos_actuales:
-                st.dataframe(mecanicos_actuales, width="stretch", hide_index=True)
+                st.caption(f"{miles(len(mecanicos_actuales))} cuenta(s), "
+                           f"{miles(sum(1 for m in mecanicos_actuales if m['Portal']))} con portal. "
+                           "«ID» es el número de cuenta.")
+                st.dataframe(mecanicos_actuales, width="stretch", hide_index=True,
+                             height=min(420, 38 * (len(mecanicos_actuales) + 1)))
 
             cm1, cm2 = st.columns(2)
             nombre_nuevo_mecanico = cm1.text_input("Nombre:", key="nuevo_mecanico_nombre")
-            password_nuevo_mecanico = cm2.text_input("Contraseña:", type="password", key="nuevo_mecanico_pass")
-            if st.button("➕ Crear mecánico"):
-                if not nombre_nuevo_mecanico.strip() or not password_nuevo_mecanico:
-                    st.warning("Completá nombre y contraseña.")
+            password_nuevo_mecanico = cm2.text_input(
+                "Contraseña (opcional):", type="password", key="nuevo_mecanico_pass",
+                help="Solo si va a entrar a su portal. Sin contraseña se le vende y se le lleva "
+                     "la cuenta corriente igual; se le puede dar después.")
+            if st.button("➕ Crear la cuenta", key="crear_mecanico"):
+                if not nombre_nuevo_mecanico.strip():
+                    st.warning("Poné el nombre.")
                 else:
                     try:
-                        crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
-                        avisar("success", f"Mecánico '{nombre_nuevo_mecanico}' creado.")
+                        _nueva_cuenta = crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
+                        avisar("success", f"Cuenta «{nombre_nuevo_mecanico.strip()}» creada: es la "
+                                          f"N.º {_nueva_cuenta}.")
                         st.rerun()
                     except sqlite3.IntegrityError as _err:
                         anotar_error("nivel principal", _err)
-                        st.error("Ya existe un mecánico con ese nombre.")
+                        st.error("Ya existe una cuenta con ese nombre.")
                     except ValueError as _err:          # ver clave_ya_usada()
                         st.error(el_error_en_castellano(_err))
+
+            # MUCHAS DE UNA VEZ, pegadas de una planilla: ver crear_cuentas_de_una_vez().
+            _exp_muchas = st.expander("📋 Cargar muchas cuentas de una vez (pegadas de Excel)",
+                                      key="exp_muchas_cuentas", on_change="rerun")
+            if _exp_muchas.open:
+                with _exp_muchas:
+                    st.caption("Una cuenta por renglón. Copiá las columnas de tu planilla en este "
+                               "orden y pegalas acá: **Nombre**, CUIT, Límite, Descuento %, Días "
+                               "de plazo. Solo el nombre es obligatorio. Entran sin contraseña; "
+                               "las que ya existen no se tocan.")
+                    # Vaciado ANTES de dibujar el campo: después Streamlit no lo deja.
+                    if st.session_state.pop("_vaciar_muchas_cuentas", False):
+                        st.session_state["muchas_cuentas_texto"] = ""
+                    _texto_muchas = st.text_area(
+                        "Las cuentas:", key="muchas_cuentas_texto", height=180,
+                        placeholder="Taller García\t20-12345678-9\t500000\t10\t30\n"
+                                    "Lubricentro Sosa\nRepuestos Norte\t\t\t5")
+                    if candado("crear muchas cuentas de una vez",
+                               st.button("➕ Crear todas", key="muchas_cuentas_crear",
+                                         disabled=not _texto_muchas.strip()),
+                               "muchas_cuentas_candado"):
+                        try:
+                            _hecho_muchas = crear_cuentas_de_una_vez(_texto_muchas)
+                            st.session_state["_muchas_cuentas_hecho"] = _hecho_muchas
+                            st.session_state["_vaciar_muchas_cuentas"] = True
+                            st.rerun()
+                        except ValueError as _err:
+                            st.warning(el_error_en_castellano(_err))
+                    _hecho_muchas = st.session_state.get("_muchas_cuentas_hecho")
+                    if _hecho_muchas:
+                        st.success(f"Creadas: {miles(_hecho_muchas['creadas'])}."
+                                   + (f" Ya estaban (no se tocaron): "
+                                      f"{miles(len(_hecho_muchas['ya_estaban']))}."
+                                      if _hecho_muchas["ya_estaban"] else ""))
+                        if _hecho_muchas["con_problemas"]:
+                            st.warning(f"{miles(len(_hecho_muchas['con_problemas']))} renglón(es) "
+                                       "no entraron: corregilos y pegalos de nuevo.")
+                            st.dataframe([{"Renglón": n, "Qué pasó": q}
+                                          for n, q in _hecho_muchas["con_problemas"][:200]],
+                                         width="stretch", hide_index=True)
 
             if mecanicos_actuales:
                 st.markdown("**Gestionar un mecánico existente**")
                 opciones_mecanico = {m["Nombre"]: m["ID"] for m in mecanicos_actuales}
-                mecanico_elegido = st.selectbox("Elegí un mecánico:", list(opciones_mecanico.keys()), key="sel_mecanico_gestionar")
-                mecanico_id_sel = opciones_mecanico[mecanico_elegido]
+                _por_id_mec = {i: n for n, i in opciones_mecanico.items()}
+                _de_entrada_mec = st.session_state.get("_mecanico_ultimo")
+                if _de_entrada_mec not in _por_id_mec:
+                    _de_entrada_mec = next(iter(_por_id_mec))
+                mecanico_id_sel = elegir_cuenta("gestionar", "Elegí un mecánico:",
+                                                cuentas=list(_por_id_mec.items()),
+                                                elegida=_de_entrada_mec) or _de_entrada_mec
+                st.session_state["_mecanico_ultimo"] = mecanico_id_sel
+                mecanico_elegido = _por_id_mec[mecanico_id_sel]
+                st.caption(f"Elegido: **{mecanico_elegido}** · cuenta N.º {mecanico_id_sel}")
+                # EL PORTAL: darle, cambiarle o sacarle la contraseña (ver «CON MILES DE CUENTAS»).
+                _con_portal = next(bool(m["Portal"]) for m in mecanicos_actuales
+                                   if m["ID"] == mecanico_id_sel)
+                _cp1, _cp2 = cols([2, 1], abajo=True)
+                _clave_portal = _cp1.text_input(
+                    "Contraseña del portal:", type="password", key=f"mecanico_clave_{mecanico_id_sel}",
+                    placeholder="Nueva contraseña" if _con_portal else "Sin portal: ponele una para dárselo",
+                    help=f"Entra en {URL_DE_LA_APP}?cuenta={mecanico_id_sel} con su número de "
+                         f"cuenta ({mecanico_id_sel}) y esta contraseña.")
+                if _cp2.button("🔑 Guardar la contraseña", key="mecanico_guardar_clave",
+                               disabled=not _clave_portal, width="stretch"):
+                    try:
+                        cambiar_password_mecanico(mecanico_id_sel, _clave_portal)
+                        avisar("success", f"{mecanico_elegido} entra al portal con su número de "
+                                          f"cuenta ({mecanico_id_sel}) y esa contraseña.")
+                        st.rerun()
+                    except ValueError as _err:
+                        st.error(el_error_en_castellano(_err))
+                if _con_portal and st.button("🚪 Sacarle el portal (sigue la cuenta)",
+                                             key="mecanico_sacar_portal"):
+                    cambiar_password_mecanico(mecanico_id_sel, "")
+                    avisar("success", f"{mecanico_elegido} ya no entra al portal. Su cuenta sigue.")
+                    st.rerun()
                 cmg1, cmg2 = st.columns(2)
                 mecanico_activo_actual = next(m["Activo"] == "Sí" for m in mecanicos_actuales if m["ID"] == mecanico_id_sel)
                 if cmg1.button("🚫 Desactivar" if mecanico_activo_actual else "✅ Reactivar", key="toggle_mecanico"):
@@ -1276,14 +1357,38 @@ if pagina == PAGINAS[3]:
                 _cc2.metric("Vencido", f"${miles(sum(r['Vencido'] for r in _resumen_cc), 0)}")
                 _cc3.metric("Cheques en cartera",
                             f"${miles(sum(r['Cheques en cartera'] or 0 for r in _resumen_cc), 0)}")
-                st.dataframe(quitar_id(_resumen_cc), width="stretch", hide_index=True)
+                # Escrito como plata y con el hueco vacío: con los números crudos, la que no tiene
+                # límite mostraba «None» en «Límite» y «Disponible» (se vio con muchas cuentas).
+                _plata_cc = lambda x: ("" if x is None else
+                                       ("-" if x < 0 else "") + f"${miles(abs(x), 0)}")
+                st.caption(f"{miles(len(_resumen_cc))} cuenta(s) con movimientos o configuradas, "
+                           "las que más deben vencido primero.")
+                st.dataframe([{"N.º": r["ID"], "Taller": r["Taller"], "Saldo": _plata_cc(r["Saldo"]),
+                               "Vencido": _plata_cc(r["Vencido"] or None),
+                               "Límite": _plata_cc(r["Límite"]),
+                               "Disponible": _plata_cc(r["Disponible"]),
+                               "Cheques en cartera": _plata_cc(r["Cheques en cartera"])}
+                              for r in _resumen_cc], width="stretch", hide_index=True,
+                             height=min(420, 38 * (len(_resumen_cc) + 1)))
 
             # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta. Ver
             # mostrar_permisos_de_limite().
             mostrar_permisos_de_limite()
 
-            _taller = st.selectbox("Taller:", list(_talleres), key="cc_taller")
-            _mid = _talleres[_taller]
+            # Con muchas, por el buscador (ver «ELEGIR UNA CUENTA ENTRE MILES»). Siempre hay una
+            # a la vista: la última elegida o, de entrada, la que más debe vencido; mientras se
+            # busca otra, sigue esa.
+            _por_id_cc = {i: n for n, i in _talleres.items()}
+            _de_entrada_cc = st.session_state.get("_cc_ultima")
+            if _de_entrada_cc not in _por_id_cc:
+                _de_entrada_cc = (_resumen_cc[0]["ID"] if _resumen_cc
+                                  and _resumen_cc[0]["ID"] in _por_id_cc else next(iter(_por_id_cc)))
+            _mid = elegir_cuenta("cc", "Taller:", cuentas=sorted(_por_id_cc.items(),
+                                                                 key=lambda x: x[1].lower()),
+                                 elegida=_de_entrada_cc) or _de_entrada_cc
+            st.session_state["_cc_ultima"] = _mid
+            _taller = _por_id_cc[_mid]
+            st.markdown(f"**💳 {_taller}**  ·  cuenta N.º {_mid}")
             _estado = estado_de_cuenta(_mid)
             _config = configuracion_de_cuenta(_mid)
             _e1, _e2, _e3 = st.columns(3)

@@ -7095,6 +7095,30 @@ Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:5
 
 Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), el día UTC de una fecha guardada (`date(fecha)`, `substr(fecha, 1, 10)`), `date('now', 'localtime')`, `date.today()` (también en las pruebas) y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
 
+## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
+
+Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar más de 2000 cuentas, sería una locura scrollear para encontrar cada una». Una cuenta (un taller, un mayorista, un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para diez. Se cargaron 2.000 en una copia de la base real y se miró qué se rompía.
+
+**El buscador** (`elegir_cuenta()`, en `logica/deposito.py`). Donde se elige una cuenta ya no hay una lista desplegable con todas:
+
+- Se escribe **una parte del nombre** —sin acentos, en cualquier orden: «gar taller» encuentra «Taller García»—, **el CUIT** (entero o una parte) o **el número de cuenta**, y quedan hasta seis para tocar, con «…y N más: escribí algo más» si calzan más. Primero la que tiene ese número, después las que empiezan con lo escrito.
+- Sin escribir nada salen **las últimas que atendió** quien está en la pantalla: en el mostrador casi siempre es uno de los de siempre.
+- Si calza una sola, queda elegida.
+- Con hasta 12 cuentas sigue la lista de antes (un toque menos).
+- Es la misma pieza en «🧾 Atendiendo a» (Buscador, Ventas, Lista WhatsApp), al poner a cuenta una venta de Mostrador en la caja, en «👥 Cada cuenta», en Cuentas corrientes y en los talleres de Usuarios.
+
+**Lo que se rompía con 2.000, además de la lista:**
+
+- **El ingreso se colgaba dos minutos.** Para entrar no se escribe el nombre: la contraseña se prueba contra cada cuenta hasta que una calza, y cada prueba tarda 61 ms a propósito (es lo que las protege si alguien se lleva la base). Con 2.000 cuentas, una contraseña mal tipeada —la de cualquiera, también la del dueño— eran 2.000 pruebas: 122 segundos con la app entera parada. Ahora:
+  - **una cuenta puede no tener contraseña**: se le vende y se le lleva la cuenta corriente, y no entra al portal. Es lo que van a ser casi todas, y en el ingreso no cuestan nada;
+  - con hasta 30 cuentas con portal, todo sigue igual (la contraseña sola dice quién sos); **con más, el taller entra con su número de cuenta y su contraseña**, y se prueba contra una sola. El campo del número aparece solo cuando hace falta, o si entra con su link (`…/?cuenta=123`, que lo trae puesto). Quien pone un número de cuenta entra como taller o no entra: nunca como empleado.
+  - Un taller nunca puede tener la contraseña de un empleado; entre muchos talleres, dos pueden tener la misma (cada uno entra con su número). Si después vuelven a ser pocos y quedó una repetida, sin el número no entra ninguno de los dos: no se elige uno al azar.
+- **Crearlas era de a una y con contraseña obligatoria**, mirando contra todas las demás que no se repitiera (cada vez más lento). Ahora la contraseña es opcional, y **«📋 Cargar muchas cuentas de una vez»** (Administrar → 👥 Usuarios) recibe las columnas pegadas de Excel —**Nombre**, CUIT, Límite, Descuento %, Días de plazo; solo el nombre es obligatorio—: 2.000 entran en un momento, las que ya existen no se tocan, y lo que no entra (un CUIT que no cierra, un descuento de más) se dice renglón por renglón. El portal se le da después a la que lo pida («🔑 Guardar la contraseña»), o se le saca.
+- **Una cuenta sin portal no podía comprar a cuenta**: de entrada toda cuenta pide el código de retiro, que el taller genera en su portal. Sin portal no lo puede generar: ahora no se le pide.
+- **Cuentas corrientes hacía tres consultas por cuenta** en cada toque (6.000 con 2.000 cuentas) para armar el resumen: ahora es una sola. Y la tabla mostraba «None» en «Límite» y «Disponible» de las que no tienen límite: ahora va escrita como plata, con el hueco vacío.
+
+`pruebas_de_muchas_cuentas.py` lo controla con 2.000 cuentas: el pegado de la planilla, el buscador (acentos, orden, número, CUIT, cuántas muestra y que no tarde), el resumen igual que cuenta por cuenta, el ingreso (que una clave mal puesta no tarde, con pocas y con muchas con portal, la clave repetida), y las pantallas dibujadas sin la lista de dos mil. Las 89 pantallas con la base real y 2.000 cuentas cargadas: en verde.
+
 ## 🎲 La caja, al azar: que la plata, el stock y las cuentas cierren siempre
 
 Las pruebas de la caja siguen caminos pensados: vender, cobrar, devolver. Los errores de plata aparecen en los que nadie pensó. `pruebas/pruebas_al_azar_de_la_caja.py` arma el camino al azar —con semilla fija: si falla, falla siempre igual y dice en qué paso y de dónde venía— con unas 250 operaciones por semilla mezcladas: vender (a la caja o cobrando), cobrar con descuento, poner a cuenta, devolver una parte (con motivos que vuelven al stock y que no), anular, deshacer, corregir cómo pagó, volver la venta a la caja y registrar pagos. Después de **cada una** controla lo que no depende del camino:

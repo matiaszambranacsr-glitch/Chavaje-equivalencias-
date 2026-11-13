@@ -529,6 +529,14 @@ if pagina == PAGINAS[9]:
     if _exp_cada_cuenta.open:
         with _exp_cada_cuenta:
             _cuentas = cuentas_para_mirar()
+            # Con muchos talleres (ver «ELEGIR UNA CUENTA ENTRE MILES»), en la lista quedan las
+            # personas y un renglón que abre el buscador de talleres: no dos mil renglones.
+            _talleres_cta = [(x[2], x[0].replace("🔧 ", "", 1)) for x in _cuentas if x[2] is not None]
+            _con_buscador = len(_talleres_cta) > CUENTAS_PARA_ELEGIR_SIN_BUSCAR
+            if _con_buscador:
+                _cuentas = ([x for x in _cuentas if x[2] is None]
+                            + [(f"🔧 Un taller o cliente ({miles(len(_talleres_cta))}: buscarlo)",
+                                None, "buscar")])
             _ca1, _ca2 = cols([2, 1])
             _cual = _ca1.selectbox("Cuenta:", range(len(_cuentas)), key="venta_cuenta_sel",
                                    format_func=lambda i: _cuentas[i][0])
@@ -538,8 +546,16 @@ if pagina == PAGINAS[9]:
                                                               90: "Últimos 3 meses",
                                                               365: "Último año"}[d])
             _, _persona_cta, _taller_cta = _cuentas[_cual]
-            _cta = resumen_de_la_cuenta(persona=_persona_cta, mecanico_id=_taller_cta, dias=_dias_cta)
-            if _taller_cta is None:
+            if _taller_cta == "buscar":
+                _taller_cta = elegir_cuenta("cada_cuenta", "Qué taller o cliente:",
+                                            cuentas=_talleres_cta)
+            _falta_elegir = _persona_cta is None and _taller_cta is None
+            _cta = ({"afuera": [], "ventas": [], "entregas": []} if _falta_elegir else
+                    resumen_de_la_cuenta(persona=_persona_cta, mecanico_id=_taller_cta,
+                                         dias=_dias_cta))
+            if _falta_elegir:
+                st.caption("Elegí el taller o cliente para ver su cuenta.")
+            elif _taller_cta is None:
                 _q = fila_de_numeros(3)
                 _q[0].metric("Ventas", miles(len(_cta["ventas"])))
                 _q[1].metric("Vendió", f"${miles(_cta['total'], 0)}")
@@ -566,5 +582,5 @@ if pagina == PAGINAS[9]:
                                "Desde": ("🔴 " if r["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA
                                          else "") + "hace " + cuanto_hace(r["horas"])}
                               for r in _cta["afuera"]], width="stretch", hide_index=True)
-            elif not (_cta.get("ventas") or _cta.get("entregas")):
+            elif not _falta_elegir and not (_cta.get("ventas") or _cta.get("entregas")):
                 st.caption("En ese período no tiene movimientos, y no tiene nada del depósito afuera.")
