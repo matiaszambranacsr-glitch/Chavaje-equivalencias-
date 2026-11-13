@@ -316,7 +316,8 @@ def camino_del_asistente(destino):
 COMO_HAGO_DEL_ASISTENTE = (
     # ---- vender y cobrar ----
     ("vender", "Hacer una venta",
-     "vender venta vendo despachar cargar venta nueva cliente lleva mostrador terminar f9",
+     "vender venta vendo despachar cargar venta nueva cliente lleva mostrador terminar f9 "
+     "cantidad sumar agregar quitar uno menos",
      "Buscá lo que se lleva el cliente y sumalo; corregí la cantidad o el precio si hace falta "
      "(con el lector, escaneá la caja). Arriba, en «🧾 Atendiendo a», elegís la cuenta si es de "
      "un taller. Para cerrar, «✅ Terminar la venta» —o «📤 Mandar a la caja» si cobra otra "
@@ -324,7 +325,7 @@ COMO_HAGO_DEL_ASISTENTE = (
      "🧾 Ventas", ""),
     ("cobrar", "Cobrar una venta",
      "cobrar cobro cobranza pago pagar efectivo debito credito tarjeta cuotas transferencia "
-     "f10 medio forma como pago",
+     "qr f10 medio forma como pago",
      "Lo que mandan los vendedores llega con un cartel. Elegí la venta y tocá «💳 Cobrar (F10)»: "
      "«¿Cómo pagó?» —efectivo, débito, crédito con las cuotas o transferencia— y, si hace "
      "falta, un descuento por porcentaje. Recién cobrada cuenta en el cierre.",
@@ -336,11 +337,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "La cuenta es la que el vendedor eligió en «🧾 Atendiendo a».",
      "💵 Caja", ""),
     ("cierre", "Cerrar la caja (el arqueo del día)",
-     "cierre cerrar caja arqueo arquear contar plata dinero efectivo dia total vendido cuanto "
-     "vendi hoy recaudacion planilla zeta",
-     "Abajo de la caja, abrí «📋 Ventas y cierre de caja»: están las ventas de hoy con cómo se "
-     "pagó cada una y los totales. Contá el efectivo, escribilo y tocá «🧮 Guardar el arqueo»: "
-     "queda anotado con la diferencia. Las ventas del día se bajan en Excel desde ahí.",
+     "cierre cerrar caja arqueo arquear contar plata dinero efectivo dia total vendido "
+     "vendi hoy ayer anteriores historial quien vendio recaudacion planilla zeta",
+     "Abajo de la caja, abrí «📋 Ventas y cierre de caja»: están las ventas del día con quién "
+     "vendió, cómo se pagó cada una y los totales (con «Día:» se mira otro día). Contá el "
+     "efectivo, escribilo y tocá «🧮 Guardar el arqueo»: queda anotado con la diferencia. Las "
+     "ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
     ("corregir_cobro", "Corregir un cobro mal cargado",
      "corregir equivoque equivocado error mal cobrado cambiar medio forma pago anular cobro "
@@ -349,6 +351,11 @@ COMO_HAGO_DEL_ASISTENTE = (
      "cambiás cómo pagó, o tocás «↩️ Volverla a la caja» para cobrarla de nuevo (vuelve sin el "
      "descuento y sin el cargo en la cuenta). Cada corrección queda anotada con quién la hizo.",
      "💵 Caja", ""),
+    ("sin_stock", "Vender algo que figura sin stock",
+     "negativo cero figura vender igual alcanza falta agotado",
+     "Se vende igual: el stock nunca queda negativo, y si no alcanzaba la app avisa para "
+     "contarlo. Para que quede anotado para comprar, «📌 Anotar para reponer».",
+     "🧾 Ventas", ""),
     ("deshacer_venta", "Deshacer una venta que mandé por error",
      "deshacer anular cancelar venta equivocada error mande recuperar",
      "Mientras la venta espera en la caja, quien la armó la puede deshacer desde Ventas: "
@@ -456,6 +463,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "aceite gol»— busca por descripción. F2 lleva a la caja de búsqueda.\n\n"
      "También me lo podés pedir a mí: escribí «buscar» y el código.",
      "🔍 Buscador", ""),
+    ("ver_stock", "Ver cuánto stock hay de un repuesto, o apartarlo",
+     "stock hay queda quedan tengo existencia disponible libre apartar separar reservar "
+     "guardar cliente",
+     "Buscalo: cada resultado dice el precio y el stock, y «Libre» es lo que queda sin "
+     "apartar. Para guardarle uno a un cliente, «🔒 Apartar» en el resultado.",
+     "🔍 Buscador", "empleado"),
     ("no_encuentro", "No aparece un código que busco",
      "no aparece encuentro encuentra existe sale codigo falta cargar sin resultado nada",
      "Probá sin puntos ni espacios, o por descripción. Si de verdad no está, queda anotado "
@@ -510,9 +523,17 @@ COMO_HAGO_DEL_ASISTENTE = (
      "«📒 Movimientos», «➕ Cargar a la cuenta» y «💵 Registrar un pago».",
      "💳 Cuentas corrientes", ""),
     ("limite", "Cambiar el límite, el descuento o el plazo de una cuenta",
-     "limite credito tope descuento plazo dias vencimiento interes mora configurar cuenta",
+     "limite credito tope descuento plazo dias vencimiento interes mora tasa bcra punitorio "
+     "configurar cuenta",
      "Elegí la cuenta y abrí «⚙️ Configuración de la cuenta»: el límite de crédito, el "
-     "descuento, los días de plazo para pagar y el interés por mora.",
+     "descuento, los días de plazo para pagar y el interés por mora (con «🔄 Traer las tasas "
+     "del BCRA» se usa la tasa oficial).",
+     "💳 Cuentas corrientes", ""),
+    ("codigo_retiro", "El código de retiro de un taller",
+     "codigo retiro seis cifras retirar autorizar taller llevar cargar cuenta",
+     "Para cargarle algo a la cuenta de un taller que tiene portal hace falta su código de "
+     "retiro: lo genera el taller en su portal («🔑 Generar código de retiro»), vale una sola "
+     "vez, y lo dicta en el mostrador. Una cuenta sin portal no lo pide.",
      "💳 Cuentas corrientes", ""),
     ("cheque", "Verificar un cheque",
      "cheque cheques denunciado robado bcra banco verificar rechazado",
@@ -571,6 +592,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Buscá el producto y se abre para corregirlo: el precio, el stock, las medidas, dónde "
      "está y las fotos.",
      "📦 Productos", ""),
+    ("escala", "La lista de un proveedor está en otra escala (el coeficiente)",
+     "coeficiente escala multiplicar multiplica lista precios bajos baratos ridiculos otra "
+     "moneda dolar",
+     "Si los precios de una lista hay que multiplicarlos para que sean los de venta, se le "
+     "pone el coeficiente a ese proveedor: muestra ejemplos de la misma pieza en otro "
+     "proveedor para comparar. La venta y el presupuesto avisan cuando una lista está en otra "
+     "escala.",
+     "🏷️ Marcas", "admin"),
     ("unir_marcas", "Unir dos marcas que son la misma",
      "unir fusionar juntar marcas repetidas duplicadas misma mal escrita",
      "Elegí la marca repetida y unila con la buena: los productos pasan todos a una sola.",
@@ -582,10 +611,10 @@ COMO_HAGO_DEL_ASISTENTE = (
     # ---- stock y compras ----
     ("reponer", "Saber qué hay que pedirle al proveedor",
      "pedir comprar reponer reposicion falta faltante stock bajo acaba termina proveedor "
-     "pedido compra",
+     "pedido compra anotar",
      "Está lo que se va a acabar, a quién conviene comprarle, lo que no se mueve, y el "
-     "mensaje armado para el proveedor. También lo que más se busca en Mercado Libre contra "
-     "tu catálogo.",
+     "mensaje armado para el proveedor. Lo que falta se anota desde el Buscador («📌 Reponer») "
+     "o desde la venta («📌 Anotar para reponer») y aparece acá.",
      "📌 Para pedir", ""),
     ("tendencias", "Ver lo que más se busca en Mercado Libre",
      "mercado libre ml meli tendencias busca gente demanda moda semana",
@@ -620,6 +649,19 @@ COMO_HAGO_DEL_ASISTENTE = (
      "historial»). La app avisa cuándo a una pieza le toca el cambio, y «🔗 Link para que el "
      "cliente vea su auto» se lo muestra al cliente. Al terminar una venta, la patente y los "
      "km la anotan sola.",
+     "🚗 Vehículos", ""),
+    ("avisar_service", "Avisarle a un cliente que le toca un cambio",
+     "avisar aviso cliente toca service cambio aceite vencido atrasado recordatorio mensaje "
+     "vida util",
+     "Arriba están los autos con una pieza que ya pasó su vida útil o que llega en los "
+     "próximos días, con un solo mensaje por cliente. Después de mandarlo, «✅ Ya le avisé» lo "
+     "saca de la lista por un tiempo.",
+     "🚗 Vehículos", ""),
+    ("link_auto", "Mandarle al cliente el link para ver su auto",
+     "link cliente auto vea ver qr compartir mandar ficha celular",
+     "En la ficha del auto, abrí «🔗 Link para que el cliente vea su auto»: ve desde el "
+     "celular qué se le puso y cuánto le falta a cada cosa, sin su nombre ni su teléfono. Va "
+     "también en el QR de la ficha en PDF.",
      "🚗 Vehículos", ""),
     ("patente", "Saber qué auto es por la patente",
      "patente dominio chapa que auto es identificar",
@@ -671,7 +713,7 @@ COMO_HAGO_DEL_ASISTENTE = (
      None, "empleado"),
     ("problema", "La app anda lenta o salió un error",
      "lenta lento tarda demora cuelga colgo colgada error falla fallo anda funciona rompio "
-     "trabo traba cargando problema bug blanco",
+     "trabo traba cargando problema bug blanco internet conexion corto cayo wifi senal",
      "Si una pantalla tarda, esperá a que termine la barrita de arriba antes de tocar de "
      "nuevo. Si sale un cartel de error con un código, pasáselo al administrador: con ese "
      "código se encuentra qué pasó. Y si se recargó la página, la venta o el presupuesto que "
@@ -707,6 +749,7 @@ por que se si sin sobre son su sus te tu tus un una uno unas unos y ya yo vos us
 como donde quiero queria quisiera necesito necesitaria puedo podes podria podrias puede hago
 hacer hace hacen hacemos haces hacerlo tengo tenes tiene tenemos debo hay ser estar
 favor porfa porfavor gracias hola buenas che decime dame explicame ayudame ayuda
+cuanto cuanta cuantos cuantas
 """.split())
 
 # Palabras que para el mostrador son la misma cosa. Cada grupo se iguala a su primera palabra.
@@ -1067,6 +1110,9 @@ _ASIS_QUE_SOS = re.compile(r"\b(quien sos|que sos|quien eres|que eres|como te ll
 _ASIS_QUE_HACES = re.compile(r"^(ayuda|ayudame|help|que podes hacer|que sabes hacer|que haces|"
                              r"para que servis|como funcionas|como te uso|que te puedo pedir|"
                              r"que te puedo preguntar|opciones|menu)$")
+_ASIS_NOVEDADES = re.compile(r"\b(que hay de nuevo|novedad\w*|lo nuevo|que cambio|que "
+                             r"cambiaron|ultimos cambios|ultimas mejoras|que agregaron|que "
+                             r"tiene de nuevo|actualizacion\w*)\b")
 _ASIS_ACA = re.compile(r"\b(aca|esta pantalla|esta pagina|esta seccion|esta solapa|donde "
                        r"estoy|en que pantalla estoy)\b")
 # Una patente argentina (AB123CD o ABC123) y algo con pinta de código de repuesto.
@@ -1193,6 +1239,11 @@ def responder_del_asistente(pregunta, contexto):
             "Escribí como te salga: entiendo sin acentos y con errores.",
             [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)])
 
+    # «¿qué hay de nuevo?»: lo último de LO_NUEVO, para quien entró (cuenta cómo se trabaja
+    # adentro: al invitado, no).
+    if _ASIS_NOVEDADES.search(llano) and contexto.get("nivel") != "invitado" and visibles:
+        return _asis_simple("**Lo último que se sumó:**\n\n" + "\n".join(
+            f"- {_asis_escapar(texto)} *({donde})*" for texto, donde in LO_NUEVO[:4]))
     # «¿qué puedo hacer acá?»: la pantalla en la que está.
     if _ASIS_ACA.search(llano) and contexto.get("pagina") in visibles:
         pagina = contexto["pagina"]

@@ -496,7 +496,8 @@ LO_NUEVO = (
     ("🤖 Un asistente en todas las pantallas: preguntale cómo se hace algo («¿cómo hago una "
      "devolución?»), pedile que te lleve («llevame a la caja») o que busque un repuesto. "
      "Entiende sin acentos y con errores. No ve los datos ni las contraseñas, y lleva solo a "
-     "las pantallas que cada uno ya tiene.", "🤖 la burbuja de abajo a la izquierda"),
+     "las pantallas que cada uno ya tiene. Se abre también con F1.",
+     "🤖 la burbuja de abajo a la izquierda"),
     ("🔥 Lo que más se busca en Mercado Libre en repuestos esta semana, contra tu catálogo: lo "
      "que no tenés va primero. Gratis, con la aplicación de Mercado Libre.",
      "📊 Estadísticas → 📌 Para pedir"),

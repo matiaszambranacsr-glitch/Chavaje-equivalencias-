@@ -196,6 +196,20 @@ def probar(url, clave, carpeta):
               or "Elegir archivo" not in recuadros or "por archivo" not in recuadros):
             fallas.append(f"el recuadro para subir un archivo no está en castellano: "
                           f"{recuadros[:120]!r}")
+
+        # 7. F1 abre el asistente con el cursor en su caja para escribir, y otro F1 lo
+        # minimiza (ver «LA BURBUJA DEL ASISTENTE» en logica/asistente.py).
+        pagina.keyboard.press("F1")
+        if not _hasta(lambda: pagina.locator(".st-key-asistente_abierto").count() == 1):
+            fallas.append("F1 no abre el asistente")
+        elif not _hasta(lambda: pagina.evaluate(
+                "() => !!(document.activeElement && document.activeElement.closest("
+                "'.st-key-asistente_abierto'))")):
+            fallas.append("al abrir el asistente con F1 el cursor no queda en su caja")
+        else:
+            pagina.keyboard.press("F1")
+            if not _hasta(lambda: pagina.locator(".st-key-asistente_minimizado").count() == 1):
+                fallas.append("un segundo F1 no minimiza el asistente")
         navegador.close()
     return fallas
 
@@ -229,8 +243,8 @@ def main():
         fallas = probar(url, clave, carpeta)
         for f in fallas:
             print("   ✗", f)
-        print("✅ navegador: el cursor al entrar, el click derecho, F2, F9, F10 y los textos "
-              "en castellano"
+        print("✅ navegador: el cursor al entrar, el click derecho, F1, F2, F9, F10 y los "
+              "textos en castellano"
               if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:

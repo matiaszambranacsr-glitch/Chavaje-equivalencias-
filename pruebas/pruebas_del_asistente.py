@@ -78,6 +78,21 @@ ENTIENDE = (
     ("mandar cotizacion por wasap", "como:whatsapp"),
     ("atajos de teclado", "como:teclas"),
     ("la app anda lenta", "como:problema"),
+    ("se corto internet", "como:problema"),
+    ("codigo de retiro", "como:codigo_retiro"),
+    ("tasa del bcra", "como:limite"),
+    ("stock negativo", "como:sin_stock"),
+    ("cuanto stock hay", "como:ver_stock"),
+    ("separar stock para un cliente", "como:ver_stock"),
+    ("anotar para reponer", "como:reponer"),
+    ("cambiar la cantidad en la venta", "como:vender"),
+    ("como veo las ventas de ayer", "como:cierre"),
+    ("quien vendio esto", "como:cierre"),
+    ("cobrar con qr", "como:cobrar"),
+    ("coeficiente de la lista", "como:escala"),
+    ("como le aviso a un cliente que le toca el service", "como:avisar_service"),
+    ("vida util de una pieza", "como:avisar_service"),
+    ("mandarle al cliente el link de su auto", "como:link_auto"),
     ("cargar muchas cuentas de excel", "seccion:📋 Cargar muchas cuentas de una vez (pegadas de Excel)"),
     ("armado rapido", "seccion:⚡ Armado rápido"),
     ("precios que no cierran", "herramienta:💲 Precios que no cierran entre equivalentes"),
@@ -234,7 +249,7 @@ def probar(L):
         for rotulo in re.findall(r"«([^»]+)»", pasos):
             if not re.search(r"[^\w\s]", rotulo[:2]) and not rotulo[:1].isupper():
                 continue          # «filtro aceite gol», «buscar»: un ejemplo, no un botón
-            if rotulo in ("A-3-2", "Vista:", "Búsquedas sin resultado"):
+            if rotulo in ("A-3-2", "Vista:", "Búsquedas sin resultado", "Libre"):
                 continue          # un ejemplo de ubicación, una etiqueta de campo, una solapa
             cierto(f"«{nombre}» nombra «{rotulo}», que no está escrito así en la app",
                    re.sub(r"\s+", " ", rotulo) in fuente)
@@ -270,6 +285,11 @@ def probar(L):
             responder("dale", {**empleado, "ultima": "como:cierre"})["ir"], "como:cierre")
     esperar("«sí» sin nada antes no lleva a ningún lado",
             responder("si", empleado)["ir"], None)
+    # Lo nuevo: a quien entró; al invitado no se le cuenta cómo se trabaja adentro.
+    cierto("«qué hay de nuevo» cuenta lo último",
+           responder("que hay de nuevo", empleado)["texto"].startswith("**Lo último"))
+    cierto("al invitado, no",
+           not responder("que hay de nuevo", invitado)["texto"].startswith("**Lo último"))
     # Dónde está parado.
     r = responder("que puedo hacer aca", empleado)
     cierto("«qué puedo hacer acá» habla de la pantalla en la que está",

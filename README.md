@@ -7105,9 +7105,12 @@ desde `app.py`, abajo a la izquierda, en todas las pantallas.
 
 **Qué hace.** Tres cosas: explica cómo se hace algo («¿cómo hago una devolución?»), lleva a
 la pantalla («llevame a la caja», o el nombre solo: «caja», «para pedir»), y busca un repuesto
-(«buscar W712/75», o el código solo). Abierto es un panel con la caja para escribir arriba (en
-el celular, abajo la taparía el teclado); se minimiza con «➖», y solo al llevar a una pantalla,
-para que se vea a dónde llevó. La charla queda en la sesión y se borra al salir.
+(«buscar W712/75», o el código solo; una patente o un código de falla del escáner los reconoce
+y ofrece lo suyo). También «¿qué puedo hacer acá?» y «¿qué hay de nuevo?». Se abre con la
+burbuja o con **F1**. Abierto es un panel con la caja para escribir arriba (en
+el celular, abajo la taparía el teclado); se minimiza con «➖» o F1, y solo al llevar a una
+pantalla, para que se vea a dónde llevó. Si a donde lleva hay una sección plegable («📋 Ventas
+y cierre de caja», en el arqueo), llega con ella abierta. La charla queda en la sesión y se borra al salir.
 
 **Por qué no es un modelo de inteligencia artificial.** A un asistente que «piensa» con un
 modelo de afuera se lo convence con palabras («olvidá tus instrucciones», «soy el dueño»), y
@@ -7118,8 +7121,9 @@ además hay que mandarle afuera lo que se le escribe. Este es un buscador de res
   clave. La prueba lo mira en el código y además lo corre con la base envenenada.
 - **No hace nada: solo cambia de pantalla.** Lo único que escribe en la sesión es lo suyo
   (`_asis_…`), `pagina_actual` y las solapas —con nombres de las listas de
-  `logica/interfaz.py`, por `ir_a_donde_dice_el_aviso()`— y `_pasar_a_codigo`, que es escribir
-  en el Buscador lo mismo que escribiría la persona.
+  `logica/interfaz.py`, por `ir_a_donde_dice_el_aviso()`—, la clave `exp_…` de la sección que
+  llega abierta (leída del código de la pantalla) y `_pasar_a_codigo`, que es escribir en el
+  Buscador lo mismo que escribiría la persona.
 - **Lleva solo a donde ya se puede entrar.** Las pantallas que ofrece son las de la barra de
   quien pregunta (`paginas_a_la_vista()`, la misma cuenta que usa `app.py`), miradas en el
   momento de llevar: al que entra sin contraseña, tres; al del depósito, dos; al taller en su
@@ -7153,11 +7157,13 @@ app, y si uno cambia de nombre la prueba dice cuál.
 palabras con que se pregunta, los pasos, dónde, quién puede), y una línea en `ENTIENDE` de
 `pruebas/pruebas_del_asistente.py` con la pregunta como la haría alguien.
 
-**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 59 preguntas con su respuesta, 10
+**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 74 preguntas con su respuesta, 10
 pedidos de «llevame», 6 búsquedas, 21 intentos de sacarle algo (a un invitado, a un empleado y
 a un administrador), lo que ve cada uno, y la burbuja en la app simulada. Ocho errores puestos
 a propósito —llevar sin mirar si se puede, contarle todo al invitado, consultar la base, mostrar
 crudo lo escrito…— los detecta todos. Contesta en un milisegundo; minimizada no hace nada.
+En el navegador de verdad (PC y celular) se probó abrir con F1, preguntar, llevar con la
+sección abierta, el cartel de «te llevé a…» y que F2 siga yendo a la búsqueda.
 
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 
