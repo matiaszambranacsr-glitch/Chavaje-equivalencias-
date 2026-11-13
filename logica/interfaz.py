@@ -503,7 +503,8 @@ LO_NUEVO = (
      "de una vez pegándolas de Excel.", "🗂️ Administrar → 👥 Usuarios"),
     ("🧾 Factura electrónica de ARCA, solo cuando la cajera la pide: «Con factura» al cobrar, o "
      "después desde el comprobante o el cierre; con nota de crédito para anularla (al devolver, "
-     "por lo devuelto) y la planilla del mes para el contador. Falta el certificado de ARCA: "
+     "por lo devuelto), la planilla del mes para el contador, y con el CUIT del cliente trae de "
+     "ARCA su nombre y su condición. Falta el certificado de ARCA: "
      "en Administrar → Mensajería y cobros, «🔑 No tengo el certificado» lo arma paso a paso.",
      "💵 Caja"),
     ("🕒 Las horas ahora son las de Argentina: antes estaban tres horas adelantadas, y lo cobrado "

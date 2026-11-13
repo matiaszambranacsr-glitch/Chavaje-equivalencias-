@@ -49,10 +49,18 @@ from datetime import timezone as _tz
 #     ingresos_brutos = "…"             # para el PDF de la factura
 AMBIENTES_DE_ARCA = {
     "homologacion": {"wsaa": "https://wsaahomo.afip.gov.ar/ws/services/LoginCms",
-                     "wsfe": "https://wswhomo.afip.gov.ar/wsfev1/service.asmx"},
+                     "wsfe": "https://wswhomo.afip.gov.ar/wsfev1/service.asmx",
+                     "padron": "https://awshomo.afip.gov.ar/sr-padron/webservices/"
+                               "personaServiceA5"},
     "produccion": {"wsaa": "https://wsaa.afip.gov.ar/ws/services/LoginCms",
-                   "wsfe": "https://servicios1.afip.gov.ar/wsfev1/service.asmx"},
+                   "wsfe": "https://servicios1.afip.gov.ar/wsfev1/service.asmx",
+                   "padron": "https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5"},
 }
+# El servicio del padrón («Consulta de constancia de inscripción»): ver datos_del_cuit_en_arca().
+SERVICIO_DEL_PADRON = "ws_sr_constancia_inscripcion"
+_NS_PADRON = "http://a5.soap.ws.server.puc.sr/"
+# Los impuestos del padrón que dicen la condición frente al IVA.
+IMPUESTO_IVA, IMPUESTO_IVA_EXENTO = 30, 32
 CONDICIONES_DEL_NEGOCIO = ("monotributo", "responsable_inscripto")
 # El tipo de comprobante de ARCA: (qué es, letra).
 TIPOS_DE_COMPROBANTE = {1: ("Factura", "A"), 6: ("Factura", "B"), 11: ("Factura", "C"),
@@ -267,9 +275,11 @@ def _texto_de_arca(raiz, nombre, defecto=""):
     return (elemento.text or "").strip() if elemento is not None and elemento.text else defecto
 
 
-def _ticket_de_acceso(cfg):
-    """{token, sign} vigentes: el guardado si le quedan más de diez minutos, o uno nuevo."""
-    clave = f"arca_ta_{cfg['ambiente']}_{cfg['cuit']}"
+def _ticket_de_acceso(cfg, servicio="wsfe"):
+    """{token, sign} vigentes para ese servicio de ARCA: el guardado si le quedan más de diez
+    minutos, o uno nuevo. Cada servicio tiene su permiso."""
+    clave = (f"arca_ta_{cfg['ambiente']}_{cfg['cuit']}" if servicio == "wsfe"
+             else f"arca_ta_{servicio}_{cfg['ambiente']}_{cfg['cuit']}")
     try:
         guardado = json.loads(obtener_config(clave, "") or "{}")
         if guardado and datetime.fromisoformat(guardado["vence"]) - datetime.now(_tz.utc) > \
@@ -277,7 +287,7 @@ def _ticket_de_acceso(cfg):
             return guardado
     except (ValueError, KeyError, TypeError):
         pass
-    cms = _firmar_pedido(_pedido_de_acceso(), cfg["certificado"], cfg["clave_privada"])
+    cms = _firmar_pedido(_pedido_de_acceso(servicio), cfg["certificado"], cfg["clave_privada"])
     try:
         raiz = _hablar_con_arca(AMBIENTES_DE_ARCA[cfg["ambiente"]]["wsaa"], "",
                                 f'<loginCms xmlns="{_NS_WSAA}"><in0>{cms}</in0></loginCms>')
@@ -297,6 +307,63 @@ def _ticket_de_acceso(cfg):
     # A la copia ya: si la app se reinicia y lo pierde, ARCA no da otro hasta que venza.
     pedir_la_copia_ya()
     return nuevo
+
+
+# ---- El padrón: quién es un CUIT ------------------------------------------------------------
+def datos_del_cuit_en_arca(cuit):
+    """LO QUE ARCA SABE DE UN CUIT, GRATIS: el nombre o razón social, la condición frente al IVA
+    y el domicilio fiscal, de su servicio «Consulta de constancia de inscripción». Para no
+    tipear el cliente de una factura ni elegirle mal la condición (de la condición sale la
+    letra: A, B o C). Devuelve ({"nombre", "condicion", "domicilio", "estado"}, "") o (None, por
+    qué no).
+
+    Usa el mismo certificado que la factura, con otro permiso: en ARCA hay que sumarle al
+    certificado el servicio ws_sr_constancia_inscripcion (es un paso más de los de la factura).
+    El CUIT se le manda a ARCA y a nadie más: es el mismo que después va en la factura."""
+    cfg = configuracion_de_arca()
+    if not cfg:
+        return None, "Falta configurar la factura electrónica."
+    numero = cuit_valido(cuit)
+    if not numero:
+        return None, "Ese CUIT no cierra: revisá los números."
+    try:
+        ticket = _ticket_de_acceso(cfg, SERVICIO_DEL_PADRON)
+        raiz = _hablar_con_arca(
+            AMBIENTES_DE_ARCA[cfg["ambiente"]]["padron"], "",
+            f'<a5:getPersona_v2 xmlns:a5="{_NS_PADRON}"><token>{_html.escape(ticket["token"])}'
+            f'</token><sign>{_html.escape(ticket["sign"])}</sign><cuitRepresentada>{cfg["cuit"]}'
+            f"</cuitRepresentada><idPersona>{numero}</idPersona></a5:getPersona_v2>")
+    except ErrorDeArca as e:
+        texto = str(e)
+        if "notAuthorized" in texto or "no autorizado" in texto.lower():
+            return None, ("El certificado todavía no tiene permiso para consultar el padrón: en "
+                          "ARCA, sumale el servicio «Consulta de constancia de inscripción» "
+                          f"({SERVICIO_DEL_PADRON}), igual que se hizo con el de la factura.")
+        if "No existe persona" in texto:
+            return None, "ARCA no tiene a nadie con ese CUIT."
+        return None, texto
+    generales = _primero_de_arca(raiz, "datosGenerales")
+    if generales is None:
+        # Hay CUIT pero no constancia (inactivo, con datos por completar): ARCA dice por qué.
+        motivo = _texto_de_arca(raiz, "error") or "sin detalle"
+        return None, f"ARCA no da la constancia de ese CUIT: {tapar_lo_sensible(motivo)[:160]}."
+    nombre = _texto_de_arca(generales, "razonSocial") or " ".join(
+        x for x in (_texto_de_arca(generales, "apellido"), _texto_de_arca(generales, "nombre"))
+        if x)
+    impuestos = {int(e.text) for e in raiz.iter()
+                 if (e.tag == "idImpuesto" or e.tag.endswith("}idImpuesto"))
+                 and (e.text or "").strip().isdigit()}
+    condicion = ("Monotributista" if _primero_de_arca(raiz, "datosMonotributo") is not None
+                 else "Responsable inscripto" if IMPUESTO_IVA in impuestos
+                 else "Exento" if IMPUESTO_IVA_EXENTO in impuestos
+                 else "Consumidor final")
+    fiscal = _primero_de_arca(generales, "domicilioFiscal")
+    domicilio = ", ".join(x for x in (_texto_de_arca(fiscal, "direccion"),
+                                      _texto_de_arca(fiscal, "localidad"),
+                                      _texto_de_arca(fiscal, "descripcionProvincia"))
+                          if x) if fiscal is not None else ""
+    return {"nombre": " ".join(nombre.split())[:80], "condicion": condicion,
+            "domicilio": domicilio, "estado": _texto_de_arca(generales, "estadoClave")}, ""
 
 
 # ---- WSFEv1: el CAE -------------------------------------------------------------------------
@@ -1137,7 +1204,9 @@ PASOS_DEL_CERTIFICADO_DE_ARCA = (
     "pedido (el archivo `pedido.csr`, abierto con el Bloc de notas) y tocá «Crear DN y obtener "
     "certificado». Copiá el certificado que te devuelve.\n"
     "3. En WSASS → **«Crear autorización a servicio»**: elegí ese alias, tu CUIT y el servicio "
-    "**`wsfe`** (factura electrónica).\n"
+    "**`wsfe`** (factura electrónica). Y otra igual con **`ws_sr_constancia_inscripcion`** "
+    "(opcional: es lo que deja traer de ARCA el nombre y la condición del cliente con su "
+    "CUIT).\n"
     "4. Pegá el bloque de abajo en Streamlit (Settings → Secrets), con el certificado adentro. "
     "De prueba, el punto de venta puede ser cualquiera (por ejemplo 1).\n\n"
     "**De verdad (producción), cuando el de prueba ande:**\n"
@@ -1145,7 +1214,8 @@ PASOS_DEL_CERTIFICADO_DE_ARCA = (
     "alias y el mismo `pedido.csr`. Bajá el certificado (`.crt`).\n"
     "2. En «Administrador de Relaciones de Clave Fiscal» → «Nueva relación» → ARCA → WebServices "
     "→ **«Facturación Electrónica»**, y como representante el «Computador Fiscal» con ese "
-    "alias.\n"
+    "alias. Lo mismo con **«Consulta de constancia de inscripción»** (opcional: para traer el "
+    "nombre y la condición del cliente con su CUIT).\n"
     "3. En «Administración de puntos de venta y domicilios», un punto de venta nuevo del tipo "
     "**«RECE para aplicativo y web services»** (si sos monotributista: «Factura Electrónica - "
     "Monotributo - Web Services»). Ese número va en `punto_de_venta`.\n"
@@ -1223,6 +1293,12 @@ def elegir_cliente_de_la_factura(prefijo, venta_id=None):
             st.session_state[f"{prefijo}_condicion_factura"] = _cond
             st.session_state[f"{prefijo}_documento_factura"] = _doc
             st.session_state[f"{prefijo}_nombre_factura"] = _nom
+    # Lo traído de ARCA con «🔎 Traer de ARCA» (más abajo), puesto ANTES de dibujar los campos:
+    # después Streamlit no deja cambiarles el valor.
+    _de_arca = st.session_state.pop(f"{prefijo}_de_arca", None)
+    if _de_arca:
+        st.session_state[f"{prefijo}_condicion_factura"] = _de_arca["condicion"]
+        st.session_state[f"{prefijo}_nombre_factura"] = _de_arca["nombre"]
     # La condición sola en su renglón: en el diálogo de cobrar, de a tres, «Consumidor final» se
     # cortaba en «Consumidor f…» (se vio en una captura).
     condicion = st.selectbox("Cliente:", list(CONDICIONES_DEL_CLIENTE),
@@ -1232,6 +1308,18 @@ def elegir_cliente_de_la_factura(prefijo, venta_id=None):
                                                else ""),
                                key=f"{prefijo}_documento_factura", placeholder="Ej: 30123456")
     nombre = _c3.text_input("Nombre (opcional)", key=f"{prefijo}_nombre_factura")
+    # EL NOMBRE Y LA CONDICIÓN, DEL PADRÓN DE ARCA (ver datos_del_cuit_en_arca()): con un CUIT
+    # puesto, un toque los trae. De la condición sale la letra de la factura, y elegirla a ojo
+    # es hacerle una B a quien le tocaba una A.
+    if len(re.sub(r"\D", "", documento or "")) == 11 and configuracion_de_arca():
+        if st.button("🔎 Traer el nombre y la condición de ARCA", key=f"{prefijo}_traer_de_arca"):
+            _datos, _por_que = datos_del_cuit_en_arca(documento)
+            if _datos:
+                st.session_state[f"{prefijo}_de_arca"] = _datos
+                avisar("success", f"ARCA: {_datos['nombre']} · {_datos['condicion']}"
+                                  + (f" · {_datos['domicilio']}" if _datos["domicilio"] else ""))
+                st.rerun()
+            st.warning(_por_que)
     return condicion, documento, nombre
 
 

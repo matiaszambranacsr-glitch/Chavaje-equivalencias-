@@ -70,15 +70,32 @@ class _ArcaDePrueba:
         self.logins = 0
         self.cortar_el_proximo_cae = False
         self.autorizar_aunque_se_corte = False
+        self.padron = {}          # CUIT -> lo que el padrón contesta de él (XML de personaReturn)
+        self.padron_autorizado = True
 
     def post(self, url, data=None, timeout=None, headers=None):
         accion = (headers or {}).get("SOAPAction", "").strip('"')
         cuerpo = data.decode("utf-8")
         self.pedidos.append((accion, cuerpo))
+        if "getPersona_v2" in cuerpo:
+            assert "sr-padron" in url, "el padrón tiene su propia dirección"
+            cuit = re.search(r"<idPersona>(\d+)</idPersona>", cuerpo).group(1)
+            if cuit not in self.padron:
+                return self._respuesta("<soap:Fault><faultcode>soap:Server</faultcode>"
+                                       "<faultstring>No existe persona con ese Id</faultstring>"
+                                       "</soap:Fault>")
+            return self._respuesta('<ns2:getPersona_v2Response xmlns:ns2="http://a5.soap.ws.'
+                                   f'server.puc.sr/"><personaReturn>{self.padron[cuit]}'
+                                   "</personaReturn></ns2:getPersona_v2Response>")
         if accion == "":
-            self.logins += 1
             cms = re.search(r"<in0>(.*?)</in0>", cuerpo).group(1)
             assert b"<loginTicketRequest" in base64.b64decode(cms), "el TRA no va adentro"
+            if (b"ws_sr_constancia_inscripcion" in base64.b64decode(cms)
+                    and not self.padron_autorizado):
+                return self._respuesta("<soap:Fault><faultcode>ns1:coe.notAuthorized</faultcode>"
+                                       "<faultstring>Computador no autorizado a acceder al "
+                                       "servicio</faultstring></soap:Fault>")
+            self.logins += 1
             vence = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
             ticket = (f"<loginTicketResponse><header><expirationTime>{vence}</expirationTime>"
                       "</header><credentials><token>TOKEN&amp;1</token><sign>FIRMA</sign>"
@@ -501,6 +518,65 @@ def probar(L):
                 uno("SELECT nombre_receptor FROM facturas WHERE venta_id = ?", v21),
                 "Taller Sur SRL")
 
+        # 4f. EL PADRÓN DE ARCA: con el CUIT, el nombre y la condición frente al IVA del cliente
+        # (de la condición sale la letra de la factura). Con su propio permiso, aparte del de
+        # facturar.
+        arca.padron = {
+            "30712345671": (
+                "<datosGenerales><domicilioFiscal><direccion>AV SIEMPRE VIVA 742</direccion>"
+                "<localidad>SALTA</localidad><descripcionProvincia>SALTA</descripcionProvincia>"
+                "</domicilioFiscal><estadoClave>ACTIVO</estadoClave><idPersona>30712345671"
+                "</idPersona><razonSocial>TALLER  NORTE SA</razonSocial><tipoPersona>JURIDICA"
+                "</tipoPersona></datosGenerales><datosRegimenGeneral><impuesto>"
+                "<descripcionImpuesto>GANANCIAS</descripcionImpuesto><idImpuesto>10</idImpuesto>"
+                "</impuesto><impuesto><descripcionImpuesto>IVA</descripcionImpuesto><idImpuesto>30"
+                "</idImpuesto></impuesto></datosRegimenGeneral>"),
+            "20111111112": (
+                "<datosGenerales><apellido>PEREZ</apellido><estadoClave>ACTIVO</estadoClave>"
+                "<nombre>JUAN</nombre><tipoPersona>FISICA</tipoPersona></datosGenerales>"
+                "<datosMonotributo><categoriaMonotributo><descripcionCategoria>B VENTAS"
+                "</descripcionCategoria></categoriaMonotributo><impuesto><idImpuesto>20"
+                "</idImpuesto></impuesto></datosMonotributo>"),
+        }
+        _otro_cuit = next(f"3370000000{d}" for d in range(10)
+                          if ns["cuit_valido"](f"3370000000{d}"))
+        _inactivo = next(f"2711111111{d}" for d in range(10)
+                         if ns["cuit_valido"](f"2711111111{d}"))
+        arca.padron[_inactivo] = (
+            "<errorConstancia><apellido>GOMEZ</apellido><error>La clave se encuentra "
+            f"inactiva</error><idPersona>{_inactivo}</idPersona></errorConstancia>")
+        _logins = arca.logins
+        _padron = ns["datos_del_cuit_en_arca"]
+        esperar("del padrón: la razón social, la condición y el domicilio de un inscripto",
+                _padron("30-71234567-1"),
+                ({"nombre": "TALLER NORTE SA", "condicion": "Responsable inscripto",
+                  "domicilio": "AV SIEMPRE VIVA 742, SALTA, SALTA", "estado": "ACTIVO"}, ""))
+        esperar("una persona en el monotributo: apellido y nombre, monotributista",
+                [(_padron("20111111112")[0] or {}).get(k) for k in ("nombre", "condicion")],
+                ["PEREZ JUAN", "Monotributista"])
+        esperar("con otro permiso que el de facturar, pedido una vez; y se manda quién pregunta "
+                "y por quién",
+                (arca.logins - _logins,
+                 "<cuitRepresentada>20111111112</cuitRepresentada><idPersona>20111111112"
+                 "</idPersona>" in arca.pedidos[-1][1]), (1, True))
+        _pedidos_antes = len(arca.pedidos)
+        esperar("el que no está, el que no tiene constancia, y el CUIT que no cierra (sin "
+                "preguntarle a ARCA)",
+                (_padron(_otro_cuit), _padron(_inactivo)[0],
+                 "inactiva" in _padron(_inactivo)[1], _padron("30-71234567-2"),
+                 len(arca.pedidos) - _pedidos_antes),
+                ((None, "ARCA no tiene a nadie con ese CUIT."), None, True,
+                 (None, "Ese CUIT no cierra: revisá los números."), 3))
+        ns["guardar_config"]("arca_ta_ws_sr_constancia_inscripcion_homologacion_20111111112", "")
+        arca.padron_autorizado = False
+        _sin_permiso = _padron("30712345671")
+        arca.padron_autorizado = True
+        esperar("sin el permiso del padrón en el certificado: dice qué servicio sumarle",
+                (_sin_permiso[0], "ws_sr_constancia_inscripcion" in _sin_permiso[1],
+                 "http" in _sin_permiso[1]), (None, True, False))
+        esperar("y facturar sigue andando igual (su permiso es otro)",
+                bool(ns["_ticket_de_acceso"](ns["configuracion_de_arca"]())["token"]), True)
+
         # 5. El QR y el PDF.
         _fa = dict(c.execute("SELECT * FROM facturas WHERE venta_id = ?", (v2,)).fetchone())
         _qr = ns["url_del_qr"](_fa, "20111111112")
@@ -610,6 +686,25 @@ def probar(L):
                  [x.value for x in at.selectbox if (x.key or "").endswith("_condicion_factura")],
                  [e.value for e in at.exception]),
                 (["30-71234567-1"], ["Monotributista"], []))
+        # Con un CUIT puesto, «🔎 Traer de ARCA» completa el nombre y la condición.
+        v24, _ = ns["cerrar_venta"]([item(9)], a_la_caja=True)
+        ns["cobrar_venta"](v24, "Efectivo")
+        at.session_state["caja_recien"] = v24
+        at.run()
+        esperar("sin un CUIT entero, no se ofrece traer nada de ARCA",
+                [b.key for b in at.button if (b.key or "").endswith("_traer_de_arca")], [])
+        at.text_input(key=f"caja_recien_v{v24}_documento_factura").set_value("30-71234567-1").run()
+        [b for b in at.button if b.key == f"caja_recien_v{v24}_traer_de_arca"][0].click().run()
+        esperar("con el CUIT: un toque trae el nombre y la condición del padrón",
+                (at.selectbox(key=f"caja_recien_v{v24}_condicion_factura").value,
+                 at.text_input(key=f"caja_recien_v{v24}_nombre_factura").value,
+                 at.text_input(key=f"caja_recien_v{v24}_documento_factura").value,
+                 [e.value for e in at.exception]),
+                ("Responsable inscripto", "TALLER NORTE SA", "30-71234567-1", []))
+        [b for b in at.button if b.key == "caja_recien_facturar"][0].click().run()
+        esperar("y la factura sale con esos datos: la A, a ese nombre",
+                c.execute("SELECT tipo, nombre_receptor, doc_nro FROM facturas WHERE venta_id = ?",
+                          (v24,)).fetchone()[:], (1, "TALLER NORTE SA", 30712345671))
         # Una factura que la app perdió, del mismo importe que una venta sin factura: el
         # comprobante de la caja ofrece enlazarla en vez de hacer otra.
         v19, _ = ns["cerrar_venta"]([item()], a_la_caja=True)

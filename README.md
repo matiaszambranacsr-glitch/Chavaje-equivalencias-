@@ -7116,6 +7116,19 @@ Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porq
 
 `pruebas_de_muchas_cuentas.py` lo controla con 2.000 cuentas: el pegado de la planilla, el buscador (acentos, orden, número, CUIT, cuántas muestra y que no tarde), el resumen igual que cuenta por cuenta, el ingreso (que una clave mal puesta no tarde, con pocas y con muchas con portal, la clave repetida), y las pantallas dibujadas sin la lista de dos mil. Las 89 pantallas con la base real y 2.000 cuentas cargadas: en verde.
 
+## 🆓 Más información gratuita: qué se buscó, qué entró y qué no
+
+Lo pidió el dueño: «busquemos más información gratuita». Primero se miró lo que la app ya usa sin pagar nada, para no repetir: el BCRA (deudores, cheques rechazados, tasas, dólar), el INDEC (inflación), la NHTSA (chasis, campañas y reclamos), el parque automotor de la DNRPA, las autopartes de seguridad homologadas (CHAS), los catálogos de MANN, SKF y NGK, y Mercado Libre. Después se contó en la base real qué fabricantes nombran las listas, para buscar donde rinde: **BOSCH** (3.448 productos), **VALEO** (852), **INA** (726), SKF (400, ya está), **DAYCO** (188), NGK (105, ya está), MANN (72, ya está), GATES (58) y FRAM (41).
+
+**Lo que entró: el padrón de ARCA.** Con el CUIT del cliente, ARCA dice gratis su **nombre o razón social, su condición frente al IVA y su domicilio fiscal** (servicio «Consulta de constancia de inscripción», `ws_sr_constancia_inscripcion`). En el formulario de la factura, con un CUIT puesto aparece **«🔎 Traer el nombre y la condición de ARCA»**: un toque y quedan cargados. De la condición sale la letra de la factura (A, B o C): elegirla a ojo era hacerle una B a quien le tocaba una A. Usa el mismo certificado que la factura, con su propio permiso: en ARCA hay que sumarle ese servicio al certificado (está en los pasos de «🔑 No tengo el certificado»); sin eso, la app lo dice y facturar sigue andando igual. El CUIT se le manda a ARCA y a nadie más. Como la factura, está probado contra un ARCA simulado (`datos_del_cuit_en_arca()`, `pruebas_de_las_facturas.py` 4f).
+
+**Lo que se buscó y no entró, y por qué:**
+
+- **Catálogos oficiales de BOSCH, VALEO, INA, DAYCO y GATES** —los que más rendirían—: no se encontró una dirección pública por código. Sus catálogos son aplicaciones que arman la página en el navegador o piden usuario; lo que aparece por código son tiendas (con números internos, no el del fabricante) que revenden datos de TecDoc, que es pago.
+- **oilfilter-crossreference.com**: existe, con una dirección por código igual a la de las bujías que ya se usa (`/convert/Fram/PH5949`, `/convert/MAHLE/OC981`, `/convert/Wix/51348`). Pero es solo de filtros de aceite, y lo que tus listas citan de FRAM son filtros de nafta (G…, P…): hoy sumaría casi nada. Queda anotado para cuando entren listas de filtros.
+- **CAPE** (certificados de autopartes de primer equipo, del mismo portal que el CHAS): diría qué marcas son proveedoras de las terminales. No se pudo bajar el archivo desde donde se armó esto para ver sus columnas; queda como candidato.
+- **Retiros de vehículos (recall) de Argentina** y **fichas técnicas por modelo (LCM)**: no se encontró un dataset abierto. Las campañas siguen saliendo de la NHTSA.
+
 ## 🔑 Cada uno entra con su usuario y su contraseña
 
 Lo pidió el dueño: «necesito que cada usuario con contraseña tenga que poner también el usuario, ya que si no capaz que en algún momento dos personas ponen la misma contraseña y se cruzarían». Tenía razón, y era peor: como la contraseña sola decía quién eras, ninguna se podía repetir, y para evitarlo la app avisaba **«esa contraseña ya la usa otra cuenta»** —que es decirle a uno la contraseña de otro—.
