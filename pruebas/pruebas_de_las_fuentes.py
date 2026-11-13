@@ -745,6 +745,106 @@ def probar(L):
                                                      sesion=_Sesion13("", freno=True))["error"]
     esperar("ficha suelta: el freno de la sesión, sin la dirección",
             (bool(_err13), "http" in _err13 or "clave" in _err13), (True, False))
+    # 14. LO QUE MÁS SE BUSCA EN MERCADO LIBRE, CONTRA EL CATÁLOGO (ver esa sección en
+    # logica/proveedores.py). Con un Mercado Libre de mentira: se pide la categoría de los
+    # repuestos con el token, las búsquedas se cruzan con las descripciones (sin importar el
+    # plural ni las palabras sueltas), lo que no se tiene va primero, y lo que falla se dice.
+    c, conn = ns["c"], ns["conn"]
+    gm = ns["traer_las_tendencias_de_mercado_libre"].__globals__
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('TENDENCIAS', 'PROVEEDOR')")
+    _marca_t = c.lastrowid
+    for _cod, _desc in (("T1", "PASTILLA DE FRENO DELANTERA FIAT PALIO"),
+                        ("T2", "PASTILLA FRENO TRASERA PALIO SIENA"),
+                        ("T3", "AMORTIGUADOR TRASERO VW GOL TREND"),
+                        ("T4", "BUJIA NGK BP5HS")):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", (_cod, _cod, _desc, _marca_t))
+    conn.commit()
+    esperar("la raíz de una palabra: sin el plural",
+            [gm["_raiz_de_la_palabra"](p) for p in ("PASTILLAS", "AMORTIGUADORES", "BUJIAS", "GAS",
+                                                    "FAROLES", "CROSS")],
+            ["PASTILLA", "AMORTIGUADOR", "BUJIA", "GAS", "FAROL", "CROSS"])
+    esperar("cuántos productos nombran cada búsqueda: todas sus palabras, en cualquier orden",
+            ns["productos_que_nombran_las_busquedas"](
+                ["pastillas de freno palio", "Amortiguadores para Gol", "cubre volante",
+                 "freno palio delantera", "de para"]),
+            {"pastillas de freno palio": 2, "Amortiguadores para Gol": 1, "cubre volante": 0,
+             "freno palio delantera": 1, "de para": 0})
+
+    class _RespuestaML:
+        def __init__(self, estado, cuerpo):
+            self.status_code, self._cuerpo = estado, cuerpo
+
+        def json(self):
+            return self._cuerpo
+
+    class _MercadoLibre:
+        def __init__(self):
+            self.pedidos, self.contesta = [], None
+
+        def get(self, url, timeout=None, headers=None, params=None):
+            self.pedidos.append((url, dict(headers or {})))
+            return self.contesta
+
+    _ml, _requests_de_verdad = _MercadoLibre(), gm["requests"]
+    _token_de_verdad, _config_de_verdad = gm["token_de_mercado_libre"], gm["config_mercado_libre"]
+    esperar("sin la aplicación de Mercado Libre cargada: lo dice, y no sale a ningún lado",
+            (ns["traer_las_tendencias_de_mercado_libre"]()[0],
+             "mercadolibre" in (ns["traer_las_tendencias_de_mercado_libre"]()[1] or "")),
+            (0, True))
+    _secretos_ml = {"client_id": "x", "client_secret": "y"}
+    gm["requests"] = _ml
+    gm["token_de_mercado_libre"] = lambda: ("TOKEN-1", None)
+    gm["config_mercado_libre"] = lambda: dict(_secretos_ml)
+    try:
+        _ml.contesta = _RespuestaML(200, [
+            {"keyword": "pastillas de freno palio", "url": "https://listado.mercadolibre.com.ar/x"},
+            {"keyword": "cubre volante", "url": "https://listado.mercadolibre.com.ar/y"},
+            {"keyword": "Pastillas  de freno palio"}, {"keyword": ""},
+            {"keyword": "amortiguadores gol"}])
+        esperar("traídas: sin repetidas ni vacías, por la categoría de los repuestos y con el token",
+                (ns["traer_las_tendencias_de_mercado_libre"](), _ml.pedidos[-1][0],
+                 _ml.pedidos[-1][1].get("Authorization")),
+                ((3, None), "https://api.mercadolibre.com/trends/MLA/MLA5725", "Bearer TOKEN-1"))
+        _guardadas = ns["tendencias_de_mercado_libre"]()
+        esperar("guardadas con lo que no se tiene primero, y sin tramos si no son las cincuenta",
+                [(f["busqueda"], f["en_catalogo"], f["tipo"]) for f in _guardadas["filas"]],
+                [("cubre volante", 0, ""), ("amortiguadores gol", 1, ""),
+                 ("pastillas de freno palio", 2, "")])
+        _ml.contesta = _RespuestaML(200, [{"keyword": f"busqueda numero {i}"} for i in range(50)])
+        ns["traer_las_tendencias_de_mercado_libre"]()
+        _por_busqueda = {f["busqueda"]: f["tipo"] for f in ns["tendencias_de_mercado_libre"]()["filas"]}
+        esperar("con las cincuenta: las diez primeras crecen en ventas, veinte son las más "
+                "buscadas y veinte crecen en búsquedas",
+                [_por_busqueda[f"busqueda numero {i}"][:1] for i in (0, 9, 10, 29, 30, 49)],
+                ["📈", "📈", "🔎", "🔎", "🚀", "🚀"])
+        _antes = ns["obtener_config"]("ml_tendencias", "")
+        _ml.contesta = _RespuestaML(403, {"message": "forbidden"})
+        _rechazo = ns["traer_las_tendencias_de_mercado_libre"]()
+        _ml.contesta = _RespuestaML(200, [])
+        _vacia = ns["traer_las_tendencias_de_mercado_libre"]()
+        _secretos_ml["categoria_de_tendencias"] = "../../otra/cosa"
+        _pedidos = len(_ml.pedidos)
+        _categoria_rara = ns["traer_las_tendencias_de_mercado_libre"]()
+        esperar("rechazado, sin tendencias o con una categoría rara: lo dice, no pide de más y "
+                "no pisa lo guardado",
+                (_rechazo[0], "403" in _rechazo[1], _vacia[0], bool(_vacia[1]),
+                 _categoria_rara[0], len(_ml.pedidos) == _pedidos,
+                 ns["obtener_config"]("ml_tendencias", "") == _antes),
+                (0, True, 0, True, 0, True, True))
+        _secretos_ml["categoria_de_tendencias"] = "MLA1747"
+        _ml.contesta = _RespuestaML(200, [{"keyword": "bujias ngk"}])
+        ns["traer_las_tendencias_de_mercado_libre"]()
+        esperar("la categoría se puede cambiar en los secretos",
+                (_ml.pedidos[-1][0].rsplit("/", 1)[-1],
+                 [(f["busqueda"], f["en_catalogo"] >= 1)
+                  for f in ns["tendencias_de_mercado_libre"]()["filas"]]),
+                ("MLA1747", [("bujias ngk", True)]))
+    finally:
+        gm["requests"] = _requests_de_verdad
+        gm["token_de_mercado_libre"] = _token_de_verdad
+        gm["config_mercado_libre"] = _config_de_verdad
+
     return fallas
 
 

@@ -1504,6 +1504,125 @@ def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE,
     return resumen
 
 
+# LO QUE MÁS SE BUSCA EN MERCADO LIBRE, CONTRA TU CATÁLOGO. Lo pidió el dueño: «busquemos más
+# información gratuita». Mercado Libre publica cada semana las búsquedas que son tendencia, por
+# categoría, con la misma aplicación gratuita de arriba (developers.mercadolibre.com.ar →
+# «Tendencias»: GET /trends/MLA/{categoría}). De la categoría de los repuestos salen unas
+# cincuenta: las que más crecieron en ventas, las que más se buscan y las que más crecieron en
+# búsquedas. Cruzadas con el catálogo dicen qué está pidiendo la gente ESTA semana y de eso
+# cuánto tenés cargado —las que dan cero son las que conviene mirar—.
+#   · Es lo que busca todo el país en Mercado Libre, no tu mostrador: una pista para pedir, al
+#     lado de «🚗 Los autos que más circulan», no una orden.
+#   · Se traen con un botón (sale a internet) y quedan guardadas con su fecha.
+# «Accesorios para Vehículos»: la categoría de Mercado Libre Argentina donde están los
+# repuestos. Se puede cambiar en los secretos ([mercadolibre] categoria_de_tendencias).
+ML_CATEGORIA_DE_REPUESTOS = "MLA5725"
+CONFIG_DE_LAS_TENDENCIAS = "ml_tendencias"
+# Cómo las ordena Mercado Libre cuando manda las cincuenta: (hasta qué puesto, qué son).
+TRAMOS_DE_LAS_TENDENCIAS = ((10, "📈 Crecen en ventas"), (30, "🔎 Las más buscadas"),
+                            (50, "🚀 Crecen en búsquedas"))
+# Palabras de una búsqueda que no dicen qué pieza es.
+_PALABRAS_SUELTAS_DE_UNA_BUSQUEDA = frozenset(
+    "DE DEL LA LAS EL LOS PARA POR CON SIN EN UN UNA Y O A AUTO AUTOS ORIGINAL ORIGINALES "
+    "NUEVO NUEVA NUEVOS KIT JUEGO PAR".split())
+
+
+def _raiz_de_la_palabra(palabra):
+    """La palabra sin el plural, para que «PASTILLAS» encuentre «PASTILLA» y «AMORTIGUADORES»,
+    «AMORTIGUADOR». Tosco a propósito: es para contar, no para decidir nada."""
+    if len(palabra) > 5 and palabra.endswith("ES") and palabra[-3] in "RLNDJ":
+        return palabra[:-2]
+    if len(palabra) > 3 and palabra.endswith("S") and not palabra.endswith("SS"):
+        return palabra[:-1]
+    return palabra
+
+
+def _palabras_de_la_busqueda(texto):
+    return [_raiz_de_la_palabra(p) for p in re.findall(r"[A-Z0-9]+", normalizar_texto(texto))
+            if len(p) >= 2 and p not in _PALABRAS_SUELTAS_DE_UNA_BUSQUEDA]
+
+
+def productos_que_nombran_las_busquedas(busquedas):
+    """{búsqueda: cuántos productos del catálogo tienen TODAS sus palabras en la descripción},
+    en una sola pasada por las descripciones distintas (como _cuantos_productos_nombran())."""
+    palabras_de = {b: _palabras_de_la_busqueda(b) for b in busquedas}
+    palabras_de = {b: ps for b, ps in palabras_de.items() if ps}
+    cuenta = {b: 0 for b in busquedas}
+    if not palabras_de:
+        return cuenta
+    todas = set().union(*palabras_de.values())
+    c.execute("SELECT descripcion, COUNT(*) FROM productos WHERE descripcion IS NOT NULL "
+              "GROUP BY descripcion")
+    for descripcion, cuantos in c.fetchall():
+        presentes = {_raiz_de_la_palabra(p)
+                     for p in re.findall(r"[A-Z0-9]+", normalizar_texto(descripcion))} & todas
+        if not presentes:
+            continue
+        for busqueda, palabras in palabras_de.items():
+            if all(p in presentes for p in palabras):
+                cuenta[busqueda] += cuantos
+    return cuenta
+
+
+def traer_las_tendencias_de_mercado_libre():
+    """Trae las búsquedas que son tendencia en la categoría de los repuestos, las cruza con el
+    catálogo y las deja guardadas. (cuántas, error)."""
+    token, error = token_de_mercado_libre()
+    if error:
+        return 0, error
+    categoria = str((config_mercado_libre() or {}).get("categoria_de_tendencias")
+                    or ML_CATEGORIA_DE_REPUESTOS).strip()
+    if not re.fullmatch(r"[A-Z]{3}\d{1,12}", categoria):
+        return 0, "La categoría de tendencias de los secretos no es de Mercado Libre (ej: MLA5725)."
+    try:
+        r = requests.get(f"{ML_API}/trends/{ML_SITIO}/{categoria}", timeout=20,
+                         headers={"Authorization": f"Bearer {token}"})
+    except Exception as e:
+        anotar_error("traer_las_tendencias_de_mercado_libre", e)
+        return 0, f"No se pudieron traer las tendencias ({el_error_en_castellano(e)})."
+    if r.status_code in (401, 403):
+        _TOKEN_DE_MERCADO_LIBRE.clear()
+        return 0, f"Mercado Libre rechazó el pedido de tendencias ({r.status_code})."
+    if r.status_code != 200:
+        return 0, f"Mercado Libre respondió {r.status_code} al pedir las tendencias."
+    try:
+        crudas = r.json() or []
+    except ValueError:
+        crudas = []
+    busquedas = []
+    for it in crudas if isinstance(crudas, list) else []:
+        texto = " ".join(str((it or {}).get("keyword") or "").split())[:80]
+        if texto and texto.lower() not in {b.lower() for b in busquedas}:
+            busquedas.append(texto)
+    if not busquedas:
+        return 0, "Mercado Libre no mandó ninguna tendencia para esa categoría."
+    en_catalogo = productos_que_nombran_las_busquedas(busquedas)
+    # Los tramos valen solo si mandó las cincuenta de siempre: con otra cantidad no se sabe
+    # dónde corta cada uno.
+    completas = len(crudas) == TRAMOS_DE_LAS_TENDENCIAS[-1][0]
+    filas = [{"busqueda": b,
+              "tipo": next((nombre for hasta, nombre in TRAMOS_DE_LAS_TENDENCIAS if i < hasta), "")
+              if completas else "",
+              "en_catalogo": en_catalogo.get(b, 0)} for i, b in enumerate(busquedas)]
+    guardar_config(CONFIG_DE_LAS_TENDENCIAS, json.dumps(
+        {"cuando": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "categoria": categoria,
+         "filas": filas}, ensure_ascii=False))
+    return len(filas), None
+
+
+def tendencias_de_mercado_libre():
+    """Las tendencias guardadas: {"cuando", "categoria", "filas": [{busqueda, tipo,
+    en_catalogo}]} con lo que no tenés primero, o {} si nunca se trajeron."""
+    try:
+        guardadas = json.loads(obtener_config(CONFIG_DE_LAS_TENDENCIAS, "") or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(guardadas, dict) or not guardadas.get("filas"):
+        return {}
+    guardadas["filas"] = sorted(guardadas["filas"], key=lambda f: f.get("en_catalogo", 0))
+    return guardadas
+
+
 def precios_lejos_de_mercado_libre(veces=1.6, limite=200):
     """Tus productos cuyo precio de lista está a más de `veces` del que se publica en Mercado
     Libre, para un lado o para el otro. Primero los que tenés en stock y los más alejados."""

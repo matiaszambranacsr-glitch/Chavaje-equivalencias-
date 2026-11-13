@@ -493,6 +493,9 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-13"
 LO_NUEVO = (
+    ("🔥 Lo que más se busca en Mercado Libre en repuestos esta semana, contra tu catálogo: lo "
+     "que no tenés va primero. Gratis, con la aplicación de Mercado Libre.",
+     "📊 Estadísticas → 📌 Para pedir"),
     ("🔑 Para entrar ahora se pone el usuario y la contraseña (el empleado, su nombre de "
      "usuario; el taller o cliente, su número de cuenta): dos personas pueden tener la misma "
      "contraseña sin cruzarse. Los nombres de usuario están acá.",

@@ -834,6 +834,44 @@ a traer solas desde Administrar → Mantenimiento.
                            + ("; el archivo era más largo y se leyó hasta el tope"
                               if _info_parque.get("cortado") else "") + ").")
 
+        # LO QUE MÁS SE BUSCA EN MERCADO LIBRE, CONTRA EL CATÁLOGO: ver esa sección en
+        # logica/proveedores.py.
+        st.markdown("---")
+        st.markdown("**🔥 Lo que más se busca en Mercado Libre, contra tu catálogo**")
+        explicar(
+            "Las búsquedas de repuestos que son tendencia esta semana, y de cada una cuánto tenés cargado.",
+            "Mercado Libre publica cada semana unas cincuenta búsquedas de la categoría de los "
+            "repuestos: las que más crecen en ventas, las más buscadas y las que más crecen en "
+            "búsquedas. Acá se cruzan con tu catálogo —cuántos productos tienen todas esas "
+            "palabras en la descripción—, con **lo que no tenés primero**.\n\n"
+            "**Es una pista, no una orden**: es lo que busca todo el país en Mercado Libre, no "
+            "tu mostrador, y hay búsquedas que no son repuestos (accesorios, herramientas). Se "
+            "traen con el botón, que sale a internet; es gratis, con la misma aplicación de "
+            f"Mercado Libre de {miga_hasta('Mercado Libre')}.")
+        _tend = tendencias_de_mercado_libre()
+        if not config_mercado_libre():
+            st.caption(f"Hace falta activar Mercado Libre en {miga_hasta('Mercado Libre')} "
+                       "(una aplicación gratuita).")
+        elif candado("traer las tendencias de Mercado Libre",
+                     st.button("🔄 Traer las de esta semana", key="ml_traer_tendencias"),
+                     "ml_traer_tendencias_candado", nivel="empleado"):
+            with st.spinner("Preguntándole a Mercado Libre…"):
+                _n_tend, _error_tend = traer_las_tendencias_de_mercado_libre()
+            if _error_tend:
+                st.warning(_error_tend)
+            else:
+                avisar("success", f"Traje {miles(_n_tend)} búsquedas en tendencia.")
+                st.rerun()
+        if _tend:
+            _sin_nada = sum(1 for f in _tend["filas"] if not f["en_catalogo"])
+            st.caption(f"Traídas el {fecha_legible(_tend['cuando'])}: {miles(len(_tend['filas']))} "
+                       f"búsquedas, {miles(_sin_nada)} sin nada en tu catálogo.")
+            st.dataframe([{"Se busca": f["busqueda"], "Qué es": f["tipo"],
+                           "En tu catálogo": (f"{miles(f['en_catalogo'])} producto(s)"
+                                              if f["en_catalogo"] else "🔴 nada")}
+                          for f in _tend["filas"]], width="stretch", hide_index=True,
+                         height=min(420, 38 * (len(_tend["filas"]) + 1)))
+
         st.markdown("---")
         st.markdown("**🧊 Clavos: lo que no se mueve**")
         explicar(
