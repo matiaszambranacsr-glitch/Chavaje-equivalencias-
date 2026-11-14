@@ -491,13 +491,14 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-13c"
+VERSION_DE_LO_NUEVO = "2026-11-14"
 LO_NUEVO = (
     ("🤖 Un asistente en todas las pantallas: preguntale cómo se hace algo («¿cómo hago una "
      "devolución?»), pedile que te lleve («llevame a la caja») o que busque un repuesto. "
      "Entiende sin acentos y con errores. No ve los datos ni las contraseñas, y lleva solo a "
      "las pantallas que cada uno ya tiene: el que entra sin contraseña lo tiene para el "
-     "Buscador, la lista de WhatsApp y el Modo Mecánico, y nada más. Se abre también con F1.",
+     "Buscador, la lista de WhatsApp y el Modo Mecánico, y el taller para su portal, y nada "
+     "más. Se abre también con F1; «temas» lista todo lo que sabe.",
      "🤖 la burbuja de abajo a la izquierda"),
     ("🔥 Lo que más se busca en Mercado Libre en repuestos esta semana, contra tu catálogo: lo "
      "que no tenés va primero. Gratis, con la aplicación de Mercado Libre.",
@@ -830,8 +831,16 @@ AYUDAS_DEL_NAVEGADOR = r"""
                  F11: ".st-key-caja_f11 button"};
   var BUSQUEDAS = [".st-key-venta_buscar input", ".st-key-busqueda_input input",
                    ".st-key-mapa_buscar input", ".st-key-ubicar_escaneo input",
-                   ".st-key-dvl_escaneo input", ".st-key-venta_buscar_dev input"];
+                   ".st-key-dvl_escaneo input", ".st-key-venta_buscar_dev input",
+                   ".st-key-mec_busqueda input"];
   window.addEventListener("keydown", function (e) {
+    // Escape, escribiéndole al asistente, lo minimiza (como cerrar cualquier ventanita).
+    if (e.key === "Escape" && doc.activeElement
+        && doc.activeElement.closest(".st-key-asistente_abierto")) {
+      var minimizar = doc.querySelector(".st-key-asis_minimizar button");
+      if (minimizar) { e.preventDefault(); minimizar.click(); }
+      return;
+    }
     if (e.key === "F2") {
       var caja = BUSQUEDAS.map(function (s) { return doc.querySelector(s); })
                           .filter(Boolean)[0];

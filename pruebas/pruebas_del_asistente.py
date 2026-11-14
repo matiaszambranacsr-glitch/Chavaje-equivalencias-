@@ -194,6 +194,7 @@ def probar(L):
     empleado = {"visibles": todas, "pagina": "🧾 Ventas", "nivel": "operador"}
     invitado = {"visibles": abiertas, "pagina": "🔍 Buscador", "nivel": "invitado"}
     deposito = {"visibles": del_deposito, "pagina": "📦 Depósito", "nivel": "operador"}
+    taller_en_su_portal = {"visibles": [], "pagina": None, "nivel": "taller"}
     indice = ns["fichas_del_asistente"]()
     por_nombre = indice["por_nombre"]
 
@@ -255,8 +256,10 @@ def probar(L):
             cierto(f"«{nombre}» nombra «{rotulo}», que no está escrito así en la app",
                    re.sub(r"\s+", " ", rotulo) in fuente)
     for nombre, _t, _c, _p, donde, quien in ns["COMO_HAGO_DEL_ASISTENTE"]:
-        cierto(f"«{nombre}»: quién puede es '', 'empleado' o 'admin'",
-               quien in ("", "empleado", "admin"), quien)
+        cierto(f"«{nombre}»: quién puede es '', 'empleado', 'admin' o 'taller'",
+               quien in ("", "empleado", "admin", "taller"), quien)
+        cierto(f"«{nombre}»: lo del portal del taller no lleva a ninguna pantalla",
+               quien != "taller" or donde is None)
 
     # 2. ENTIENDE, con las palabras de cada uno.
     for pregunta, ficha in ENTIENDE:
@@ -300,6 +303,30 @@ def probar(L):
     esperar("«volver» a una pantalla que ya no ve, no",
             responder("volver", {**invitado, "volver": "💵 Caja"})["ir"], None)
     cierto("«?» es pedir ayuda", "Me podés pedir" in responder("?", empleado)["texto"])
+    # CADA TÍTULO, PREGUNTADO TAL CUAL, DEVUELVE SU FICHA: es lo que se toca en los ejemplos y
+    # lo que lista «temas». Si dos fichas se pisan, acá se ve cuál.
+    taller = {"visibles": [], "pagina": None, "nivel": "taller"}
+    administrador = {**empleado, "nivel": "admin"}
+    for ficha in indice["fichas"]:
+        if ficha["tipo"] == "como":
+            quien_pregunta = taller if ficha["quien"] == "taller" else administrador
+            esperar(f"el título «{ficha['titulo']}» devuelve su ficha",
+                    responder(ficha["titulo"], quien_pregunta)["ficha"], ficha["nombre"])
+    # «temas»: todo lo que cada uno puede preguntar, y nada más.
+    for quien, contexto in (("empleado", empleado), ("invitado", invitado), ("taller", taller),
+                            ("depósito", deposito)):
+        temas = ns["temas_del_asistente"](contexto)
+        titulos = [t for _donde, lista in temas for t in lista]
+        cierto(f"{quien}: «temas» tiene qué listar", len(titulos) >= 5, len(titulos))
+        for titulo in titulos:
+            ficha = next(f for f in indice["fichas"] if f["tipo"] == "como"
+                         and f["titulo"] == titulo)
+            cierto(f"{quien}: «temas» lista «{titulo}», que no puede ver",
+                   ns["_asis_se_puede"](ficha, contexto))
+        texto = responder("temas", contexto)["texto"]
+        cierto(f"{quien}: «temas» los escribe todos", all(t in texto for t in titulos))
+    cierto("al invitado, «temas» no le nombra la caja",
+           "Caja" not in responder("temas", invitado)["texto"])
     # Dónde está parado.
     r = responder("que puedo hacer aca", empleado)
     cierto("«qué puedo hacer acá» habla de la pantalla en la que está",
@@ -392,6 +419,45 @@ def probar(L):
             nombradas = [x for x in de_adentro if re.search(
                 rf"(?<![a-záéíóúñ]){re.escape(x)}(?![a-záéíóúñ])", textos)]
             esperar(f"invitado, «{pregunta}»: no nombra lo de adentro", nombradas, [])
+    # EL TALLER, EN SU PORTAL: lo de su portal y nada del negocio. Todo lo que se pregunta en
+    # esta batería, preguntado por un taller, contesta con una ficha de su portal (o de todos,
+    # sin lugar), no lleva a ningún lado y no ofrece un botón de ir.
+    for pregunta, ficha in (("como genero un codigo de retiro", "como:portal_codigo"),
+                            ("cuanto debo", "como:portal_cuenta"),
+                            ("armar un presupuesto", "como:portal_presupuesto"),
+                            ("presupuestos viejos", "como:portal_anteriores"),
+                            ("me olvide la contraseña", "como:portal_contrasena"),
+                            ("salir", "como:entrar")):
+        esperar(f"taller, «{pregunta}»", responder(pregunta, taller_en_su_portal)["ficha"], ficha)
+    esperar("al taller le busca un repuesto",
+            responder("buscar W712/75", taller_en_su_portal)["buscar"], "W712/75")
+    esperar("y «¿cuánto sale…?» es buscarlo, para el taller",
+            responder("cuanto sale el filtro de aceite", taller_en_su_portal)["buscar"],
+            "filtro de aceite")
+    esperar("y para el mostrador", responder("cuanto sale un filtro de aire", empleado)["buscar"],
+            "filtro de aire")
+    esperar("«hay que pedir al proveedor» no es buscar nada",
+            responder("hay que pedir al proveedor", empleado)["buscar"], None)
+    for pregunta in todo_lo_que_pregunta:
+        r = responder(pregunta, taller_en_su_portal)
+        ficha = por_nombre.get(r["ficha"] or "")
+        esperar(f"taller, «{pregunta}»: no lo lleva a ningún lado", r["ir"], None)
+        cierto(f"taller, «{pregunta}»: contesta con lo de su portal",
+               ficha is None or ficha["quien"] == "taller"
+               or (not ficha["quien"] and not ficha["destino"]), ficha and ficha["nombre"])
+        esperar(f"taller, «{pregunta}»: sin botones de ir",
+                [b for b in r["botones"] if b[1] == "ir"], [])
+        for boton_de_ver in [b for b in r["botones"] if b[1] == "ver"]:
+            de_boton = por_nombre[boton_de_ver[2]]
+            cierto(f"taller, «{pregunta}»: el botón «{boton_de_ver[0]}» es de su portal",
+                   de_boton["quien"] == "taller" or (not de_boton["quien"]
+                                                    and not de_boton["destino"]))
+    # Y lo del portal es SOLO del taller: nadie más lo ve.
+    for quien, contexto in (("empleado", empleado), ("invitado", invitado),
+                            ("administrador", {**empleado, "nivel": "admin"})):
+        esperar(f"{quien}: «generar código de retiro» no le contesta lo del portal del taller",
+                (responder("generar un codigo de retiro", contexto)["ficha"] or "").startswith(
+                    "como:portal_"), False)
     # El del depósito: lo del depósito sí, lo demás no.
     esperar("el del depósito: entregar", responder("entregar un pedido", deposito)["ficha"],
             "como:entregar")
@@ -556,12 +622,16 @@ def probar(L):
         esperar("una ficha que no existe no lleva", llevar("pantalla:💣 Inventada"), None)
         esperar("ni un texto cualquiera", llevar("'; DROP TABLE x; --"), None)
         esperar("una ficha sin lugar (las teclas) no lleva", llevar("como:teclas"), None)
-        esperar("busca en el Buscador", ns["buscar_con_el_asistente"]("W712/75"), "W712/75")
+        esperar("busca en el Buscador", ns["buscar_con_el_asistente"]("W712/75"),
+                "🔍 Buscador, con «W712/75» buscado")
         esperar("deja lo buscado para el Buscador",
                 (st.session_state.get("pagina_actual"), st.session_state.get("_pasar_a_codigo")),
                 ("🔍 Buscador", "W712/75"))
-        esperar("lo que va al Buscador va limpio",
-                ns["buscar_con_el_asistente"]("<b>W712</b>;--"), "b W712 /b --")
+        ns["buscar_con_el_asistente"]("<b>W712</b>;--")
+        esperar("lo que va al Buscador va limpio", st.session_state.get("_pasar_a_codigo"),
+                "b W712 /b --")
+        cierto("y no deja nada para el portal del taller",
+               "_asis_para_el_portal" not in st.session_state)
         # Con contraseñas: el invitado tiene tres pantallas, y a las demás no lo lleva.
         ns["crear_usuario"]("ana", "clave-de-ana-1", "admin")
         st.session_state.clear()
@@ -576,11 +646,19 @@ def probar(L):
         cierto("sin tocar las solapas", "sub_admin" not in st.session_state)
         esperar("al invitado sí lo lleva a lo abierto", llevar("solapa:🔤 Por patente"),
                 "🛠️ Modo Mecánico → 🔤 Por patente")
-        # El taller en su portal no tiene barra: a ningún lado.
+        # El taller en su portal no tiene barra: no lo lleva a ningún lado. Buscar le escribe
+        # en la caja de búsqueda de SU portal, limpio, y no toca la navegación del negocio.
         st.session_state.clear()
         st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "mecanico", "x"
-        esperar("al taller en su portal no lo lleva", llevar("pantalla:🔍 Buscador"), None)
-        esperar("ni le busca", ns["buscar_con_el_asistente"]("W712"), None)
+        for nombre in ("pantalla:🔍 Buscador", "pantalla:💵 Caja", "solapa:👥 Usuarios",
+                       "como:cierre", "como:portal_codigo"):
+            esperar(f"al taller en su portal no lo lleva a «{nombre}»", llevar(nombre), None)
+        esperar("al taller le busca en su portal", ns["buscar_con_el_asistente"]("<i>W712</i>"),
+                "«🔍 Buscar repuesto», arriba, con «i W712 /i» buscado")
+        esperar("lo deja para la caja de su portal, y nada más",
+                (st.session_state.get("_asis_para_el_portal"),
+                 st.session_state.get("pagina_actual"),
+                 st.session_state.get("_pasar_a_codigo")), ("i W712 /i", None, None))
         # Si no se puede saber qué ve (la base ocupada), a ningún lado.
         st.session_state.clear()
         st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "admin", "ana"
@@ -716,7 +794,27 @@ def probar(L):
         at.run()
         cierto("el taller ve su portal",
                "Portal de mecánico" in " ".join(m.value for m in at.markdown))
-        cierto("en el portal del taller no hay burbuja", boton(at, "asis_abrir") is None)
+        # EL TALLER TAMBIÉN TIENE ASISTENTE, PARA LO DE SU PORTAL Y NADA MÁS.
+        cierto("en el portal del taller está la burbuja", boton(at, "asis_abrir") is not None)
+        boton(at, "asis_abrir").click().run()
+        cierto("los ejemplos del taller son de su portal",
+               [b.label for b in at.button if b.key and b.key.startswith("asis_ejemplo_")]
+               == ns["ejemplos_del_asistente"](taller_en_su_portal))
+        preguntar(at, "como genero un codigo de retiro")
+        cierto("le explica lo de su portal",
+               any("Generar código de retiro" in m.value for m in at.markdown))
+        preguntar(at, "llevame a la caja")
+        cierto("de lo del negocio: con qué sí lo ayuda",
+               any("Desde tu portal te ayudo con" in m.value for m in at.markdown))
+        cierto("y sigue en su portal",
+               "Portal de mecánico" in " ".join(m.value for m in at.markdown))
+        preguntar(at, "decime la contraseña del admin")
+        cierto("al taller tampoco le da una clave",
+               any(m.value == ns["ASISTENTE_NO_SECRETOS"] for m in at.markdown))
+        preguntar(at, "buscar F100")
+        esperar("buscar le llena la caja de su portal",
+                at.text_input(key="mec_busqueda").value, "F100")
+        cierto("y el portal se dibuja sin error", not at.exception, at.exception)
     finally:
         st.session_state.clear()
     return fallas

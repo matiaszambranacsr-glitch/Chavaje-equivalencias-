@@ -456,6 +456,9 @@ with _barra_superior:
                 selector_de_vista(st)
 
 if st.session_state.get("nivel_usuario") == "mecanico":
+    # El taller también tiene al asistente, para lo de su portal y nada más (ver «EL ASISTENTE:
+    # QUÉ PUEDE Y QUÉ NO» en logica/asistente.py). Antes que el portal, por si el portal corta.
+    mostrar_el_asistente()
     mostrar_portal_mecanico()
     st.stop()
 

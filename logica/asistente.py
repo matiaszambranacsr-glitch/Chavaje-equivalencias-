@@ -34,7 +34,8 @@ import orden
 #     usuario: para eso está la pantalla, con su candado.
 #   · LLEVA SOLO A DONDE YA SE PUEDE ENTRAR. Las pantallas que le ofrece a cada uno son las
 #     que ya tiene en la barra (ver paginas_a_la_vista()): al que entra sin contraseña, tres;
-#     al del depósito, dos. Y aunque llevara de más, cada pantalla vuelve a pedir su contraseña
+#     al del depósito, dos; al taller en su portal, ninguna (lo ayuda con su portal, que es
+#     una sola pantalla). Y aunque llevara de más, cada pantalla vuelve a pedir su contraseña
 #     (ver seccion_permitida()): el asistente no es una puerta, es un cartel.
 #   · AL INVITADO LO AYUDA SOLO CON LO QUE VE SIN CONTRASEÑA. Lo pidió el dueño: «que lo tenga
 #     al asistente, pero que lo ayude solamente en las pantallas que ven sin contraseña». De
@@ -376,7 +377,9 @@ def camino_del_asistente(destino):
 # pruebas/pruebas_del_asistente.py, y si un botón cambia de nombre la prueba dice cuál.
 # «Dónde» es el nombre de una pantalla, una solapa, un grupo o una herramienta (None: se hace
 # desde cualquier pantalla). «Quién»: "" cualquiera que vea esa pantalla; "empleado" si está en
-# una pantalla abierta pero hay que entrar para hacerlo; "admin" si adentro pide un administrador.
+# una pantalla abierta pero hay que entrar para hacerlo; "admin" si adentro pide un
+# administrador; "taller" si es del portal del taller (que es una sola pantalla, sin barra: no
+# hay a dónde llevar), y entonces lo ve el taller y nadie más.
 COMO_HAGO_DEL_ASISTENTE = (
     # ---- vender y cobrar ----
     ("vender", "Hacer una venta",
@@ -519,9 +522,9 @@ COMO_HAGO_DEL_ASISTENTE = (
      "«💾 Guardar el plano».",
      "🏗️ Armar el depósito", ""),
     # ---- buscar ----
-    ("buscar", "Buscar un repuesto y sus equivalencias",
+    ("buscar", "Buscar un repuesto: su precio y sus equivalencias",
      "buscar equivalencia equivalente reemplazo reemplaza sirve otra marca alternativa "
-     "codigo repuesto cruce igual",
+     "codigo repuesto cruce igual precio",
      "Escribí el código (o varios, separados por coma) y «🔍 Buscar equivalencias»: salen "
      "todas las marcas que sirven en su lugar, con precio y stock. Si escribís palabras —«filtro "
      "aceite gol»— busca por descripción. F2 lleva a la caja de búsqueda.\n\n"
@@ -587,7 +590,7 @@ COMO_HAGO_DEL_ASISTENTE = (
      "muchas juntas, «📋 Cargar muchas cuentas de una vez (pegadas de Excel)».",
      "👥 Usuarios", "admin"),
     ("cuenta_corriente", "Ver cuánto debe un cliente o registrar que pagó",
-     "debe deuda saldo cuanto cuenta corriente pago pagar registrar cobrar taller movimientos "
+     "deuda saldo cuenta corriente pago pagar registrar cobrar taller movimientos "
      "resumen estado",
      "Buscá la cuenta por una parte del nombre, el CUIT o el número. Ahí están sus "
      "«📒 Movimientos», «➕ Cargar a la cuenta» y «💵 Registrar un pago».",
@@ -767,6 +770,42 @@ COMO_HAGO_DEL_ASISTENTE = (
      "alias cbu transferencia qr texto mensaje whatsapp saludo firma cobro datos",
      "Ahí está el texto del mensaje de WhatsApp y el alias para cobrar por transferencia.",
      "💬 Mensajería y cobros", "admin"),
+    # ---- el portal del taller (lo ve el taller, en su portal, y nadie más) ----
+    ("portal_buscar", "Buscar un repuesto y su precio",
+     "buscar repuesto codigo precio stock equivalencia marca descripcion",
+     "Arriba, en «🔍 Buscar repuesto», escribí el código o qué es: salen las marcas con su "
+     "precio. También me lo podés pedir a mí: escribí «buscar» y el código.",
+     None, "taller"),
+    ("portal_presupuesto", "Armar un presupuesto para mi cliente",
+     "presupuesto cotizacion cotizar armar cliente mano obra sumar agregar cantidad pdf "
+     "whatsapp mandar enviar guardar total",
+     "Buscá cada repuesto, poné la cantidad y sumalo con «➕». Abajo, en «📋 Presupuesto "
+     "actual», agregá el nombre del cliente y tu mano de obra: se guarda con «💾 Guardar "
+     "presupuesto» y se manda con «📄 PDF» o «📲 WhatsApp».",
+     None, "taller"),
+    ("portal_cuenta", "Ver cuánto debo (mi cuenta corriente)",
+     "deuda saldo cuenta corriente vencido disponible limite credito movimientos pagar "
+     "pago estado resumen",
+     "En «💳 Mi cuenta corriente» están el saldo, lo vencido y lo que te queda disponible, "
+     "con los últimos movimientos. Los pagos los anota el negocio cuando los recibe.",
+     None, "taller"),
+    ("portal_codigo", "Generar un código de retiro",
+     "codigo retiro retirar mandar alguien empleado cadete buscar llevar autorizar nombre "
+     "generar",
+     "Para que alguien retire repuestos a tu nombre, tocá «🔑 Generar código de retiro» y "
+     "pasale el código: vale una sola vez y por unas horas, y si generás otro el anterior "
+     "deja de valer. Sin el código, en el mostrador no se carga nada a tu cuenta.",
+     None, "taller"),
+    ("portal_anteriores", "Ver mis presupuestos anteriores",
+     "anteriores guardados historial presupuestos viejos pasados ver mis",
+     "Abajo de todo, en «📁 Mis presupuestos anteriores», están los que guardaste, con sus "
+     "repuestos y la mano de obra. Solo ves los tuyos.",
+     None, "taller"),
+    ("portal_contrasena", "Cambiar la contraseña de mi portal",
+     "contrasena clave password cambiar olvide olvido nueva",
+     "La contraseña del portal te la cambia el negocio: pedila en el mostrador. Yo no la "
+     "tengo ni la puedo ver.",
+     None, "taller"),
     # ---- la app ----
     ("teclas", "Los atajos del teclado",
      "teclas atajos teclado f1 f2 f9 f10 f11 rapido click derecho mouse",
@@ -774,7 +813,7 @@ COMO_HAGO_DEL_ASISTENTE = (
      "venta o la manda a la caja; en la caja, F10 cobra y F11 pone a cuenta. En la "
      "computadora, el click derecho sobre un producto abre sus botones.",
      None, "empleado"),
-    ("teclas_de_todos", "Las teclas que sirven sin entrar",
+    ("teclas_de_todos", "Las teclas: F1 y F2",
      "teclas atajos teclado f1 f2 rapido",
      "F1 me abre y me minimiza, y F2 va a la caja de búsqueda de la pantalla.",
      None, ""),
@@ -829,7 +868,7 @@ a al algo ahi aca alla asi con cual cuales cuando de del desde e el ella en entr
 eso esta este esto estoy fue ha hay la las le les lo los me mi mis muy ni nos o os para pero
 por que se si sin sobre son su sus te tu tus un una uno unas unos y ya yo vos usted
 como donde quiero queria quisiera necesito necesitaria puedo podes podria podrias puede hago
-hacer hace hacen hacemos haces hacerlo tengo tenes tiene tenemos debo hay ser estar
+hacer hace hacen hacemos haces hacerlo tengo tenes tiene tenemos hay ser estar
 favor porfa porfavor gracias hola buenas che decime dame explicame ayudame ayuda
 cuanto cuanta cuantos cuantas
 """.split())
@@ -870,6 +909,12 @@ _ASIS_SINONIMOS = (
     "error equivocacion equivoque equivoco equivocado equivocar mal",
     "arqueo cierre cerrar",
 )
+
+# Palabras que se cambian enteras, antes de sacarles la raíz: «¿cuánto sale?» es preguntar el
+# precio, pero «sale» y «salir» tienen la misma raíz, y contestaba cómo se sale de la sesión.
+_ASIS_QUIERE_DECIR = {"sale": "precio", "salen": "precio", "cuesta": "precio",
+                      "cuestan": "precio", "vale": "precio", "valen": "precio",
+                      "costo": "precio", "debo": "deuda", "debe": "deuda", "deben": "deuda"}
 
 # Las terminaciones que se le sacan a una palabra (ya sin el plural), de la más larga a la más
 # corta. «an» y «en» —«cobran», «venden»— solo si quedan cuatro letras: «orden» no es un verbo.
@@ -926,6 +971,7 @@ def _asis_palabras(texto, conocidas=None, raices=()):
         # Una letra suelta no dice nada («zzz» queda en «z»); un número suelto, sí.
         if palabra in _ASIS_PALABRAS_VACIAS or (len(palabra) == 1 and not palabra.isdigit()):
             continue
+        palabra = _ASIS_QUIERE_DECIR.get(palabra, palabra)
         raiz = _asis_raiz(palabra)
         if (conocidas is not None and palabra not in conocidas and len(palabra) >= 5
                 and raiz not in raices
@@ -1200,6 +1246,9 @@ _ASIS_GRACIAS = re.compile(r"^(muchas |mil )?(gracias+|genial|perfecto|buenisimo
                            r"barbaro|dale gracias|ok gracias)\b")
 _ASIS_SI = re.compile(r"^(si|sip|dale|ok|oka|okey|bueno|de una|hacelo|llevame|llevame ahi|ir|"
                       r"vamos|ahi|eso|ese|esa|andá|anda|por favor)$")
+_ASIS_INDICE = re.compile(r"^(indice|temas|los temas|lista de temas|todos los temas|que temas "
+                          r"hay|que sabes|todo lo que sabes|que preguntas hay|preguntas "
+                          r"frecuentes|faq|ver todo|mostrame todo lo que sabes)$")
 _ASIS_VOLVER = re.compile(r"^(volver|volve|volveme|volvamos|atras|para atras|regresar|"
                           r"regresa|donde estaba|a donde estaba|volver atras|volver a donde "
                           r"estaba)$")
@@ -1230,8 +1279,13 @@ ASISTENTE_PARA_IR_SOLO = 0.62
 
 def _asis_se_puede(ficha, contexto):
     """¿Quien pregunta ve la pantalla de esa ficha, y puede hacer lo que dice? Las que no tienen
-    destino (las teclas, la vista, entrar) son de todos; lo que pide entrar, de quien entró."""
-    if ficha["quien"] and contexto.get("nivel") == "invitado":
+    destino (la vista, entrar) son de todos; lo que pide entrar, de quien entró; lo del portal
+    del taller, del taller."""
+    nivel = contexto.get("nivel")
+    if nivel == "taller":
+        # El taller en su portal: lo de su portal, y lo que es de todos y no lleva a ningún lado.
+        return ficha["quien"] == "taller" or (not ficha["quien"] and not ficha["destino"])
+    if ficha["quien"] == "taller" or (ficha["quien"] and nivel == "invitado"):
         return False
     return not ficha["destino"] or ficha["destino"]["pagina"] in (contexto.get("visibles") or ())
 
@@ -1266,6 +1320,11 @@ def _asis_simple(texto, botones=()):
     return {"texto": texto, "botones": list(botones), "ir": None, "buscar": None, "ficha": None}
 
 
+# Con qué ayuda al taller en su portal, dicho en una frase.
+ASISTENTE_LO_DEL_PORTAL = ("buscar un repuesto, armar un presupuesto, tu cuenta corriente y el "
+                           "código de retiro")
+
+
 def _asis_lo_abierto(contexto):
     """Las pantallas de quien pregunta, en una frase: «🔍 Buscador, 📋 Lista WhatsApp y 🛠️ Modo
     Mecánico»."""
@@ -1284,6 +1343,11 @@ def _asis_no_se_puede(ficha, contexto):
             "personal del negocio: si sos del negocio, entrá con tu usuario y tu contraseña "
             "(«🔑 Ingresar», arriba).",
             [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)[:3]])
+    if contexto.get("nivel") == "taller":
+        return _asis_simple(
+            f"🔒 Desde tu portal te ayudo con **{ASISTENTE_LO_DEL_PORTAL}**. Lo demás es del "
+            "negocio.",
+            [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)[:3]])
     return _asis_simple(f"🔒 Con tu usuario no tenés esa pantalla: ves "
                         f"{_asis_lo_abierto(contexto)}. Eso lo hace otra persona del negocio.")
 
@@ -1292,10 +1356,25 @@ def ejemplos_del_asistente(contexto):
     """Tres o cuatro preguntas de ejemplo, de lo que quien pregunta puede hacer, empezando por
     la pantalla en la que está."""
     indice = fichas_del_asistente()
-    comos = [f for f in indice["fichas"] if f["tipo"] == "como" and f["destino"]
-             and _asis_se_puede(f, contexto)]
-    comos.sort(key=lambda f: f["destino"]["pagina"] != contexto.get("pagina"))
+    comos = [f for f in indice["fichas"] if f["tipo"] == "como"
+             and (f["destino"] or f["quien"] == "taller") and _asis_se_puede(f, contexto)]
+    comos.sort(key=lambda f: bool(f["destino"])
+               and f["destino"]["pagina"] != contexto.get("pagina"))
     return [f["titulo"] for f in comos[:4]]
+
+
+def temas_del_asistente(contexto):
+    """Todo lo que quien pregunta puede preguntarle, por pantalla: [(pantalla, [títulos])]. Lo
+    del portal del taller va como «Tu portal»; lo que no es de ninguna, «En cualquier pantalla»."""
+    grupos = {}
+    for ficha in fichas_del_asistente()["fichas"]:
+        if ficha["tipo"] == "como" and _asis_se_puede(ficha, contexto):
+            donde = (ficha["destino"]["pagina"] if ficha["destino"]
+                     else "Tu portal" if ficha["quien"] == "taller" else "En cualquier pantalla")
+            grupos.setdefault(donde, []).append(ficha["titulo"])
+    orden_de_las_pantallas = ["Tu portal"] + list(contexto.get("visibles") or [])
+    return sorted(grupos.items(), key=lambda par: (
+        orden_de_las_pantallas.index(par[0]) if par[0] in orden_de_las_pantallas else 99))
 
 
 def responder_del_asistente(pregunta, contexto):
@@ -1328,8 +1407,23 @@ def responder_del_asistente(pregunta, contexto):
         if ficha and ficha["destino"] and _asis_se_puede(ficha, contexto):
             return {**_asis_simple(f"Te llevo a {camino_del_asistente(ficha['destino'])}."),
                     "ir": ficha["nombre"]}
-    # Al invitado se le habla de lo suyo: los ejemplos no nombran la caja ni las cuentas.
+    # Al invitado se le habla de lo suyo: los ejemplos no nombran la caja ni las cuentas. Y al
+    # taller, de su portal.
     invitado = contexto.get("nivel") == "invitado"
+    if contexto.get("nivel") == "taller" and (
+            (_ASIS_SALUDO.match(llano) and len(llano.split()) <= 4) or _ASIS_QUE_SOS.search(llano)
+            or _ASIS_QUE_HACES.match(llano) or _ASIS_ACA.search(llano)):
+        return _asis_simple(
+            f"🤖 Soy el asistente. En tu portal te ayudo con {ASISTENTE_LO_DEL_PORTAL}: te "
+            "explico cómo se hace y te busco un repuesto («buscar W712/75»). No veo tu cuenta "
+            "ni tus datos: eso lo ves vos, en tu pantalla.",
+            [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)])
+    # «temas»: todo lo que se le puede preguntar, por pantalla.
+    if _ASIS_INDICE.match(llano):
+        return _asis_simple(
+            "Esto es lo que te puedo explicar. Escribime cualquiera, con tus palabras:\n\n"
+            + "\n".join(f"- **{donde}**: " + " · ".join(titulos)
+                        for donde, titulos in temas_del_asistente(contexto)))
     # «volver»: a la pantalla de la que lo sacó.
     if _ASIS_VOLVER.match(llano):
         anterior = indice["por_nombre"].get(f"pantalla:{contexto.get('volver')}")
@@ -1368,8 +1462,8 @@ def responder_del_asistente(pregunta, contexto):
              "- **Que te lleve**: «llevame a la caja», «abrí cuentas corrientes».\n"
              "- **Que te explique**: «¿cómo hago una devolución?», «¿dónde cambio un precio?».\n"
              "- **Que busque un repuesto**: «buscar W712/75».\n\n"
-             "Después de llevarte, «volver» te trae de nuevo. Escribí como te salga: entiendo "
-             "sin acentos y con errores."),
+             "Después de llevarte, «volver» te trae de nuevo, y «temas» lista todo lo que sé. "
+             "Escribí como te salga: entiendo sin acentos y con errores."),
             [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)])
 
     # «¿qué hay de nuevo?»: lo último de LO_NUEVO, para quien entró (cuenta cómo se trabaja
@@ -1407,16 +1501,28 @@ def responder_del_asistente(pregunta, contexto):
     elif (len(palabras_escritas) == 1 and _ASIS_CODIGO.match(palabras_escritas[0])
           and not _ASIS_TECLA.match(palabras_escritas[0])):
         lo_buscado = _asis_para_buscar(palabras_escritas[0])
-    if lo_buscado and PAGINAS[0] in visibles:
+    del_portal = contexto.get("nivel") == "taller"
+    if lo_buscado and (PAGINAS[0] in visibles or del_portal):
         # Con un número adentro es un código. Sin número, solo si dijo «buscar» (o «equivalencia
         # de») y lo que sigue no es algo que el asistente sepa explicar: «buscar por medidas» y
-        # «buscar hablando» son preguntas; «buscar filtro de aceite gol», una búsqueda.
+        # «buscar hablando» son preguntas; «buscar filtro de aceite gol», una búsqueda. «Hay
+        # que pedir…» no es buscar nada.
         tiene_codigo = any(ch.isdigit() for ch in lo_buscado)
-        dijo_buscar = bool(pide_buscar) and con_signos.split()[0][:4] in ("busc", "equi", "reem")
+        antes = r"^(por favor |che |quiero |necesito |me )*"
+        dijo_buscar = bool(pide_buscar) and bool(re.match(antes + "(busc|equi|reem)", con_signos))
+        # Preguntar el precio de algo es buscarlo, se llame como se llame: «filtro de aceite»
+        # comparte palabras con la ficha del auto, y no es eso lo que se pregunta.
+        pregunta_el_precio = bool(pide_buscar) and bool(re.match(
+            antes + "(precio|cuanto (sale|cuesta|vale))", con_signos))
         del_resto = fichas_que_responden(lo_buscado, contexto.get("pagina"))
-        if tiene_codigo or (dijo_buscar and (not del_resto
-                                             or del_resto[0][0] < ASISTENTE_SEGURO)):
+        if tiene_codigo or pregunta_el_precio or (
+                dijo_buscar and (not del_resto or del_resto[0][0] < ASISTENTE_SEGURO)):
             botones = [(f"🔍 Buscar «{lo_buscado}»", "buscar", lo_buscado)]
+            if del_portal:
+                return {**_asis_simple(
+                    f"Lo busco arriba, en «🔍 Buscar repuesto»: «{lo_buscado}». Ahí salen las "
+                    "marcas con su precio.", botones),
+                    "buscar": lo_buscado if pide_buscar else None}
             if (_ASIS_FALLA.match(lo_buscado) and "🛠️ Modo Mecánico" in visibles
                     and not pide_buscar):
                 botones.insert(0, ("📖 Ver qué significa ese código de falla", "ir",
@@ -1449,12 +1555,13 @@ def responder_del_asistente(pregunta, contexto):
         if _ASIS_SI.match(llano):
             return _asis_simple("¿Sí a qué? 🙂 Decime qué querés hacer o a dónde querés ir.")
         botones = [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)[:3]]
-        if PAGINAS[0] in visibles and _asis_para_buscar(escrito):
+        if (PAGINAS[0] in visibles or del_portal) and _asis_para_buscar(escrito):
             botones.insert(0, (f"🔍 Buscar «{_asis_para_buscar(escrito)[:30]}» como repuesto",
                                "buscar", _asis_para_buscar(escrito)))
         return _asis_simple(
             "No encontré nada con esas palabras. Probá decirlo de otra forma, con una o dos "
             "palabras —" + ("«bujía», «medidas», «patente»" if invitado
+                           else "«presupuesto», «código de retiro», «saldo»" if del_portal
                            else "«devolución», «lista de precios», «backup»")
             + "—, o mirá estos ejemplos.", botones)
 
@@ -1510,7 +1617,8 @@ def _asis_contexto():
         visibles = []
     charla = st.session_state.get("_asis_charla") or []
     return {"visibles": visibles, "pagina": st.session_state.get("pagina_actual"),
-            "nivel": ("admin" if es_admin() else "invitado" if solo_mirar() else "operador"),
+            "nivel": ("taller" if nivel_de_la_sesion == "mecanico" else "admin" if es_admin()
+                      else "invitado" if solo_mirar() else "operador"),
             "ultima": charla[-1]["r"].get("ficha") if charla else None,
             "volver": st.session_state.get("_asis_volver")}
 
@@ -1538,13 +1646,21 @@ def llevar_con_el_asistente(nombre_de_la_ficha):
 
 def buscar_con_el_asistente(lo_buscado):
     """Lleva al Buscador con eso escrito y buscado: lo mismo que escribirlo ahí (ver
-    «_pasar_a_codigo» en pantallas/buscador.py). Devuelve lo que se buscó, o None."""
+    «_pasar_a_codigo» en pantallas/buscador.py). Al taller, en su portal, se lo escribe en la
+    caja de búsqueda del portal. Devuelve dónde quedó buscado (para el cartel), o None."""
     lo_buscado = _asis_para_buscar(lo_buscado)
-    if not lo_buscado or PAGINAS[0] not in _asis_contexto()["visibles"]:
+    contexto = _asis_contexto()
+    if not lo_buscado:
+        return None
+    if contexto["nivel"] == "taller":
+        # El portal la pone en su caja antes de dibujarla (ver mostrar_portal_mecanico()).
+        st.session_state["_asis_para_el_portal"] = lo_buscado
+        return f"«🔍 Buscar repuesto», arriba, con «{lo_buscado}» buscado"
+    if PAGINAS[0] not in contexto["visibles"]:
         return None
     st.session_state["_pasar_a_codigo"] = lo_buscado
     st.session_state["pagina_actual"] = PAGINAS[0]
-    return lo_buscado
+    return f"🔍 Buscador, con «{lo_buscado}» buscado"
 
 
 def _asis_anotar(pregunta, respuesta):
@@ -1579,7 +1695,7 @@ def preguntarle_al_asistente(pregunta=None):
     elif respuesta["buscar"]:
         buscado = buscar_con_el_asistente(respuesta["buscar"])
         if buscado:
-            _asis_se_fue(f"🔍 Buscador, con «{buscado}» buscado")
+            _asis_se_fue(buscado)
 
 
 def _asis_toco(que, cual):
@@ -1591,7 +1707,7 @@ def _asis_toco(que, cual):
     elif que == "buscar":
         buscado = buscar_con_el_asistente(cual)
         if buscado:
-            _asis_se_fue(f"🔍 Buscador, con «{buscado}» buscado")
+            _asis_se_fue(buscado)
     elif que == "ver":
         contexto = _asis_contexto()
         ficha = fichas_del_asistente()["por_nombre"].get(str(cual))

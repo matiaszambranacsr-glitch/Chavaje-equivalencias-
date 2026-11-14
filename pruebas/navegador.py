@@ -210,6 +210,14 @@ def probar(url, clave, carpeta):
             pagina.keyboard.press("F1")
             if not _hasta(lambda: pagina.locator(".st-key-asistente_minimizado").count() == 1):
                 fallas.append("un segundo F1 no minimiza el asistente")
+            # Y Escape, escribiéndole, también lo minimiza.
+            pagina.keyboard.press("F1")
+            if _hasta(lambda: pagina.locator(".st-key-asistente_abierto textarea").count() == 1):
+                pagina.locator(".st-key-asistente_abierto textarea").focus()
+                pagina.keyboard.press("Escape")
+                if not _hasta(lambda: pagina.locator(
+                        ".st-key-asistente_minimizado").count() == 1):
+                    fallas.append("Escape no minimiza el asistente")
         navegador.close()
     return fallas
 

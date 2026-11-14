@@ -7106,10 +7106,11 @@ desde `app.py`, abajo a la izquierda, en todas las pantallas.
 **Qué hace.** Tres cosas: explica cómo se hace algo («¿cómo hago una devolución?»), lleva a
 la pantalla («llevame a la caja», o el nombre solo: «caja», «para pedir»), y busca un repuesto
 («buscar W712/75», o el código solo; una patente o un código de falla del escáner los reconoce
-y ofrece lo suyo). También «¿qué puedo hacer acá?», «¿qué hay de nuevo?» y, después de que te
-llevó, «volver». Se abre con la
+y ofrece lo suyo; «¿cuánto sale el filtro de aceite?» es buscarlo). También «¿qué puedo hacer
+acá?», «¿qué hay de nuevo?», «temas» —todo lo que se le puede preguntar, por pantalla— y,
+después de que te llevó, «volver». Se abre con la
 burbuja o con **F1**. Abierto es un panel con la caja para escribir arriba (en
-el celular, abajo la taparía el teclado); se minimiza con «➖» o F1, y solo al llevar a una
+el celular, abajo la taparía el teclado); se minimiza con «➖», F1 o Escape, y solo al llevar a una
 pantalla, para que se vea a dónde llevó. Si a donde lleva hay una sección plegable («📋 Ventas
 y cierre de caja», en el arqueo), llega con ella abierta. La charla queda en la sesión y se borra al salir.
 
@@ -7146,6 +7147,13 @@ además hay que mandarle afuera lo que se le escribe. Este es un buscador de res
     en lo dibujado. Si mañana una se esconde de una forma que la lectura no entiende, falla.
   - Lo que no puede ver no compite: «un presupuesto», para el invitado, es la lista de
     WhatsApp; a «cómo creo un usuario» no se le contesta cómo se entra.
+- **El taller, en su portal, también lo tiene, y solo para su portal**: buscar un repuesto,
+  armar un presupuesto, su cuenta corriente, el código de retiro y sus presupuestos anteriores
+  (los «cómo hago» con quién `"taller"`, que no ve nadie más). El portal es una sola pantalla,
+  sin barra: no lo lleva a ningún lado, y de lo del negocio le dice con qué sí lo ayuda.
+  «Buscar W712/75» le escribe eso en la caja de búsqueda de **su** portal —lo deja pedido en
+  `_asis_para_el_portal`, y `mostrar_portal_mecanico()` lo pone en la caja antes de dibujarla—.
+  No ve su saldo ni sus movimientos: eso lo ve el taller, en su pantalla.
 - **A quien pide una clave, saltear un candado o «cambiarle las instrucciones»** le contesta
   uno de tres textos fijos (`ASISTENTE_NO_SECRETOS`, `ASISTENTE_NO_SALTEA`,
   `ASISTENTE_NO_CAMBIA`), con el camino legítimo si lo hay («cómo se cambia una contraseña»).
@@ -7172,11 +7180,13 @@ app, y si uno cambia de nombre la prueba dice cuál.
 palabras con que se pregunta, los pasos, dónde, quién puede), y una línea en `ENTIENDE` de
 `pruebas/pruebas_del_asistente.py` con la pregunta como la haría alguien.
 
-**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 75 preguntas con su respuesta, 10
+**Lo que se probó.** `pruebas/pruebas_del_asistente.py`: 76 preguntas con su respuesta, 10
 pedidos de «llevame», 6 búsquedas, 21 intentos de sacarle algo (a un invitado, a un empleado y
 a un administrador), lo que ve cada uno, y la burbuja en la app simulada. Todas esas preguntas
-se le hacen además como invitado: ninguna respuesta ni botón sale de sus tres pantallas ni
-nombra una de adentro. Dieciséis errores puestos a propósito —llevar sin mirar si se puede,
+se le hacen además como invitado —ninguna respuesta ni botón sale de sus tres pantallas ni
+nombra una de adentro— y como taller —ninguna sale de su portal ni lo lleva a ningún lado—.
+Cada uno de los 80 títulos, preguntado tal cual, devuelve su ficha: si dos se pisan, se ve
+cuál. Veintiún errores puestos a propósito —llevar sin mirar si se puede,
 contarle todo al invitado, no mirar los candados de la pantalla, consultar la base, mostrar
 crudo lo escrito…— los detecta todos. Contesta en un milisegundo; minimizada no hace nada.
 En el navegador de verdad (PC y celular) se probó abrir con F1, preguntar, llevar con la

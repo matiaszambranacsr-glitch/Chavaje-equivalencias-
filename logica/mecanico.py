@@ -2111,6 +2111,12 @@ def mostrar_portal_mecanico():
         st.session_state["presupuesto_mecanico_items"] = []
 
     st.markdown("**🔍 Buscar repuesto**")
+    # Lo que el taller le pidió buscar al asistente («buscar W712/75») llega acá, ya limpio (ver
+    # buscar_con_el_asistente() en logica/asistente.py): va a la caja ANTES de dibujarla, que
+    # es cuando Streamlit deja ponerle un valor.
+    _del_asistente = st.session_state.pop("_asis_para_el_portal", None)
+    if _del_asistente:
+        st.session_state["mec_busqueda"] = str(_del_asistente)[:60]
     texto_busqueda_mec = st.text_input("Código o descripción:", key="mec_busqueda")
     if texto_busqueda_mec.strip():
         clean_mec = sanitizar(texto_busqueda_mec)
