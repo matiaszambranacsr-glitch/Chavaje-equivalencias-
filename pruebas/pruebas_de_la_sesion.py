@@ -422,6 +422,33 @@ def probar():
     finally:
         _gp["marcas_con_precios_fuera_de_escala"] = _fuera_del_portal
 
+    # 4c. EL PAPEL DEL COMPROBANTE se guarda al tocar el selector, y el selector muestra siempre
+    # lo guardado. Antes comparaba, en cada pasada, lo que mostraba con lo guardado: con dos
+    # pantallas abiertas, la de uno le pisaba sin querer lo que había elegido el otro.
+    at = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+    at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+    at.session_state["nivel_usuario"], at.session_state["admin_nombre"] = "admin", "duenio"
+    at.session_state["pagina_actual"] = "🗂️ Administrar"
+    at.session_state["sub_admin"] = "💬 Mensajería y cobros"
+    at.run()
+    _papel = at.radio(key="papel_del_comprobante_elegido")
+    esperar("el selector del papel muestra lo guardado", (_papel.value, ns["papel_del_comprobante"]()),
+            ("Hoja A4", "Hoja A4"))
+    _papel.set_value("Ticket de 80 mm").run()
+    esperar("al tocarlo se guarda, y lo dice",
+            (ns["papel_del_comprobante"](), any("Ticket de 80 mm" in x.value for x in at.success)),
+            ("Ticket de 80 mm", True))
+    # Otro, desde su pantalla, lo vuelve a hoja: esta pantalla lo muestra y NO lo pisa.
+    ns["guardar_config"]("papel_del_comprobante", "Hoja A4")
+    ns["conn"].commit()
+    at.run()
+    esperar("si otro lo cambió, esta pantalla muestra lo nuevo y no lo pisa",
+            (at.radio(key="papel_del_comprobante_elegido").value, ns["papel_del_comprobante"]()),
+            ("Hoja A4", "Hoja A4"))
+    at.run()
+    esperar("ni en la pasada siguiente", ns["papel_del_comprobante"](), "Hoja A4")
+    esperar("sin errores en la pantalla", [e.value for e in at.exception], [])
+
     # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
     # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el
     # precio y el cliente que tenía— y, terminada, no queda nada guardado. A otro no se le

@@ -900,22 +900,16 @@ if pagina == PAGINAS[3]:
     if sub_admin == SUB_ADMIN[2]:
         # EN QUÉ PAPEL SALEN EL COMPROBANTE Y LA FACTURA: hoja A4 o ticket de 80 mm (ver «EL
         # TICKET DE 80 MM» en logica/ventas.py). Se elige una vez; los botones son los mismos.
-        _papel_ahora = papel_del_comprobante()
-        _papel_elegido = st.radio(
+        # El selector muestra SIEMPRE lo guardado (se le pone antes de dibujarlo), y guarda
+        # solo cuando alguien lo toca: ver elegir_papel_del_comprobante().
+        st.session_state["papel_del_comprobante_elegido"] = papel_del_comprobante()
+        st.radio(
             "🖨️ El comprobante y la factura se imprimen en:", PAPELES_DEL_COMPROBANTE,
-            index=PAPELES_DEL_COMPROBANTE.index(_papel_ahora), horizontal=True,
-            key="papel_del_comprobante_elegido",
+            horizontal=True, key="papel_del_comprobante_elegido",
+            on_change=elegir_papel_del_comprobante, args=("papel_del_comprobante_elegido",),
             help="Con ticketera térmica, «Ticket de 80 mm»: el PDF sale del ancho del rollo y "
                  "del largo justo. Los botones de «📄 Comprobante (PDF)» y «📄 Factura (PDF)» "
                  "son los mismos; cambia el papel.")
-        if _papel_elegido != _papel_ahora:
-            try:
-                guardar_papel_del_comprobante(_papel_elegido)
-                avisar("success", f"🖨️ Listo: el comprobante y la factura salen en "
-                                  f"«{_papel_elegido}».")
-                st.rerun()
-            except (PermissionError, ValueError) as _err:
-                st.error(el_error_en_castellano(_err))
         st.markdown("---")
         # LA FACTURA ELECTRÓNICA (ver esa sección en logica/facturas.py): qué falta para
         # hacerlas y probar la conexión con ARCA, sin facturar nada.

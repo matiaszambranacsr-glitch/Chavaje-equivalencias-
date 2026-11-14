@@ -623,6 +623,20 @@ def guardar_papel_del_comprobante(papel):
     conn.commit()
 
 
+def elegir_papel_del_comprobante(clave):
+    """Lo que pasa al tocar el selector del papel (va como on_change): guarda lo elegido y lo
+    dice. Como aviso al tocar, y no comparando lo que muestra el selector con lo guardado en
+    cada pasada: Streamlit conserva lo que mostraba un campo aunque otro haya cambiado el valor
+    en la base, y la pantalla abierta de uno le pisaba sin querer lo que había elegido el otro."""
+    try:
+        guardar_papel_del_comprobante(st.session_state.get(clave))
+        aviso = ("success", "🖨️ Listo: el comprobante y la factura salen en "
+                            f"«{papel_del_comprobante()}».")
+    except (PermissionError, ValueError) as _err:
+        aviso = ("error", el_error_en_castellano(_err))
+    avisar(*aviso)
+
+
 def pdf_de_ticket(partes):
     """Un PDF de 80 mm de ancho y del alto justo, para ticketera. `partes`, de arriba a abajo:
         ("centro", texto, tamaño, negrita)     centrado, en los renglones que haga falta
