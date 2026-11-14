@@ -1054,7 +1054,7 @@ _PIEZAS_DE_LA_FICHA_EN_CASTELLANO = (
      re.compile(r"\bPOLEA|\bTENSOR|\bRODILLO")),
     ("timing tensioner", "un tensor de distribución", re.compile(r"\bPOLEA|\bTENSOR|\bRODILLO")),
     ("multi-v-belt", "una correa Poly-V", None),
-    ("ball joint", "una rótula", None),
+    ("ball joint", "una rótula o un kit de rótulas", None),
     ("water pump", "una bomba de agua", None),
 )
 # El nombre de cada medida en la ficha: (cómo se dice acá, a qué campo de buscar_por_medidas()

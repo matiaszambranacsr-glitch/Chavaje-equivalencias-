@@ -7145,7 +7145,7 @@ sitios que la app usa, y se abrió cada uno con el código de la app, sin atajos
     En el Buscador, el código de SKF que no tenés ofrece «🌐 Ver qué pieza es según SKF». La
     ficha existe solo si declara ESE código.
   - **En castellano, lo que se reconoce.** La ficha está en inglés. La pieza se pasa a
-    castellano por las palabras de la frase de SKF, tomadas de 16 fichas reales (kit de
+    castellano por las palabras de la frase de SKF, tomadas de 14 fichas reales (kit de
     distribución, con o sin bomba; bomba de agua; rodamiento de rueda; tensor; correa Poly-V;
     crapodina; fuelle; rótula), y las medidas por su nombre. Lo que no se reconoce no se
     inventa: sale la frase de SKF, entre comillas y escapada, porque es texto de un sitio ajeno.
