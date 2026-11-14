@@ -45,6 +45,15 @@ _INDICE = {"data": [["2026-08-01", 9234.56], ["2026-07-01", 9062.37], ["2026-06-
 _VARIACION_FRACCION = {"data": [["2026-08-01", 0.019], ["2026-07-01", 0.0242]]}
 _VARIACION_PORCENTAJE = {"data": [["2026-08-01", 1.9], ["2026-07-01", 2.42]]}
 _ROTA = {"data": [["2026-08-01", 9234.56], ["2026-07-01", 0.0242]]}
+# EL IPC DE TRANSPORTE, COMO LO CONTESTA LA API DE VERDAD (serie 146.3_ITRANSPNAL_DICI_M_23,
+# consultada el 14/11/2026): en diciembre de 2023 el transporte subió 31,7% en un mes. Con el
+# techo de 30% la serie entera se descartaba, y el IPC de transporte no anduvo nunca.
+_TRANSPORTE_DE_VERDAD = {"data": [
+    ["2024-03-01", 5923.314], ["2024-02-01", 5243.4233], ["2024-01-01", 4311.5901],
+    ["2023-12-01", 3414.0727], ["2023-11-01", 2593.1752], ["2023-10-01", 2349.1266]]}
+# Y esto no es inflación de un mes: un 45% es una serie interanual, o leída al revés.
+_NO_ES_DE_UN_MES = {"data": [["2026-08-01", 13400.0], ["2026-07-01", 9241.0],
+                             ["2026-06-01", 9100.0]]}
 
 _BCRA = {"status": 200, "metadata": {"resultset": {"count": 2}},
          "results": [{"fecha": "2026-09-25", "detalle": [
@@ -123,6 +132,19 @@ def probar(L):
     # Una serie que mezcla índice y variación no se cree.
     _con_respuestas(g, {url_ipc: _ROTA})
     esperar("IPC roto", g["_inflacion_mensual_indec"](), {})
+    # La serie de transporte de verdad, con su 31,7% de diciembre de 2023: se cree, entera.
+    _con_respuestas(g, {url_ipc: _TRANSPORTE_DE_VERDAD})
+    _transporte = g["_ipc_de_la_serie"]("146.3_ITRANSPNAL_DICI_M_23")
+    esperar("IPC de transporte de verdad: se lee", sorted(_transporte.get("mensual") or {}),
+            ["2023-11", "2023-12", "2024-01", "2024-02", "2024-03"])
+    cerca("IPC de transporte: diciembre de 2023", (_transporte.get("mensual") or {}).get("2023-12"),
+          0.3166, tol=0.0002)
+    # Guardado y vuelto a leer, también se cree (pasa otra vez por el mismo control).
+    esperar("y lo guardado se vuelve a creer",
+            sorted(g["_variaciones_del_ipc"](list(_transporte["mensual"].items()))),
+            sorted(_transporte["mensual"]))
+    _con_respuestas(g, {url_ipc: _NO_ES_DE_UN_MES})
+    esperar("un 45% en un mes no se cree", g["_ipc_de_la_serie"]("x"), {})
     # Si el Estado no contesta, el respaldo de argentinadatos (porcentaje mensual), sin la
     # hiperinflación del 89 que viene al principio de la serie.
     _argdatos = ([{"fecha": "1989-07-31", "valor": 196.6}]
@@ -745,6 +767,101 @@ def probar(L):
                                                      sesion=_Sesion13("", freno=True))["error"]
     esperar("ficha suelta: el freno de la sesión, sin la dirección",
             (bool(_err13), "http" in _err13 or "clave" in _err13), (True, False))
+
+    # 13b. LA FICHA QUE NO NOMBRA NÚMEROS (ver «LO QUE LA FICHA DECLARA DE SU PIEZA»). SKF mudó
+    # su catálogo y los números originales ya no están en la página: declara qué pieza es y sus
+    # medidas. Del tensor «VKM 33019» —65 de diámetro, 25 de ancho— se dice qué es en castellano
+    # y se ofrece la polea tuya que mide eso: no el retén de la misma medida ni la polea de otra.
+    def _pagina_skf(sku, frase, medidas, antes=""):
+        import json as _json
+        _bloque = {"@context": "https://schema.org", "@type": "Product", "sku": sku,
+                   "name": sku, "description": frase, "image": ["https://ejemplo.invalid/a.jpg"],
+                   "additionalProperty": [{"@type": "PropertyValue", "name": n, "value": v}
+                                          for n, v in medidas]}
+        return ("<html><head><title>Product catalogue | SKF-" + sku + "</title>" + antes
+                + '<script type="application/ld+json">' + _json.dumps(_bloque) + "</script>"
+                + "</head><body>Product catalogue " + sku + "</body></html>")
+
+    _polea13 = _prod12("LRAP065", "POLEA TENSORA CORREA POLY V VW GOL", _m_f)
+    _reten13 = _prod12("RET6525", "RETEN DE RUEDA 65X25", _m_t)
+    _otra13 = _prod12("LRAP054", "POLEA TENSORA CORREA POLY V FIAT PALIO", _m_f)
+    # Y una polea casi igual, a 3 mm: con la tolerancia del calibre entraría; con la de una
+    # medida publicada, no.
+    _casi13 = _prod12("LRAP068", "POLEA TENSORA CORREA POLY V RENAULT CLIO", _m_f)
+    for _id, _ext, _an in ((_polea13, 65.3, 25.0), (_reten13, 65.0, 25.0), (_otra13, 54.2, 38.3),
+                           (_casi13, 67.9, 25.9)):
+        _c.execute("UPDATE productos SET diametro_interno = 17, diametro_externo = ?, ancho = ? "
+                   "WHERE id = ?", (_ext, _an, _id))
+    g["conn"].commit()
+    _basura13 = ('<script type="application/ld+json">esto no es un bloque</script>'
+                 '<script type="application/ld+json">["suelto", 7]</script>'
+                 '<script type="application/ld+json">' + "[" * 3000 + "]" * 3000 + "</script>")
+    _ses13b = _Sesion13(_pagina_skf(
+        "VKM33019", "SKF Multi-V-tensioner bearing to perform a quality repair.",
+        [("Diameter", "65 mm"), ("Width", "25 mm"), ("Colour", "black"),
+         ("Tensioner Pulley Actuation", "Automatic")], antes=_basura13))
+    _r13b = ns["buscar_en_la_ficha_del_fabricante"]("vkm 33019", sesion=_ses13b)
+    esperar("ficha de SKF: va al sitio nuevo",
+            _ses13b.pedidas, ["https://www.skfvertevo.com/eur/es/product-catalogue/VKM33019"])
+    esperar("ficha de SKF: dice qué pieza es y sus medidas, en castellano",
+            (_r13b["error"], _r13b["pieza"]["que_es"], _r13b["pieza"]["medidas"]),
+            ("", "un tensor de la correa Poly-V", [("diámetro", "65 mm"), ("ancho", "25 mm")]))
+    esperar("ficha de SKF: lo tuyo que es esa pieza y mide eso, y nada más",
+            [f["ID"] for f in _r13b["productos"]], [_polea13])
+    esperar("ficha de SKF: la frase para el mostrador",
+            ns["frase_de_la_pieza_de_la_ficha"](_r13b),
+            "🌐 **Según SKF, VKM 33019 es un tensor de la correa Poly-V.** "
+            "Diámetro 65 mm · ancho 25 mm.")
+    esperar("ficha de SKF: las medidas, en el orden en que se dicen acá",
+            ns["pieza_de_la_ficha_en_castellano"]({"que_es": "a complete Wheel Bearing", "medidas": [
+                ("Width", "37 mm"), ("Inner Diameter", "25 mm"), ("Outer Diameter", "52 mm")]}
+            )["medidas"],
+            [("diámetro interior", "25 mm"), ("diámetro exterior", "52 mm"), ("ancho", "37 mm")])
+    # El sitio contesta a cualquier código con la misma página, con el código en el título: la
+    # ficha existe solo si declara ESA pieza (antes, 96 de 96 quedaban «leídas» sin serlo).
+    esperar("ficha de SKF: la página que no declara la pieza no es la ficha",
+            [ns["buscar_en_la_ficha_del_fabricante"]("VKM 33019", sesion=_Sesion13(_p))["error"]
+             for _p in ("<html><title>Product catalogue | SKF-VKM33019</title></html>",
+                        _pagina_skf("VKM11107", "SKF timing tensioner", []).replace(
+                            "</body>", " VKM33019</body>"))],
+            ["el fabricante no tiene ficha de ese código"] * 2)
+    # La pieza que no se reconoce no se inventa: va la frase del fabricante, y como es texto
+    # de un sitio ajeno, escapada. Sin dos medidas de una pieza conocida no se busca nada.
+    _r13c = ns["buscar_en_la_ficha_del_fabricante"]("VKN 1000", sesion=_Sesion13(_pagina_skf(
+        "VKN1000", "A *special* tool <b>[see](https://ejemplo.invalid)</b>", [("Width", "25 mm")])))
+    _frase13c = ns["frase_de_la_pieza_de_la_ficha"](_r13c)
+    esperar("ficha de SKF: con una sola medida no se busca (saldría media lista)",
+            ns["buscar_en_la_ficha_del_fabricante"]("VKM 11107", sesion=_Sesion13(_pagina_skf(
+                "VKM11107", "A complete engine timing tensioner replacement.",
+                [("Width", "25 mm")])))["productos"], [])
+    esperar("ficha de SKF: lo que no se reconoce va como lo escribió, escapado",
+            (_r13c["pieza"]["que_es"], _r13c["productos"], "en inglés" in _frase13c,
+             "\\*special\\*" in _frase13c, "<b>" in _frase13c, "[see]" in _frase13c),
+            ("", [], True, True, False, False))
+    esperar("ficha de SKF: lo que declara una página cualquiera, con tope y sin listas",
+            ns["pieza_que_declara_la_pagina"](
+                '<script type="application/ld+json">{"@type": "Product", "sku": ["a"], '
+                '"name": "N' + "x" * 500 + '", "description": 5, "additionalProperty": '
+                '[{"name": "Width", "value": {"otro": 1}}, "suelto", {"name": "Height", '
+                '"value": "9\\n mm"}]}</script>'),
+            {"codigo": "", "nombre": "N" + "x" * 79, "que_es": "5", "medidas": [("Height", "9 mm")]})
+    # Y ya no se lee en segundo plano: de ahí no puede salir un par, y eran pedidos para nada.
+    _prod12("BA13", "BOMBA DE AGUA VW GOL 1.6 SKF VKPC 85304", _m_f)
+    g["conn"].commit()
+    _ses13d = _Sesion13("")
+    _res13d = ns["leer_catalogo_de_fabricante"]("SKF", cuantos=5, pausa=0, sesion=_ses13d)
+    _leer13, _leidos13 = g["leer_catalogo_de_fabricante"], []
+    g["leer_catalogo_de_fabricante"] = lambda nombre, **k: (_leidos13.append(nombre), {
+        "leidas": 1, "fallidas": 0, "error": ""})[1]
+    try:
+        ns["tanda_de_catalogos_de_fabricante"](50)
+    finally:
+        g["leer_catalogo_de_fabricante"] = _leer13
+    esperar("catálogo de SKF: no se lee solo, y el panel lo dice",
+            (_ses13d.pedidas, _res13d["leidas"], "SKF" in _leidos13, sorted(_leidos13),
+             ["no se lee solo" in e["Qué da"]
+              for e in ns["estado_de_los_catalogos_de_fabricante"]()]),
+            ([], 0, False, ["MANN-FILTER", "NGK"], [True, False, False]))
     # 14. LO QUE MÁS SE BUSCA EN MERCADO LIBRE, CONTRA EL CATÁLOGO (ver esa sección en
     # logica/proveedores.py). Con un Mercado Libre de mentira: se pide la categoría de los
     # repuestos con el token, las búsquedas se cruzan con las descripciones (sin importar el

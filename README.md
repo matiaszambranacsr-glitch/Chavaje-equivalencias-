@@ -5196,14 +5196,15 @@ un listado y no cuenta.
 sitio falla cinco veces seguidas se pausa un día (`catalogo_pausado_…`). Se apaga en Administrar
 → Mantenimiento → «🏭 Catálogos de fabricantes».
 
-Las direcciones salen de fichas reales que publican los buscadores. El servidor donde se armó
-esto no llega a esos sitios, así que se probó con un servidor falso local que imita las
-fichas: códigos leídos, pares anotados, ficha inexistente (404), sitio caído (se reintenta, y
-tras cinco fallas se pausa):
+Las direcciones salen de fichas reales que publican los buscadores, y se armó con un servidor
+falso local que imita las fichas (códigos leídos, pares anotados, ficha inexistente, sitio
+caído). El 14/11/2026 se abrieron de verdad, desde un servidor con salida a esos sitios: ver
+«🌐 Las fuentes de afuera, abiertas de verdad». De ahí salió que **SKF ya no se lee en segundo
+plano**: mudó su catálogo y la ficha nueva no trae los números originales.
 
 | Fabricante | Ficha por código |
 |---|---|
-| SKF | `automotive.skf.com/eur/es/product-catalogue/VKMA01250` |
+| SKF | `skfvertevo.com/eur/es/product-catalogue/VKMA01250` (antes `automotive.skf.com`). No nombra números: no se lee sola, y en el Buscador dice qué pieza es el código que no tenés |
 | MANN-FILTER | `mann-filter.com/en/catalog/international/search-results/product.html/w712/95_mann-filter.html` (la barra del código es parte de la dirección) |
 | NGK (bujías) | `sparkplug-crossreference.com/convert/NGK_PN/BKR6E`: una tabla de equivalencias de bujías por código NGK; no es de NGK, la ficha oficial lleva un número de stock que no sale del código |
 
@@ -7096,6 +7097,63 @@ Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:5
 
 Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), el día UTC de una fecha guardada (`date(fecha)`, `substr(fecha, 1, 10)`), `date('now', 'localtime')`, `date.today()` (también en las pruebas) y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
 
+## 🌐 Las fuentes de afuera, abiertas de verdad
+
+Todo lo que la app trae de internet se había armado y probado con servidores de mentira: el
+servidor donde se trabaja no tenía salida. El 14/11/2026 el dueño habilitó la salida a los
+sitios que la app usa, y se abrió cada uno con el código de la app, sin atajos. Lo que dio:
+
+| Fuente | Qué pasó de verdad |
+|---|---|
+| Las 13 de `probar_fuentes_de_afuera()` (BCRA, INDEC, dólar, DNRPA, CHAS, NHTSA) | 12 andaban; la inflación del transporte no (abajo). Arreglada, 13 de 13 |
+| BCRA: cheques, deudores, tasas | Contestan con el formato que la app espera |
+| CHAS (Secretaría de Industria) | 160.268 certificados de 611 marcas |
+| DNRPA: `actualizar_parque_automotor()` | Bajó septiembre de 2026: 170.332 transferencias, 25 provincias; el Gol primero, con 1.369 productos tuyos que lo nombran |
+| ARCA en homologación (WSAA, WSFE, padrón) | El pedido de permiso sale con el formato correcto (contestó «certificado no emitido por AC de confianza» a un certificado de descarte, que es lo que tiene que contestar); `FEDummy` responde. Apareció un riesgo de factura doble (abajo) |
+| MANN-FILTER | Anda: de 6 fichas, 3 nombraron productos tuyos (4 pares, y 20 que eran otra pieza quedaron afuera) |
+| NGK (`sparkplug-crossreference.com`) | Respondió 403: le pide a cada visita que demuestre que es una persona. **No se esquiva.** En la base real sí había leído (13 de 23 con productos): depende de dónde corre la app, y si pasa en producción la tanda se pausa sola |
+| SKF | **Mudó su catálogo** (abajo) |
+| WEGA (`PORTALES_CONOCIDOS`) | Las fichas se leen, con sus autos. Un código que WEGA no tiene responde 500, no 404: cuenta como falla y se da por «sin ficha» al tercer día, como cualquier falla |
+| Mercado Libre | Sin la aplicación cargada no sale nada a internet: dice qué falta |
+
+**Tres cosas que solo se veían con la red de verdad:**
+
+- **La inflación del transporte quedaba afuera por un tope mal puesto.** `INFLACION_MENSUAL_CREIBLE`
+  descartaba cualquier mes de más de 30 %, pensado para atajar un índice acumulado leído como
+  mensual. Pero el transporte subió 31,7 % en diciembre de 2023, de verdad, y la serie entera
+  se rechazaba. El tope pasó a 40 %; lo que no es de un mes (un 254 % anual) sigue afuera.
+  `pruebas_de_las_fuentes.py` lo controla con los números reales.
+- **Un error de ARCA no es una respuesta.** `ultimo_autorizado()` leía «0» de una respuesta
+  que traía un error adentro, y `_consultar_en_arca()` tomaba cualquier error como «ARCA no la
+  tiene». Con ARCA andando mal, la app podía numerar desde 1 o dar por no emitida una factura
+  que sí estaba: el camino a una factura doble. Ahora, si la respuesta trae `<Err>`, se frena
+  con el motivo en castellano (`ERRORES_DE_ARCA_EN_CRIOLLO`), y «no la tiene» es solo el código
+  602. `pruebas_de_las_facturas.py` (3b).
+- **SKF mudó su catálogo y la app leía una página vacía.** `automotive.skf.com` ahora redirige
+  a `skfvertevo.com`, y `SesionSoloLectura` corta —con razón— una redirección a otro sitio:
+  toda lectura terminaba en «se cortó por seguridad». Además, el sitio contesta a cualquier
+  código con la misma página y lo repite en el título, así que el control de siempre («la ficha
+  tiene que mostrar el código») no servía: en la base real figuraban 96 fichas «leídas», ninguna
+  «sin ficha» y ningún par. Y los números originales ya no están en la página: los trae aparte
+  un programa del navegador. Entonces:
+  - **SKF ya no se lee en segundo plano** (`"sin_numeros"` en `CATALOGOS_DE_FABRICANTE`): de ahí
+    no puede salir un par, y eran pedidos a un sitio ajeno para nada. El panel de Mantenimiento
+    lo dice en la columna «Qué da». Las fotos tampoco eran motivo: los 100 productos de tus
+    listas que citan SKF ya tienen la suya.
+  - **Lo que la ficha sí declara, se usa.** Para los buscadores, la página lleva un bloque con
+    el código, una frase que dice qué pieza es y sus medidas (`pieza_que_declara_la_pagina()`).
+    En el Buscador, el código de SKF que no tenés ofrece «🌐 Ver qué pieza es según SKF». La
+    ficha existe solo si declara ESE código.
+  - **En castellano, lo que se reconoce.** La ficha está en inglés. La pieza se pasa a
+    castellano por las palabras de la frase de SKF, tomadas de 16 fichas reales (kit de
+    distribución, con o sin bomba; bomba de agua; rodamiento de rueda; tensor; correa Poly-V;
+    crapodina; fuelle; rótula), y las medidas por su nombre. Lo que no se reconoce no se
+    inventa: sale la frase de SKF, entre comillas y escapada, porque es texto de un sitio ajeno.
+  - **Lo tuyo que mide lo mismo**, solo para el rodamiento y el tensor o la polea, que son las
+    que se pueden buscar así, solo con dos medidas, y solo entre los productos que se llaman
+    así en tus listas: sin eso, un retén de 65 x 25 salía como si fuera el tensor. En la base
+    real hay 126 poleas con diámetro y ancho cargados.
+
 ## 🧑‍🔧 Las decisiones que quedaban, tomadas
 
 El dueño las dejó en manos de la app («hacé todas las decisiones mías»). Lo que se decidió, por
@@ -7480,6 +7538,7 @@ Si en el mostrador piden «W712/94», un filtro de aceite de MANN, ninguna lista
 - **Cuándo aparece**: el código no está en ninguna lista y tiene la forma de un código de MANN-FILTER («W 712/94», «HU 719/7 X», «C 25 114/1», «WK 853/3 X») o de SKF («VKMA 01250», «VKPC 85304»). Entonces, debajo de «No hay ningún producto con ese código exacto», sale **«🌐 Buscarlo en la ficha de MANN-FILTER»**.
 - **Con un botón, y solo con sesión**: sale a internet, y lo decide el que atiende. Un cliente que mira sin sesión no dispara pedidos a un sitio ajeno. Lo que se manda es el código tipeado, nada de la base. Lo leído queda hasta cerrar la pestaña, y no se vuelve a pedir.
 - **Qué muestra**: los productos tuyos que la ficha nombra, como botones que abren sus equivalencias (primero los de tus listas, con stock, y al final los números de fábrica, que se abren para ver qué tuyo los cita), y un link a la ficha. En la de un filtro solo cuentan filtros: una junta con el mismo número es otra cosa. Revisalos antes de vender: es lo que el fabricante escribió, no una equivalencia aprobada.
+- **Con SKF es distinto** (desde el 14/11/2026): su ficha nueva no nombra números, así que el botón es **«🌐 Ver qué pieza es según SKF»** y contesta eso: «Según SKF, VKBA 3525 es un kit de rodamiento de rueda. Diámetro interior 25 mm · diámetro exterior 52 mm · ancho 37 mm». Si es un rodamiento o un tensor y la ficha da dos medidas, debajo sale lo tuyo que es esa pieza y mide lo mismo (con 2 % de diferencia, no el 5 % del calibre). Ver «🌐 Las fuentes de afuera, abiertas de verdad».
 - **Lo que no**: tener la forma no lo hace de ese fabricante. Si la ficha no muestra el código pedido, o el sitio no la tiene, dice «el fabricante no tiene ficha de ese código»; si no se pudo abrir, lo dice sin la dirección. NGK no está: para las bujías está «🕯️ ¿Qué bujía le va?», que no necesita internet.
 
 `buscar_en_la_ficha_del_fabricante()` usa la misma lectura que el catálogo de siempre (`_leer_la_ficha_de_fabricante()`, que quedó aparte para las dos). `pruebas_de_las_fuentes.py` (13) lo controla con fichas de mentira (el filtro sí y la junta no, sin ficha, una portada, un freno sin dirección), y `pruebas_de_las_pantallas.py`, el botón: sin sesión no está, con sesión lee una vez y ofrece lo encontrado. Sin el filtro de la pieza, o con el botón para todos, fallan.

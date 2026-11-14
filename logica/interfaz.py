@@ -491,8 +491,14 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-14b"
+VERSION_DE_LO_NUEVO = "2026-11-14c"
 LO_NUEVO = (
+    ("🌐 El código de SKF que no tenés: «Ver qué pieza es según SKF» dice qué es y sus medidas, "
+     "y si es un rodamiento o un tensor, lo tuyo que mide lo mismo. SKF mudó su catálogo y ya "
+     "no publica los números originales, así que dejó de leerse en segundo plano.",
+     "🔍 Buscador"),
+    ("🧾 Si ARCA contesta con un error, la app frena y dice cuál: antes podía tomarlo como «no "
+     "hay facturas» y numerar mal.", "🗂️ Administrar → 💬 Mensajería y cobros"),
     ("🖨️ El comprobante y la factura salen también en ticket de 80 mm, para ticketera: se elige "
      "una vez el papel y los botones son los mismos.", "🗂️ Administrar → 💬 Mensajería y cobros"),
     ("🔧 En el portal del taller, la lista que está en otra escala (TARANTO, hasta que tenga su "
@@ -1977,8 +1983,8 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "portal proveedor web autos aplicaciones clave contraseña jl distribuidor varias marcas "
      "relacionar equivalentes alternativas cargar link pegar sin contraseña publico wega"),
     ("🏭 Catálogos de fabricantes: se leen solos", 0,
-     "SKF, MANN-FILTER y bujías NGK: abre la ficha de cada código que tus listas citan. "
-     "✅ Corre solo en segundo plano.",
+     "MANN-FILTER y bujías NGK: abre la ficha de cada código que tus listas citan. "
+     "✅ Corre solo en segundo plano. SKF ya no: su ficha nueva no trae los números.",
      "catalogo fabricante skf mann ngk bujias filtros automatico internet equivalencias"),
     ("🛒 Mercado Libre: pistas y precio de mercado", 0,
      "Busca tus códigos en Mercado Libre: relaciona productos y trae el precio publicado.",

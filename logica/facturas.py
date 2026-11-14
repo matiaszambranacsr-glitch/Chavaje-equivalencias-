@@ -390,13 +390,49 @@ def _errores_de(raiz):
     return " · ".join(p for p in partes if p.strip(": "))
 
 
+# CUANDO ARCA CONTESTA UN ERROR, NO CONTESTÓ. Se vio la primera vez que se pudo hablar con el
+# ARCA de prueba de verdad (14/11/2026): a un pedido que rechaza —un permiso que no vale, una
+# caída interna— le contesta con la MISMA forma que a uno bueno, con todo en cero y el error al
+# lado: «<CbteNro>0</CbteNro><Errors><Err><Code>600</Code>…». La app leía el 0 como «todavía no
+# hay ninguna factura», y al consultar una pendiente leía la falta de CAE como «ARCA no la
+# tiene»: la marcaba rechazada y dejaba facturar de nuevo. Si ARCA sí la había hecho, eran dos
+# facturas por la misma venta. Ahora un error es «no se pudo preguntar», y lo único que quiere
+# decir «no existe» es el código con que ARCA lo dice.
+ARCA_NO_LO_TIENE = "602"        # «No existen datos en nuestros registros para los parámetros…»
+# Lo que dice ARCA, en castellano de mostrador. Lo demás se muestra como vino, recortado.
+ERRORES_DE_ARCA_EN_CRIOLLO = {
+    "600": "el permiso para hablar con ARCA no vale (se pide uno nuevo cuando venza el anterior)",
+    "601": "el CUIT de la configuración no es el del certificado",
+    "501": "ARCA tuvo un error interno", "502": "ARCA tuvo un error interno",
+    "500": "ARCA tuvo un error interno",
+}
+
+
+def _solo_los_errores(raiz):
+    """[(código, mensaje)] de los errores (no las observaciones) de una respuesta del WSFE."""
+    return [(_texto_de_arca(e, "Code").strip(), " ".join(_texto_de_arca(e, "Msg").split()))
+            for e in raiz.iter() if e.tag == "Err" or e.tag.endswith("}Err")]
+
+
+def _error_de_arca_en_criollo(errores):
+    """Los errores del WSFE en una frase: lo conocido, con sus palabras; lo demás, como vino."""
+    return " · ".join(ERRORES_DE_ARCA_EN_CRIOLLO.get(codigo)
+                      or f"{codigo}: {tapar_lo_sensible(mensaje)[:160]}"
+                      for codigo, mensaje in errores) or "sin detalle"
+
+
 def ultimo_autorizado(cfg, tipo):
-    """El último número autorizado por ARCA para ese punto de venta y tipo (0 si ninguno)."""
+    """El último número autorizado por ARCA para ese punto de venta y tipo (0 si ninguno).
+    ErrorDeArca si ARCA contestó un error: su «0» de ese caso no es un número (ver «CUANDO
+    ARCA CONTESTA UN ERROR, NO CONTESTÓ»)."""
     raiz = _pedir_al_wsfe(cfg, "FECompUltimoAutorizado",
                           f"<PtoVta>{cfg['punto_de_venta']}</PtoVta><CbteTipo>{tipo}</CbteTipo>")
+    errores = _solo_los_errores(raiz)
     numero = _texto_de_arca(raiz, "CbteNro")
-    if not numero.isdigit():
-        raise ErrorDeArca(f"ARCA no dijo el último número: {_errores_de(raiz) or 'sin detalle'}.")
+    if errores or not numero.isdigit():
+        raise ErrorDeArca("ARCA no dijo cuál fue el último número: "
+                          f"{_error_de_arca_en_criollo(errores)}. No se hizo nada; probá de "
+                          "nuevo en un rato.")
     return int(numero)
 
 
@@ -497,13 +533,20 @@ def _emitir(cfg, tipo, cliente, importes, venta_id, asociada=None, nombre_client
 
 def _consultar_en_arca(cfg, tipo, punto_de_venta, numero):
     """Lo que ARCA tiene de ese número: dict, o None si no lo tiene. ErrorDeArca si no se pudo
-    preguntar."""
+    preguntar —y un error de ARCA es no haber podido: solo su «no existen datos» quiere decir
+    que no lo tiene (ver «CUANDO ARCA CONTESTA UN ERROR, NO CONTESTÓ»)."""
     raiz = _pedir_al_wsfe(cfg, "FECompConsultar",
                           f"<FeCompConsReq><CbteTipo>{tipo}</CbteTipo><CbteNro>{numero}</CbteNro>"
                           f"<PtoVta>{punto_de_venta}</PtoVta></FeCompConsReq>")
     cae = _texto_de_arca(raiz, "CodAutorizacion")
     if not cae:
-        return None
+        errores = _solo_los_errores(raiz)
+        if errores and all(codigo == ARCA_NO_LO_TIENE for codigo, _mensaje in errores):
+            return None
+        raise ErrorDeArca(
+            f"ARCA no contestó por la {nombre_del_comprobante(tipo, punto_de_venta, numero)}: "
+            f"{_error_de_arca_en_criollo(errores)}. No se cambió nada; probá de nuevo en un "
+            "rato.")
 
     def importe(nombre):
         try:

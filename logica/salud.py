@@ -1621,7 +1621,12 @@ SERIES_IPC_INDEC = ("148.3_INIVELNAL_DICI_M_26", "145.3_INGNACUAL_DICI_M_38")
 URL_IPC_INDEC = ("https://apis.datos.gob.ar/series/api/series"
                  "?ids={serie}&limit=40&sort=desc&format=json")
 # Una inflación mensual fuera de esto no es un dato: es una serie leída al revés.
-INFLACION_MENSUAL_CREIBLE = (-0.05, 0.30)
+# El techo era 30%, pensado con el nivel general (su máximo reciente: 25,5% en diciembre de
+# 2023). La primera vez que se pudo consultar la API de verdad se vio que el IPC de TRANSPORTE
+# no andaba nunca: ese mismo diciembre el transporte subió 31,7% (el índice pasó de 2.593,18 a
+# 3.414,07), y por ese solo mes se descartaba la serie entera. Con 40% entra, y una variación
+# interanual leída como mensual sigue quedando afuera casi siempre.
+INFLACION_MENSUAL_CREIBLE = (-0.05, 0.40)
 
 
 def _pedir_json(url, tiempo_maximo=4):

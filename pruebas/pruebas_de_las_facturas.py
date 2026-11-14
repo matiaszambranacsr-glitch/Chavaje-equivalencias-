@@ -72,6 +72,10 @@ class _ArcaDePrueba:
         self.autorizar_aunque_se_corte = False
         self.padron = {}          # CUIT -> lo que el padrón contesta de él (XML de personaReturn)
         self.padron_autorizado = True
+        # Con un (código, mensaje), el WSFE rechaza todo como lo hace el de verdad: la misma
+        # forma de siempre, con todo en cero y el error al lado (respuesta real de wswhomo del
+        # 14/11/2026 a un permiso que no vale).
+        self.rechaza_con = None
 
     def post(self, url, data=None, timeout=None, headers=None):
         accion = (headers or {}).get("SOAPAction", "").strip('"')
@@ -106,6 +110,14 @@ class _ArcaDePrueba:
         def valor(nombre):
             m = re.search(rf"<{nombre}>(.*?)</{nombre}>", cuerpo)
             return m.group(1) if m else ""
+        if self.rechaza_con and "FEV1/" in accion:
+            codigo, mensaje = self.rechaza_con
+            error = f"<Errors><Err><Code>{codigo}</Code><Msg>{mensaje}</Msg></Err></Errors>"
+            if accion.endswith("FECompUltimoAutorizado"):
+                return self._respuesta("<FECompUltimoAutorizadoResult><PtoVta>0</PtoVta>"
+                                       f"<CbteTipo>0</CbteTipo><CbteNro>0</CbteNro>{error}"
+                                       "</FECompUltimoAutorizadoResult>")
+            return self._respuesta(f"<R>{error}</R>")
         if accion.endswith("FECompUltimoAutorizado"):
             n = self.ultimo.get((int(valor("PtoVta")), int(valor("CbteTipo"))), 0)
             return self._respuesta(f"<R><CbteNro>{n}</CbteNro></R>")
@@ -295,6 +307,55 @@ def probar(L):
         esperar("ARCA la tenía: queda autorizada con su CAE",
                 (ok3b, uno("SELECT estado FROM facturas WHERE id = ?", f3),
                  bool(uno("SELECT cae FROM facturas WHERE id = ?", f3))), (True, "autorizada", True))
+        # 3b. CUANDO ARCA CONTESTA UN ERROR, NO CONTESTÓ. Una factura que ARCA sí hizo queda
+        # pendiente (se cortó), y al consultarla ARCA contesta un error —como el de verdad: la
+        # forma de siempre, todo en cero, y el error al lado—. Sigue pendiente: no se la da por
+        # no hecha, y no deja facturar de nuevo. Antes quedaba «rechazada» y la segunda factura
+        # de la misma venta salía.
+        v3c, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v3c, "Efectivo")
+        arca.cortar_el_proximo_cae, arca.autorizar_aunque_se_corte = True, True
+        ns["facturar_venta"](v3c)
+        f3c = uno("SELECT id FROM facturas WHERE venta_id = ?", v3c)
+        _hechas_en_arca = len(arca.autorizadas)
+        for _error in (("600", "ValidacionDeToken: No valido token. Excepcion: CargarStringBase64"
+                               "Token: The input is not a valid Base-64 string"),
+                       ("501", "Error interno de base de datos"),
+                       ("9999", "Algo que ARCA todavía no inventó")):
+            arca.rechaza_con = _error
+            ok3c, texto3c = ns["consultar_factura_pendiente"](f3c)
+            esperar(f"ARCA contesta el error {_error[0]}: la pendiente sigue pendiente",
+                    (ok3c, uno("SELECT estado FROM facturas WHERE id = ?", f3c)),
+                    (False, "pendiente"))
+            esperar(f"error {_error[0]}: no deja facturar de nuevo, y no se hizo otra en ARCA",
+                    (ns["facturar_venta"](v3c)[0], len(arca.autorizadas),
+                     uno("SELECT COUNT(*) FROM facturas WHERE venta_id = ?", v3c)),
+                    (False, _hechas_en_arca, 1))
+        esperar("lo dice en castellano, sin el texto técnico de ARCA",
+                ("no vale" in ns["_error_de_arca_en_criollo"]([("600", "ValidacionDeToken")]),
+                 "Base-64" in ns["_error_de_arca_en_criollo"]([("600", "… Base-64 …")])),
+                (True, False))
+        # El «último número» con error tampoco es un número: no se factura la que sigue.
+        v3d, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
+        ns["cobrar_venta"](v3d, "Efectivo")
+        arca.rechaza_con = ("600", "ValidacionDeToken: No valido token")
+        ok3d, texto3d = ns["facturar_venta"](v3d)
+        esperar("con error en el último número no se factura ni queda nada anotado",
+                (ok3d, uno("SELECT COUNT(*) FROM facturas WHERE venta_id = ?", v3d),
+                 "no vale" in texto3d or "no se pudo" in texto3d.lower() or "ARCA no" in texto3d),
+                (False, 0, True))
+        try:
+            ns["ultimo_autorizado"](ns["configuracion_de_arca"](), 11)
+            esperar("el 0 de un error no es un número", "devolvió un número", "ErrorDeArca")
+        except ns["ErrorDeArca"]:
+            pass
+        # Cuando ARCA vuelve a contestar bien, la pendiente se resuelve como siempre, y la otra
+        # venta se factura con el número que sigue.
+        arca.rechaza_con = None
+        esperar("ARCA vuelve: la pendiente era de verdad, queda autorizada",
+                (ns["consultar_factura_pendiente"](f3c)[0],
+                 uno("SELECT estado FROM facturas WHERE id = ?", f3c)), (True, "autorizada"))
+        esperar("y la otra venta se factura", ns["facturar_venta"](v3d)[0], True)
         v4, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
         ns["cobrar_venta"](v4, "Efectivo")
         arca.cortar_el_proximo_cae, arca.autorizar_aunque_se_corte = True, False

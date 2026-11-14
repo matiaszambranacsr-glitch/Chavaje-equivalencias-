@@ -792,14 +792,27 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
 # productos_juntos_en_portal como «CATÁLOGO SKF», suma a favor en evidencia_cruzada(), y los
 # pares que no estaban van a la cola de revisión. Los vetos de siempre los tumban.
 #
-# Solo entran los fabricantes con UNA DIRECCIÓN POR CÓDIGO, verificada con fichas reales que
-# publican los buscadores (el servidor donde se armó esto no llega a esos sitios):
-#   · SKF:          automotive.skf.com/eur/es/product-catalogue/VKMA01250
+# Solo entran los fabricantes con UNA DIRECCIÓN POR CÓDIGO. Las tres se abrieron de verdad el
+# 14/11/2026, desde un servidor con salida a esos sitios (hasta ahí estaban verificadas con las
+# fichas que publican los buscadores):
 #   · MANN-FILTER:  mann-filter.com/en/catalog/international/search-results/product.html/
-#                   w712/95_mann-filter.html  (la barra del código es parte de la dirección)
+#                   w712/95_mann-filter.html  (la barra del código es parte de la dirección).
+#                   Anda: de 6 fichas, 3 nombraron productos tuyos.
 #   · NGK (bujías): sparkplug-crossreference.com/convert/NGK_PN/BKR6E, una tabla de
 #                   equivalencias de bujías por código NGK. No es de NGK: la ficha oficial lleva
-#                   un número de stock que no sale del código.
+#                   un número de stock que no sale del código. En tu base dio productos en 13
+#                   de 23 fichas; desde el servidor de la prueba respondió 403, porque el sitio
+#                   le pide a cada visita que demuestre que es una persona. Eso no se esquiva:
+#                   si pasa en producción, la tanda se pausa sola (ver más abajo).
+#   · SKF:          MUDÓ SU CATÁLOGO a skfvertevo.com/eur/es/product-catalogue/VKMA01250. La
+#                   dirección de antes (automotive.skf.com) redirige ahí, y SesionSoloLectura
+#                   corta —con razón— una redirección a otro sitio: cada lectura terminaba en
+#                   «se cortó por seguridad». Y en el sitio nuevo los números originales no
+#                   están en la página: los trae aparte un programa del navegador. Por eso de
+#                   SKF no puede salir ningún par (en tu base, de 96 fichas leídas no salió
+#                   ninguno) y YA NO SE LEE EN SEGUNDO PLANO: eran pedidos a un sitio ajeno para
+#                   nada. Lo que la ficha sí declara es qué pieza es y sus medidas, y eso se usa
+#                   con el código que no tenés: ver «LO QUE LA FICHA DECLARA DE SU PIEZA».
 # Quedaron afuera, a propósito, los que buscan con un formulario o muestran listados por rubro:
 # FRAM, MAHLE, BOSCH, TARANTO, CORVEN, FISPA. Y ILLINOIS, que publica un PDF por juego con las
 # piezas que trae adentro: juntaría cada juego con sus juntas, que no son equivalentes.
@@ -821,9 +834,11 @@ CATALOGOS_DE_FABRICANTE = {
     "SKF": {
         # Sin letra al final: en «SKF VKMA 02410 A INA 530020310» la A es de lo que sigue.
         "cita": re.compile(r"\bSKF\b[\s:=.-]*(VK[A-Z]{1,4}\s?\d{4,5})\b"),
-        "url": lambda cod: ("https://automotive.skf.com/eur/es/product-catalogue/"
+        "url": lambda cod: ("https://www.skfvertevo.com/eur/es/product-catalogue/"
                             + _codigo_para_la_direccion(cod).upper()),
-        "sitio": "automotive.skf.com",
+        "sitio": "skfvertevo.com",
+        # La ficha dice qué pieza es, pero no nombra los números originales: ver arriba.
+        "sin_numeros": True,
     },
     "MANN-FILTER": {
         "cita": re.compile(r"\bMANN(?:[\s-]*FILTER)?\b[\s:=.-]*"
@@ -973,11 +988,152 @@ def _sesion_de_catalogo_de_fabricante(cat):
     return SesionSoloLectura(base, cat["url"]("X1"))
 
 
+# LO QUE LA FICHA DECLARA DE SU PIEZA. Las páginas de producto llevan, para los buscadores, un
+# bloque con los datos de la pieza (el «Product» de schema.org): el código, una frase que dice
+# qué es y sus medidas. En la ficha nueva de SKF es lo único que hay en la página —lo demás lo
+# arma un programa en el navegador—, y alcanza para contestar «¿qué es este código que no
+# tengo?»: la «VKBA 3525» declara «Wheel Bearing», interior 25 mm, exterior 52 mm, ancho 37 mm.
+# Es texto de un sitio ajeno: sale en un renglón y con tope, y quien lo muestra lo escapa.
+_RE_BLOQUE_DE_DATOS_DE_LA_PAGINA = re.compile(
+    r"(?is)<script[^>]+application/ld\+json[^>]*>(.*?)</script>")
+
+
+def _dato_de_afuera(valor, largo=300):
+    """Un dato de una página ajena como texto de un renglón, con tope. Lo que no es un texto ni
+    un número (una lista, otro bloque) no es un dato: ""."""
+    if isinstance(valor, bool) or not isinstance(valor, (str, int, float)):
+        return ""
+    return re.sub(r"\s+", " ", str(valor)).strip()[:largo]
+
+
+def pieza_que_declara_la_pagina(html):
+    """{"codigo", "nombre", "que_es", "medidas": [(nombre, valor)]} con lo que la página declara
+    de su producto, o None si no declara ninguno. Tal cual lo escribió el fabricante, en su
+    idioma: ver pieza_de_la_ficha_en_castellano()."""
+    for bloque in _RE_BLOQUE_DE_DATOS_DE_LA_PAGINA.findall(html or "")[:20]:
+        try:
+            datos = json.loads(bloque)
+        except (ValueError, RecursionError):
+            continue
+        for d in (datos if isinstance(datos, list) else [datos]):
+            if not isinstance(d, dict) or d.get("@type") != "Product":
+                continue
+            propiedades = d.get("additionalProperty")
+            medidas = []
+            for p in (propiedades if isinstance(propiedades, list) else [])[:40]:
+                if isinstance(p, dict):
+                    nombre = _dato_de_afuera(p.get("name"), 80)
+                    valor = _dato_de_afuera(p.get("value"), 80)
+                    if nombre and valor:
+                        medidas.append((nombre, valor))
+            return {"codigo": _dato_de_afuera(d.get("sku") or d.get("mpn"), 60),
+                    "nombre": _dato_de_afuera(d.get("name"), 80),
+                    "que_es": _dato_de_afuera(d.get("description")), "medidas": medidas}
+    return None
+
+
+# EN CASTELLANO. La ficha de SKF está en inglés (la dirección en castellano lleva a la misma).
+# Se pasa a castellano lo que se reconoce: la pieza, por las palabras de la frase de SKF —las de
+# acá son las de fichas reales, abiertas el 14/11/2026—, y las medidas por su nombre. Lo que no
+# se reconoce no se inventa: se muestra la frase de SKF como la escribió. El orden importa: «kit
+# de distribución con bomba» va antes que «kit de distribución» y que «bomba».
+#
+# La tercera parte es CÓMO SE LLAMA ESA PIEZA EN TUS LISTAS, para las dos que se pueden buscar
+# por sus medidas: el rodamiento (interior, exterior y ancho) y el tensor o la polea (diámetro y
+# ancho; en tu base hay 126 poleas con esas dos cargadas). Sin eso, un retén de 65 x 25 saldría
+# como «lo tuyo que mide lo mismo» que un tensor.
+_PIEZAS_DE_LA_FICHA_EN_CASTELLANO = (
+    ("timing belt kit and water pump", "un kit de distribución con bomba de agua", None),
+    ("timing belt kit", "un kit de distribución", None),
+    ("wheel bearing and brake dis", "un disco de freno con rodamiento", None),
+    ("wheel bearing", "un kit de rodamiento de rueda", re.compile(r"\bRODAM|\bRULEM|\bMAZA")),
+    ("clutch release bearing", "una crapodina de embrague", None),
+    ("suspension bearing", "una crapodina de amortiguador", None),
+    ("boot kit", "un kit de fuelle de homocinética", None),
+    ("multi-v-tensioner", "un tensor de la correa Poly-V",
+     re.compile(r"\bPOLEA|\bTENSOR|\bRODILLO")),
+    ("timing tensioner", "un tensor de distribución", re.compile(r"\bPOLEA|\bTENSOR|\bRODILLO")),
+    ("multi-v-belt", "una correa Poly-V", None),
+    ("ball joint", "una rótula", None),
+    ("water pump", "una bomba de agua", None),
+)
+# El nombre de cada medida en la ficha: (cómo se dice acá, a qué campo de buscar_por_medidas()
+# corresponde). El «diámetro» a secas es el de afuera: es como SKF da el de una polea. Las que
+# no están acá (el color, el material) no se muestran: están en la ficha.
+_MEDIDAS_DE_LA_FICHA_EN_CASTELLANO = {
+    "inner diameter": ("diámetro interior", "diam_int"),
+    "outer diameter": ("diámetro exterior", "diam_ext"),
+    "diameter": ("diámetro", "diam_ext"),
+    "width": ("ancho", "ancho"),
+    "height": ("alto", ""), "length": ("largo", ""),
+    "inner diameter 1": ("diámetro interior de una punta", ""),
+    "inner diameter 2": ("diámetro interior de la otra", ""),
+    "number of teeth": ("dientes", ""), "belt width": ("ancho de la correa", ""),
+    "number of ribs": ("canales", ""), "thread size": ("rosca", ""),
+    "rim hole number": ("agujeros de la llanta", ""),
+    "flange diameter": ("diámetro de la brida", ""),
+    "brake disc thickness": ("espesor del disco", ""),
+}
+# Con cuánto de diferencia se da por la misma medida al buscar lo tuyo. La ficha publica la
+# medida exacta, así que es más justo que el 5 % de «📐 Buscar por medidas», que es para lo que
+# se midió con un calibre; no menos, porque tus listas dan «54,2» donde otro redondea a 54.
+TOLERANCIA_DE_LA_MEDIDA_PUBLICADA = 2
+_RE_MEDIDA_EN_MILIMETROS = re.compile(r"(\d+(?:[.,]\d+)?)\s*mm")
+
+
+def pieza_de_la_ficha_en_castellano(pieza):
+    """De lo que declara la ficha (ver pieza_que_declara_la_pagina()), lo que se le dice al que
+    atiende: {"que_es" (en castellano, o ""), "dice" (la frase del fabricante), "medidas":
+    [(nombre en castellano, valor)], "para_buscar": {campo de buscar_por_medidas(): mm},
+    "en_tus_listas": cómo se llama esa pieza en tus descripciones, o None}. Para buscar hacen
+    falta dos medidas de una pieza que se sabe cómo se llama: con menos, "para_buscar" va vacío."""
+    frase = (pieza.get("que_es") or "").lower()
+    que_es, en_tus_listas = next(
+        ((castellano, tuya) for clave, castellano, tuya in _PIEZAS_DE_LA_FICHA_EN_CASTELLANO
+         if clave in frase), ("", None))
+    medidas, para_buscar = [], {}
+    for nombre, valor in pieza.get("medidas") or []:
+        conocida = _MEDIDAS_DE_LA_FICHA_EN_CASTELLANO.get(nombre.lower())
+        if not conocida:
+            continue
+        medidas.append((conocida[0], valor))
+        en_mm = _RE_MEDIDA_EN_MILIMETROS.fullmatch(valor)
+        if conocida[1] and en_mm:
+            para_buscar[conocida[1]] = float(en_mm.group(1).replace(",", "."))
+    if not en_tus_listas or len(para_buscar) < 2:
+        para_buscar = {}
+    # En el orden en que se dice una medida acá —interior, exterior, ancho—, no en el de la ficha.
+    _orden = [castellano for castellano, _campo in _MEDIDAS_DE_LA_FICHA_EN_CASTELLANO.values()]
+    medidas.sort(key=lambda m: _orden.index(m[0]))
+    return {"que_es": que_es, "dice": pieza.get("que_es") or "", "medidas": medidas,
+            "para_buscar": para_buscar, "en_tus_listas": en_tus_listas}
+
+
+def frase_de_la_pieza_de_la_ficha(res):
+    """Lo que se le dice al que atiende de una ficha que declara su pieza (el resultado de
+    buscar_en_la_ficha_del_fabricante() con "pieza"), listo para st.markdown: lo que viene del
+    sitio ajeno va escapado."""
+    pieza, quien = res["pieza"], res["catalogo"]
+    codigo = texto_para_markdown(res["codigo"])
+    if pieza["que_es"]:
+        frase = f"🌐 **Según {quien}, {codigo} es {pieza['que_es']}.**"
+    else:
+        frase = f"🌐 **{quien} tiene la ficha de {codigo}.**"
+        if pieza["dice"]:
+            frase += f" Dice, en inglés: «{texto_para_markdown(pieza['dice'])}»"
+    if pieza["medidas"]:
+        medidas = " · ".join(f"{nombre} {texto_para_markdown(valor)}"
+                             for nombre, valor in pieza["medidas"])
+        frase += " " + medidas[0].upper() + medidas[1:] + "."
+    return frase
+
+
 def _leer_la_ficha_de_fabricante(sesion, url):
-    """(texto, error, foto) de una ficha de fabricante. El error es corto y nunca la dirección:
-    «sin ficha», «respondió 403» o el nombre del error. El PermissionError (un freno de
-    SesionSoloLectura) no se ataja: lo maneja quien llama."""
-    texto, err, foto = "", None, ""
+    """(texto, error, foto, pieza) de una ficha de fabricante. El error es corto y nunca la
+    dirección: «sin ficha», «respondió 403» o el nombre del error. La pieza es lo que la página
+    declara de su producto (ver pieza_que_declara_la_pagina()), o None. El PermissionError (un
+    freno de SesionSoloLectura) no se ataja: lo maneja quien llama."""
+    texto, err, foto, pieza = "", None, "", None
     try:
         r = sesion.get(url, timeout=20)
         if r.status_code == 404:
@@ -992,12 +1148,13 @@ def _leer_la_ficha_de_fabricante(sesion, url):
         else:
             texto = _texto_visible(r.text or "")
             foto = foto_principal_de_la_pagina(r.text or "", url)
+            pieza = pieza_que_declara_la_pagina(r.text or "")
     except PermissionError:
         raise
     except Exception as e:
         anotar_error("leer_catalogo_de_fabricante", e)
         err = type(e).__name__
-    return texto, err, foto
+    return texto, err, foto, pieza
 
 
 def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_FICHAS_DE_CATALOGO,
@@ -1014,6 +1171,9 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     resumen = {"leidas": 0, "con_productos": 0, "listados": 0, "sin_ficha": 0, "pares": 0,
                "nuevos": 0, "lote": "", "error": "", "pendientes": 0, "fallidas": 0,
                "otra_pieza": 0}
+    if cat.get("sin_numeros"):
+        # Su ficha no nombra números: no hay par que pueda salir de ahí (ver arriba, SKF).
+        return resumen
     try:
         olvidar_pares_de_catalogo_de_otra_pieza()
     except sqlite3.OperationalError as _err:
@@ -1035,7 +1195,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     for i, cod in enumerate(tanda):
         url = cat["url"](cod)
         try:
-            texto, err, foto = _leer_la_ficha_de_fabricante(sesion, url)
+            texto, err, foto, _pieza = _leer_la_ficha_de_fabricante(sesion, url)
         except PermissionError as e:
             resumen["error"] = str(e)
             break
@@ -1143,7 +1303,10 @@ def catalogo_que_publica(codigo):
 def buscar_en_la_ficha_del_fabricante(codigo, sesion=None):
     """Lee la ficha del fabricante de un código que no tenés y dice qué productos tuyos nombra:
     {"catalogo", "codigo", "url", "productos": [filas como las del buscador], "error"}. El error
-    es una frase corta, sin la dirección. Ver _CODIGO_SUELTO_DE_CADA_CATALOGO."""
+    es una frase corta, sin la dirección. Ver _CODIGO_SUELTO_DE_CADA_CATALOGO.
+
+    Si la ficha no nombra números (SKF), viene además "pieza" (ver
+    pieza_de_la_ficha_en_castellano()) y los productos son los tuyos con esas medidas."""
     escrito = re.sub(r"\s+", " ", str(codigo or "").strip().upper())
     nombre = catalogo_que_publica(escrito)
     res = {"catalogo": nombre, "codigo": escrito, "url": "", "productos": [], "error": ""}
@@ -1153,16 +1316,31 @@ def buscar_en_la_ficha_del_fabricante(codigo, sesion=None):
     cat = CATALOGOS_DE_FABRICANTE[nombre]
     res["url"] = cat["url"](escrito)
     try:
-        texto, err, _foto = _leer_la_ficha_de_fabricante(
+        texto, err, _foto, pieza = _leer_la_ficha_de_fabricante(
             sesion or _sesion_de_catalogo_de_fabricante(cat), res["url"])
     except PermissionError:
-        texto, err = "", "se cortó por seguridad"
+        texto, err, pieza = "", "se cortó por seguridad", None
     clean = sanitizar(escrito)
     if not err and clean not in sanitizar(texto):
+        err = "sin ficha"
+    # El sitio de SKF contesta a cualquier código con la misma página y lo repite en el título
+    # («ZZZZ 99999» también): la ficha existe solo si declara ESA pieza.
+    if not err and cat.get("sin_numeros") and (not pieza or sanitizar(pieza["codigo"]) != clean):
         err = "sin ficha"
     if err:
         res["error"] = ("el fabricante no tiene ficha de ese código" if err == "sin ficha"
                         else f"no se pudo abrir la ficha ({err})")
+        return res
+    if cat.get("sin_numeros"):
+        # No nombra números: se dice qué pieza es y, si publica las medidas de un rodamiento o
+        # de un tensor, lo tuyo que es esa pieza y mide eso. Con stock primero.
+        res["pieza"] = pieza_de_la_ficha_en_castellano(pieza)
+        if res["pieza"]["para_buscar"]:
+            res["productos"] = sorted(
+                (f for f in buscar_por_medidas(tolerancia_pct=TOLERANCIA_DE_LA_MEDIDA_PUBLICADA,
+                                               **res["pieza"]["para_buscar"])
+                 if res["pieza"]["en_tus_listas"].search(normalizar_texto(f["Descripcion"]))),
+                key=lambda f: (-(f["Stock"] or 0), f["Marca"], f["Codigo"]))
         return res
     nombrados = [pid for pid, _c in productos_nombrados_en_la_pagina(texto, clean)]
     if len(nombrados) > MAXIMO_PRODUCTOS_POR_FICHA_DE_FABRICANTE:
@@ -1202,7 +1380,10 @@ def estado_de_los_catalogos_de_fabricante():
                        "Productos que los citan": len({i for v in citados.values() for i in v}),
                        "Fichas leídas": fila[0] or 0, "Con productos tuyos": fila[1] or 0,
                        "Pares": pares,
-                       "Pausado hasta": obtener_config(f"catalogo_pausado_{nombre}", "")})
+                       "Pausado hasta": ("" if cat.get("sin_numeros") else
+                                         obtener_config(f"catalogo_pausado_{nombre}", "")),
+                       "Qué da": (CATALOGO_QUE_NO_SE_LEE_SOLO if cat.get("sin_numeros")
+                                  else "pares para revisar")})
     return salida
 
 
@@ -1211,6 +1392,11 @@ def estado_de_los_catalogos_de_fabricante_guardado():
     """estado_de_los_catalogos_de_fabricante() con caché: lee las descripciones de toda la base
     tres veces, y el panel se dibuja en cada toque."""
     return estado_de_los_catalogos_de_fabricante()
+
+
+# Lo que dice el panel de Mantenimiento del catálogo cuya ficha no nombra números (ver SKF).
+CATALOGO_QUE_NO_SE_LEE_SOLO = ("no se lee solo: su ficha ya no trae los números originales. En el "
+                               "Buscador dice qué pieza es el código que no tenés")
 
 
 def catalogos_de_fabricante_automaticos():
@@ -1235,7 +1421,8 @@ def tanda_de_catalogos_de_fabricante(cupo):
     for nombre in CATALOGOS_DE_FABRICANTE:
         if consultadas >= cupo:
             break
-        if _catalogo_de_fabricante_pausado(nombre):
+        if _catalogo_de_fabricante_pausado(nombre) or CATALOGOS_DE_FABRICANTE[nombre].get(
+                "sin_numeros"):
             continue
         ceder_al_mostrador()
         res = leer_catalogo_de_fabricante(nombre, cuantos=min(PRODUCTOS_POR_SUBTANDA,

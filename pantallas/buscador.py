@@ -32,7 +32,8 @@ if pagina == PAGINAS[0]:
                 "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
                 "aceite gol», «mannol»—: busca solo en las descripciones y las marcas. Si el "
                 "código no está, ofrece los que se escriben casi igual, su familia, lo que lo "
-                "nombra y, si es de MANN o SKF, «🌐 Buscarlo en la ficha» del fabricante.\n\n"
+                "nombra y, si es de MANN, «🌐 Buscarlo en la ficha» del fabricante; si es de SKF, "
+                "«🌐 Ver qué pieza es» y sus medidas.\n\n"
                 "**Cada sección:**\n\n"
                 + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
                              if PARA_QUE_SIRVE.get(_p))
@@ -1891,24 +1892,40 @@ if pagina == PAGINAS[0]:
                         # tuyo (ver buscar_en_la_ficha_del_fabricante()). Con un botón, porque
                         # sale a internet, y solo con sesión: un cliente que mira no dispara
                         # pedidos a un sitio ajeno. Lo leído queda hasta cerrar la pestaña.
+                        # La de SKF no nombra números: dice qué pieza es y sus medidas, y con
+                        # eso se ofrece lo tuyo que mide lo mismo.
                         _cat_fab = (catalogo_que_publica(codigo_individual)
                                     if not solo_mirar() else None)
                         if _cat_fab:
+                            _dice_que_es = CATALOGOS_DE_FABRICANTE[_cat_fab].get("sin_numeros")
                             _fichas_fab = st.session_state.setdefault(
                                 "_fichas_de_fabricante_leidas", {})
                             if clean not in _fichas_fab and st.button(
-                                    f"🌐 Buscarlo en la ficha de {_cat_fab}",
+                                    (f"🌐 Ver qué pieza es según {_cat_fab}" if _dice_que_es
+                                     else f"🌐 Buscarlo en la ficha de {_cat_fab}"),
                                     key=f"ficha_fabricante_{clean}",
-                                    help=f"Abre la ficha de {codigo_individual} en el sitio de "
-                                         f"{_cat_fab} y te dice qué productos tuyos nombra: "
-                                         "sus números originales o la misma pieza de otra "
-                                         "marca. Revisalos antes de vender."):
+                                    help=(f"Abre la ficha de {codigo_individual} en el sitio de "
+                                          f"{_cat_fab} y te dice qué pieza es y sus medidas. Si "
+                                          "es un rodamiento o un tensor, te muestra lo tuyo "
+                                          "que mide lo mismo." if _dice_que_es else
+                                          f"Abre la ficha de {codigo_individual} en el sitio de "
+                                          f"{_cat_fab} y te dice qué productos tuyos nombra: "
+                                          "sus números originales o la misma pieza de otra "
+                                          "marca. Revisalos antes de vender.")):
                                 with st.spinner(f"Leyendo la ficha de {_cat_fab}…"):
                                     _fichas_fab[clean] = buscar_en_la_ficha_del_fabricante(
                                         codigo_individual)
                             _fab = _fichas_fab.get(clean)
                             if _fab and _fab["error"]:
                                 st.caption(f"🌐 {_cat_fab}: {_fab['error']}.")
+                            elif _fab and _fab.get("pieza"):
+                                st.info(frase_de_la_pieza_de_la_ficha(_fab))
+                                if _fab["productos"]:
+                                    st.success(f"📐 **Tenés {len(_fab['productos'])} producto(s) "
+                                               "con esas medidas.** Compará la pieza antes de "
+                                               "vender: que mida lo mismo no dice que sea igual.")
+                                    mostrar_lista_clickeable(_fab["productos"], f"fab_{clean}",
+                                                             limite=12)
                             elif _fab and _fab["productos"]:
                                 st.success(f"🌐 **La ficha de {_cat_fab} nombra "
                                            f"{len(_fab['productos'])} producto(s) tuyo(s).** "

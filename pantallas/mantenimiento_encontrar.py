@@ -529,7 +529,7 @@ if pagina == PAGINAS[3]:
 
             st.markdown("**🏭 Catálogos de fabricantes: se leen solos**")
             explicar(
-                "SKF, MANN-FILTER y las bujías NGK, por los códigos que tus listas citan.",
+                "MANN-FILTER y las bujías NGK, por los códigos que tus listas citan.",
                 "Tus listas nombran piezas de fabricantes que no son proveedores tuyos: «BOMBA "
                 "DE AGUA … SKF VKPC85304», «BUJIA … NGK= BP5HS», «REF ORIG MANN P 716». Esos "
                 "fabricantes publican una ficha por código con los números originales y las "
@@ -542,6 +542,9 @@ if pagina == PAGINAS[3]:
                 "**sin tope por día**, hasta leer todo lo pendiente. Si un sitio no responde "
                 "cinco veces seguidas —o falla más de la mitad de una tanda—, se pausa una "
                 "hora y retoma solo.\n\n"
+                "**SKF ya no se lee solo**: mudó su catálogo y la ficha nueva no trae los "
+                "números originales, así que de ahí no puede salir ningún par. En el Buscador, "
+                "el código de SKF que no tenés ofrece «🌐 Ver qué pieza es» y sus medidas.\n\n"
                 "FRAM, MAHLE, BOSCH, TARANTO y CORVEN no están porque sus catálogos buscan con un "
                 "formulario, sin una dirección por código. Si encontrás el link de la ficha de "
                 "alguno, cargalo arriba en «➕ Cargar un portal»."
