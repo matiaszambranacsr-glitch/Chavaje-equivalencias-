@@ -30,9 +30,15 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - Medir antes y después de tocar reglas: `python pruebas/medir.py --base <copia> busquedas --guardar antes.json`, y después `--comparar antes.json` (también `cola`, `fichas` y `texto`). Salida de pocos renglones; no escribir scripts sueltos para eso.
 - Cuánto tarda cada pantalla en un toque y dónde se va el tiempo: `python pruebas/medir.py --base <copia> toques` (con `--guardar`/`--comparar` igual).
 - Las pantallas más lentas con la base real: `python pruebas/pruebas_de_las_pantallas.py --base <copia>`.
-- Probar en el navegador: Chromium y Playwright ya están instalados (`/opt/pw-browsers/chromium`).
+- Probar en el navegador: Chromium y el Playwright de Node ya están (`/opt/pw-browsers/chromium`).
   `python3 pruebas/navegador.py --python <el Python con Streamlit>` prueba el JavaScript (cursor,
-  F2, click derecho, castellano) con la app de verdad; correrlo si se toca `AYUDAS_DEL_NAVEGADOR`.
+  F1, F2, F9, click derecho, castellano) con la app de verdad. Correrlo si se toca
+  `AYUDAS_DEL_NAVEGADOR` **o se suma algo que se dibuja en todas las pantallas** (el asistente
+  rompió el cursor de Ventas sin tocar ese código). Si dice que falta Playwright para Python,
+  armarlo aparte con la versión del de Node (`cd /tmp && node -e
+  "console.log(require('playwright/package.json').version)"`):
+  `python3 -m venv /tmp/pw && /tmp/pw/bin/pip install -q "playwright==<esa versión>"`, y
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers /tmp/pw/bin/python pruebas/navegador.py --python "$(which python)"`.
 
 ## Reglas que el auditor hace cumplir
 

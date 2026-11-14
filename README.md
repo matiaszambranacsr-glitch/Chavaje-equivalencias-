@@ -7645,9 +7645,22 @@ Lo que corre en el navegador —el JavaScript de `AYUDAS_DEL_NAVEGADOR`— no lo
 - F2 vuelve a la caja desde cualquier lado;
 - el click derecho sobre un resultado abre el menú con «Sumar a la venta», y Escape lo cierra;
 - el recuadro para subir un archivo está en castellano («Elegir archivo», «Hasta 200MB por archivo»);
-- la venta de todos los días con el teclado: sumar F100 con el click derecho, F9 con el cursor en la búsqueda la manda a la caja (Streamlit solo no atiende sus teclas con el cursor en un campo), y en 💵 Caja F10 abre «Cobrar la venta», otro F10 no abre una segunda ventana, y cobrar la deja cobrada en la base. Con F9 roto en el JavaScript, falla.
+- la venta de todos los días con el teclado: sumar F100 con el click derecho, F9 con el cursor en la búsqueda (Streamlit solo no atiende sus teclas con el cursor en un campo) pregunta con el total a la vista y **no graba nada**; Enter es el «Sí» y la manda a la caja. En 💵 Caja F10 abre «Cobrar la venta», otro F10 no abre una segunda ventana, y cobrar la deja cobrada en la base. Con F9 roto en el JavaScript, falla;
+- F1 abre el asistente con el cursor en su caja, otro F1 lo minimiza, y Escape también.
 
-Se corre a mano (en GitHub no hay navegador; si falta Playwright, avisa y no falla), y tarda unos 40 segundos. Probada contra un JavaScript roto a propósito: con F2 cambiado por F3 y sin la traducción de «Upload», falla en las dos. De paso se vio que Streamlit 1.65 ya no dice «Drag and drop file here» ni «Browse files» sino «Upload»: la app lo traducía igual.
+**Lo que encontró el 14/11/2026, la primera vez que corrió en el servidor de trabajo** (no tenía Playwright para Python; ahora se arma en un minuto, ver más abajo):
+
+- **Al entrar con la contraseña, el cursor ya no quedaba en la búsqueda de Ventas**, y el lector de códigos de barras escaneaba a la nada. Se rompió al sumar la burbuja del asistente, sin que nadie tocara ese código. Cuál pastilla de la barra está elegida es un estado del campo, no algo escrito en la página: al entrar marca «Ventas», un instante «Buscador» (lo que se veía antes de entrar) y otra vez «Ventas», y ese último cambio no redibuja nada, así que el código que pone el cursor no se enteraba y se quedaba esperando la caja del Buscador. Andaba de casualidad, porque algo más se redibujaba después. Ahora se vuelve a mirar 0,3 y 1,5 segundos después del último cambio (`buscarAlEntrarYUnRatoDespues()`). Ninguna de las otras 28 pruebas lo veía.
+- **La prueba misma había quedado vieja**: esperaba que F9 grabara la venta, y desde «que una venta no se grabe por accidente» F9 pregunta. Fallaba desde entonces sin que nadie la corriera. Ahora controla lo que corresponde: F9 solo no graba, F9 y Enter sí.
+
+**Para correrla donde no hay Playwright para Python** (el Chromium ya está en `/opt/pw-browsers`): un entorno aparte con la misma versión que el Playwright de Node (`node -e "console.log(require('playwright/package.json').version)"`), y decirle dónde está el navegador:
+
+```
+python3 -m venv /tmp/pw && /tmp/pw/bin/pip install -q "playwright==<esa versión>"
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers /tmp/pw/bin/python pruebas/navegador.py --python "$(which python)"
+```
+
+Se corre a mano (en GitHub no hay navegador; si falta Playwright, avisa y no falla), y tarda cerca de un minuto y medio. Probada contra un JavaScript roto a propósito: con F2 cambiado por F3 y sin la traducción de «Upload», falla en las dos. De paso se vio que Streamlit 1.65 ya no dice «Drag and drop file here» ni «Browse files» sino «Upload»: la app lo traducía igual.
 
 ## 🚪 La entrada, más rápida
 

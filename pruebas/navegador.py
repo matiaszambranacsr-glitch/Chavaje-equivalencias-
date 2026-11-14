@@ -143,9 +143,10 @@ def probar(url, clave, carpeta):
             fallas.append(f"F2 no lleva el cursor a la búsqueda: {_foco(pagina)}")
 
         # 4. La venta de todos los días, con el teclado: sumar F100 con el click derecho, F9
-        # con el cursor en la búsqueda (Streamlit solo no atiende sus teclas ahí) la manda a la
-        # caja; en la caja, F10 abre «Cobrar la venta», otro F10 no abre otra encima, y cobrar
-        # la deja cobrada.
+        # con el cursor en la búsqueda (Streamlit solo no atiende sus teclas ahí) PREGUNTA, con
+        # el total a la vista, y no graba nada; Enter es el «Sí» y la manda a la caja (ver «QUE
+        # UNA VENTA NO SE GRABE POR ACCIDENTE» en logica/ventas.py). En la caja, F10 abre
+        # «Cobrar la venta», otro F10 no abre otra encima, y cobrar la deja cobrada.
         _ir(pagina, "🧾 Ventas")
         caja = pagina.locator(".st-key-venta_buscar input")
         caja.fill("F100")
@@ -157,9 +158,15 @@ def probar(url, clave, carpeta):
         _esperar(pagina, 2)
         pagina.keyboard.press("F2")
         pagina.keyboard.press("F9")
+        _esperar(pagina, 2)
+        if not _hasta(lambda: pagina.locator(".st-key-venta_por_cerrar_caja").count() == 1, 4):
+            fallas.append("F9 no pregunta si mandar la venta a la caja")
+        elif _base("SELECT COUNT(*) FROM ventas"):
+            fallas.append("F9 solo, sin el «Sí», ya grabó la venta")
+        pagina.keyboard.press("Enter")
         _esperar(pagina, 3)
         if not _hasta(lambda: _base("SELECT COUNT(*) FROM ventas WHERE cobrada = 0") == 1):
-            fallas.append("F9 no mandó la venta a la caja")
+            fallas.append("F9 y Enter no mandaron la venta a la caja")
         else:
             _ir(pagina, "💵 Caja")
             pagina.keyboard.press("F10")

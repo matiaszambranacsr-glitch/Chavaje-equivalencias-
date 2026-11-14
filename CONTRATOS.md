@@ -408,7 +408,8 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 
 - La tecla F11 (poner a cuenta) y el pitido: son JavaScript en el navegador
   (`AYUDAS_DEL_NAVEGADOR`) y se probaron con un navegador de verdad. El cursor en la caja de
-  búsqueda al entrar a Ventas y al Buscador, F2, F9 (mandar a la caja con el cursor en un campo),
+  búsqueda al entrar a Ventas (también recién entrado con la contraseña) y al Buscador, F2, F9
+  (con el cursor en un campo pregunta y no graba; Enter manda a la caja), F1 y Escape del asistente,
   F10 (cobrar, sin abrir otra ventana encima), el menú del click derecho y los textos de Streamlit
   pasados al castellano ya tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (se corre a
   mano: en GitHub no hay navegador; sin Playwright, se saltea). Lo mismo el formato de los gráficos

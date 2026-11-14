@@ -1110,6 +1110,21 @@ AYUDAS_DEL_NAVEGADOR = r"""
       caja.focus({preventScroll: true});
     })();
   }
+  // Y UN RATO DESPUÉS DEL ÚLTIMO CAMBIO, OTRA VEZ. Cuál pastilla de la barra está elegida es
+  // un estado del campo, no algo escrito en la página: puede cambiar sin que nada se redibuje,
+  // y entonces nadie avisa. Pasaba al entrar con la contraseña: la barra marca «Ventas», un
+  // instante «Buscador» (lo que se veía antes de entrar) y otra vez «Ventas», y si ese último
+  // cambio caía después del último redibujo, el cursor quedaba esperando la caja del Buscador
+  // en la pantalla de Ventas. Andaba de casualidad, porque algo se redibujaba después; al
+  // sumar la burbuja del asistente dejó de pasar, y el lector de códigos de barras escaneaba
+  // a la nada. Lo encontró pruebas/navegador.py.
+  var revisarDondeEstoy = [0, 0];
+  function buscarAlEntrarYUnRatoDespues() {
+    buscarAlEntrar();
+    revisarDondeEstoy.forEach(window.clearTimeout);
+    revisarDondeEstoy = [window.setTimeout(buscarAlEntrar, 300),
+                         window.setTimeout(buscarAlEntrar, 1500)];
+  }
   // DESPUÉS DE BUSCAR, EN EL TELÉFONO, LA PANTALLA BAJA SOLA HASTA LO ENCONTRADO. En el celular
   // el formulario ocupa la pantalla entera y los resultados quedaban abajo, sin nada que dijera
   // que estaban: el cliente tocaba «Buscar» y veía la misma pantalla. Solo después de tocar
@@ -1163,7 +1178,7 @@ AYUDAS_DEL_NAVEGADOR = r"""
   new MutationObserver(function (cambios) {
     sonarLoNuevo();
     destellarLoQueCambio();
-    if (conMouse) { buscarAlEntrar(); }
+    if (conMouse) { buscarAlEntrarYUnRatoDespues(); }
     if (!conMouse) { bajarALoEncontrado(); }
     cambios.forEach(function (c) {
       if (c.type === "childList") { c.addedNodes.forEach(traducirTodo); }
