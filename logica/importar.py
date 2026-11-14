@@ -1272,10 +1272,57 @@ def _parece_que_no_dice_que_pieza_es(descripcion, marcas_de_autos):
             and clasificar_repuesto(descripcion or "") == "Sin clasificar")
 
 
+# LA PISTA DE QUÉ PIEZA ES. El nombre de cada familia lo sabe quien trabaja con la lista, y con
+# IMPERIAL son 66 para escribir de memoria. Unas pocas descripciones de cada familia sí nombran
+# una pieza —en «PP», 23 de las 31 que dicen algo dicen «AROS»—, y eso se muestra y se deja
+# escrito en el campo para confirmarlo o corregirlo. Es una pista, no una certeza: muchas veces
+# la descripción nombra la pieza con la que VA y no la que ES («bancadas» en un juego de
+# cojinetes). Por eso nunca se pone sola, y se dice de cuántas sale. Probado con la copia real:
+# ni los equivalentes de otras marcas ayudan (dan pista en 1 familia de 66), y las propias
+# descripciones dan una fuerte en 11.
+PISTA_MINIMA_DE_LA_FAMILIA = 3           # descripciones que la nombran, para mostrarla
+PISTA_FUERTE_DE_LA_FAMILIA = (5, 0.7)    # y para dejarla escrita: cuántas, y qué parte del total
+
+
+def _pista_de_la_familia(nombradas):
+    """De las piezas que nombran las descripciones de una familia (un Counter), la pista:
+    {"pieza", "la_dicen", "de", "fuerte", "otras": [(pieza, cuántas)]}, o None si son pocas.
+    «BUJE» y «BUJES» cuentan juntas, con la forma más escrita."""
+    def en_singular(nombre):
+        # «BUJES» → «BUJE», «AROS» → «ARO»; «PISTONES» → «PISTON» si «PISTON» también está.
+        if len(nombre) <= 3 or not nombre.endswith("S"):
+            return nombre
+        sin_s = nombre[:-1]
+        return sin_s[:-1] if sin_s.endswith("E") and sin_s[:-1] in nombradas else sin_s
+
+    juntas, formas = collections.Counter(), {}
+    for nombre, veces in nombradas.items():
+        clave = en_singular(nombre)
+        juntas[clave] += veces
+        if veces > formas.get(clave, ("", 0))[1]:
+            formas[clave] = (nombre, veces)
+    if not juntas:
+        return None
+    total = sum(juntas.values())
+    (clave, la_dicen), *otras = juntas.most_common(4)
+    if la_dicen < PISTA_MINIMA_DE_LA_FAMILIA:
+        return None
+    try:
+        pieza = _pieza_escrita(formas[clave][0])
+    except ValueError:
+        return None
+    return {"pieza": pieza, "la_dicen": la_dicen, "de": total,
+            "fuerte": (la_dicen >= PISTA_FUERTE_DE_LA_FAMILIA[0]
+                       and la_dicen >= total * PISTA_FUERTE_DE_LA_FAMILIA[1]),
+            "otras": [(formas[k][0], n) for k, n in otras]}
+
+
 def familias_sin_nombre(marca_id):
     """Las familias de códigos de una lista cuyos productos, casi todos, no dicen qué pieza son:
-    [{"familia", "productos", "sin_pieza", "ejemplos", "pieza"}], la más grande primero.
-    «pieza» es el nombre que ya se le puso, si se le puso. Ver FAMILIA_MINIMA_PARA_PROPONER."""
+    [{"familia", "productos", "sin_pieza", "ejemplos", "pieza", "pista"}], la más grande
+    primero. «pieza» es el nombre que ya se le puso, si se le puso; «pista», lo que nombran las
+    pocas descripciones de la familia que sí dicen algo (ver _pista_de_la_familia()), o None.
+    Ver FAMILIA_MINIMA_PARA_PROPONER."""
     _marcas = {m.replace(".", "") for mv in MARCAS_VEHICULO for m in mv.split()} | set(
         _MARCAS_DE_MOTORES) | {"VW", "MWM", "IKA", "INDENOR", "MAXION", "DEERE", "BENZ"}
     nombradas = dict(c.execute("SELECT familia, pieza FROM piezas_de_las_familias "
@@ -1287,16 +1334,22 @@ def familias_sin_nombre(marca_id):
         if not fam:
             continue
         f = por_familia.setdefault(fam, {"familia": fam, "productos": 0, "sin_pieza": 0,
-                                         "ejemplos": [], "pieza": nombradas.get(fam, "")})
+                                         "ejemplos": [], "pieza": nombradas.get(fam, ""),
+                                         "_dicen": collections.Counter()})
         f["productos"] += 1
         if _parece_que_no_dice_que_pieza_es(desc, _marcas):
             f["sin_pieza"] += 1
             if len(f["ejemplos"]) < 3:
                 f["ejemplos"].append(f"{cod} «{(desc or '')[:40]}»")
+        elif desc and clasificar_repuesto(desc) != "Sin clasificar":
+            f["_dicen"][nombre_de_la_pieza(desc).upper()] += 1
     salida = [f for f in por_familia.values()
               if f["pieza"] or (
                   f["sin_pieza"] >= FAMILIA_MINIMA_PARA_PROPONER
                   and f["sin_pieza"] >= f["productos"] * PARTE_SIN_PIEZA_PARA_PROPONER)]
+    for f in salida:
+        f["pista"] = None if f["pieza"] else _pista_de_la_familia(f.pop("_dicen"))
+        f.pop("_dicen", None)
     return sorted(salida, key=lambda f: (not f["pieza"], -f["sin_pieza"], f["familia"]))
 
 

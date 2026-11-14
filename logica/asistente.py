@@ -464,8 +464,16 @@ COMO_HAGO_DEL_ASISTENTE = (
     ("comprobante", "Imprimir o mandar el comprobante de una venta",
      "comprobante ticket recibo imprimir impresion pdf papel remito boleta",
      "Al terminar la venta aparece «📄 Comprobante (PDF)». De una venta anterior, en la caja: "
-     "«📋 Ventas y cierre de caja».",
+     "«📋 Ventas y cierre de caja». Sale en hoja A4 o en ticket de 80 mm, según lo que esté "
+     "elegido en Administrar, en Mensajería y cobros.",
      "🧾 Ventas", ""),
+    ("papel", "Imprimir en ticketera de 80 mm (o en hoja A4)",
+     "ticketera ticket termica 80 mm rollo papel hoja a4 impresora imprimir formato chico "
+     "angosto comandera",
+     "Arriba de todo, en «🖨️ El comprobante y la factura se imprimen en:», elegí «Ticket de "
+     "80 mm» u «Hoja A4». Los botones del comprobante y de la factura son los mismos: cambia "
+     "el papel del PDF, que en ticket sale del ancho del rollo y del largo justo.",
+     "💬 Mensajería y cobros", ""),
     ("presupuesto", "Armar un presupuesto o una cotización",
      "presupuesto cotizacion cotizar precio pasar lista cliente pidio cuanto sale armar",
      "Dos caminos. En el Buscador, en cada resultado, «📦 Pedir al depósito / 🛒 presupuesto» lo "
@@ -658,7 +666,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "🩺 Estado y papelera", "admin"),
     ("aumentar", "Aumentar los precios de una marca por porcentaje",
      "aumentar subir bajar precios porcentaje aumento marca inflacion remarcar actualizar",
-     "Elegí la marca o el proveedor: ahí se cambian todos sus precios por un porcentaje.",
+     "En «💲 Aumentar/bajar precios por porcentaje» elegís la marca o el proveedor y el "
+     "porcentaje: cambian todos sus precios de una vez.",
+     "🏷️ Marcas", "admin"),
+    ("bonificacion", "Cargar la bonificación de un proveedor (para tener el costo)",
+     "bonificacion descuento proveedor costo ganancia margen cuanto gano rentabilidad utilidad",
+     "En «💸 Bonificación del proveedor (para el costo)» elegís la marca y ponés el porcentaje "
+     "que te descuenta ese proveedor sobre su lista: la app calcula el costo de cada producto "
+     "y, con eso, la ganancia de cada venta. Los costos cargados a mano no se tocan.",
      "🏷️ Marcas", "admin"),
     ("corregir_producto", "Corregir un producto: precio, stock, medidas o foto",
      "corregir cambiar editar modificar producto precio stock cantidad descripcion foto "
@@ -669,14 +684,15 @@ COMO_HAGO_DEL_ASISTENTE = (
     ("escala", "La lista de un proveedor está en otra escala (el coeficiente)",
      "coeficiente escala multiplicar multiplica lista precios bajos baratos ridiculos otra "
      "moneda dolar",
-     "Si los precios de una lista hay que multiplicarlos para que sean los de venta, se le "
-     "pone el coeficiente a ese proveedor: muestra ejemplos de la misma pieza en otro "
-     "proveedor para comparar. La venta y el presupuesto avisan cuando una lista está en otra "
-     "escala.",
+     "Si los precios de una lista hay que multiplicarlos para que sean los de venta, en "
+     "«📏 Coeficiente de la lista» se le pone el coeficiente a ese proveedor: muestra ejemplos "
+     "de la misma pieza en otro proveedor para comparar. Hasta entonces la venta lo avisa, y "
+     "la cotización y el portal del taller dicen «precio a confirmar».",
      "🏷️ Marcas", "admin"),
     ("unir_marcas", "Unir dos marcas que son la misma",
      "unir fusionar juntar marcas repetidas duplicadas misma mal escrita",
-     "Elegí la marca repetida y unila con la buena: los productos pasan todos a una sola.",
+     "En «🔀 Fusionar marcas duplicadas» elegís la repetida y la buena: los productos pasan "
+     "todos a una sola.",
      "🏷️ Marcas", "admin"),
     ("combos", "Armar un combo de repuestos que se venden juntos",
      "combo combos kit juntos conjunto ofrecer sugerir",
@@ -695,6 +711,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Arriba de todo está lo que más se busca en Mercado Libre en repuestos esta semana, "
      "contra tu catálogo: lo que no tenés va primero.",
      "📌 Para pedir", ""),
+    ("que_falta", "Ver qué le falta cargar a la app",
+     "falta faltan cargar completar completo pendiente configurar terminar que me falta "
+     "catalogo datos",
+     "Abrí «🧾 Qué tan completo está tu catálogo»: lista por lista, qué tiene y qué le falta "
+     "—el costo, las equivalencias, las fotos—, y lo que más conviene completar con dónde se "
+     "hace.",
+     "📈 Resumen", ""),
     ("contar_stock", "Contar el stock (inventario)",
      "contar inventario stock control auditoria recuento diferencia",
      "Dice qué productos conviene contar hoy para controlar el stock de a poco, sin cerrar el "
@@ -768,7 +791,9 @@ COMO_HAGO_DEL_ASISTENTE = (
      "📋 Lista WhatsApp", ""),
     ("alias", "Cambiar el alias de cobro o el texto del mensaje",
      "alias cbu transferencia qr texto mensaje whatsapp saludo firma cobro datos",
-     "Ahí está el texto del mensaje de WhatsApp y el alias para cobrar por transferencia.",
+     "Ahí están «💬 Texto del mensaje de WhatsApp» —el saludo, la firma y el WhatsApp del "
+     "negocio— y «💳 Alias para QR de transferencia», con el alias, el CBU y el link de pago "
+     "que salen en la cotización.",
      "💬 Mensajería y cobros", "admin"),
     # ---- el portal del taller (lo ve el taller, en su portal, y nadie más) ----
     ("portal_buscar", "Buscar un repuesto y su precio",

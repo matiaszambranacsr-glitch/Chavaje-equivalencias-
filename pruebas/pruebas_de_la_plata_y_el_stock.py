@@ -337,6 +337,38 @@ def probar(L):
     _prop11 = {f["familia"]: f["sin_pieza"] for f in ns["familias_sin_nombre"](_m11)}
     esperar("se propone la familia CAM, con sus 22 que no dicen qué pieza son", _prop11,
             {"CAM": 22})
+    # LA PISTA DE QUÉ PIEZA ES: lo que nombran las pocas descripciones de la familia que sí
+    # dicen algo. En CAM son dos y distintas (una llave, un cojinete): no hay pista. En PP, seis
+    # de siete dicen «aros»: pista fuerte, que queda escrita para confirmar. Nunca se pone
+    # sola. «Buje» y «bujes» cuentan juntas, con la forma más escrita.
+    esperar("con dos descripciones que nombran cosas distintas no hay pista",
+            ns["familias_sin_nombre"](_m11)[0]["pista"], None)
+    _pp11 = [(f"PP07{i:02d}", f"Chevrolet CORSA 1.{i % 9} L. VHC") for i in range(22)]
+    _pp11 += [(f"PP08{i:02d}", f"AROS FIAT 128 {i}") for i in range(4)]
+    _pp11 += [("PP0890", "AROS FIAT 147"), ("PP0891", "AROS FIAT UNO"),
+              ("PP0895", "PERNO DE PISTON FIAT 128")]
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", [(x, ns["sanitizar"](x), d, _m11) for x, d in _pp11])
+    conn.commit()
+    _pista11 = {f["familia"]: f["pista"] for f in ns["familias_sin_nombre"](_m11)}["PP"]
+    esperar("la pista de PP: «aros», de cuántas sale, y lo otro que nombran",
+            (_pista11["pieza"], _pista11["la_dicen"], _pista11["de"], _pista11["fuerte"],
+             [p for p, _n in _pista11["otras"]]), ("AROS", 6, 7, True, ["PERNO"]))
+    esperar("pocas que la nombran: se muestra pero no queda escrita",
+            ns["_pista_de_la_familia"](__import__("collections").Counter(
+                {"AROS": 3, "PERNO": 2}))["fuerte"], False)
+    _bujes11 = ns["_pista_de_la_familia"](__import__("collections").Counter(
+        {"BUJES": 4, "BUJE": 3, "RETEN": 1}))
+    esperar("«buje» y «bujes» cuentan juntas",
+            (_bujes11["pieza"], _bujes11["la_dicen"], _bujes11["de"], _bujes11["fuerte"]),
+            ("BUJES", 7, 8, True))
+    esperar("y con menos de tres, ni se muestra",
+            ns["_pista_de_la_familia"](__import__("collections").Counter({"AROS": 2})), None)
+    esperar("la pista no cambió ninguna descripción",
+            c.execute("SELECT descripcion FROM productos WHERE codigo_raw = 'PP0700' "
+                      "AND marca_id = ?", (_m11,)).fetchone()[0], "Chevrolet CORSA 1.0 L. VHC")
+    c.execute("DELETE FROM productos WHERE marca_id = ? AND codigo_raw LIKE 'PP%'", (_m11,))
+    conn.commit()
     esperar("nombrarla «camisa»: cambian las 22",
             ns["nombrar_familia"](_m11, "CAM", " camisa "), 22)
     esperar("la camisa dice que es una camisa; la llave y el cojinete, como estaban",

@@ -7096,6 +7096,52 @@ Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:5
 
 Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), el día UTC de una fecha guardada (`date(fecha)`, `substr(fecha, 1, 10)`), `date('now', 'localtime')`, `date.today()` (también en las pruebas) y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
 
+## 🧑‍🔧 Las decisiones que quedaban, tomadas
+
+El dueño las dejó en manos de la app («hacé todas las decisiones mías»). Lo que se decidió, por
+qué, y lo que no se puede decidir desde acá:
+
+| Decisión | Qué se decidió | Por qué |
+|---|---|---|
+| ¿El asistente usa Gemini para las frases raras? | **No.** | Hoy nada de lo que se le escribe sale de la app, y no hay nada que se le pueda sacar con palabras. Con un modelo de afuera se pierden las dos cosas, para ganar poco: entiende con errores y con las palabras del mostrador, y lo que no entiende lo dice. |
+| ¿Ticketera de 80 mm? | **Los dos papeles.** Se elige en 🗂️ Administrar → 💬 Mensajería y cobros («🖨️ El comprobante y la factura se imprimen en:»); de fábrica, hoja A4. | No se sabe con qué imprime cada mostrador, y elegirlo es un toque. Los botones son los mismos. |
+| ¿El portal del taller muestra los precios de TARANTO? | **No, hasta que tenga su coeficiente**: dice «precio a confirmar» y no se suma al presupuesto. | Es la misma regla que ya tenían la cotización y WhatsApp (`precio_para_el_cliente()`). El portal mostraba el número tal cual: una junta de tapa a $1.505 en vez de $24.140, y el taller presupuestaba con eso. |
+| Los nombres de las familias de IMPERIAL | **No se ponen solos**: la app muestra una pista y la deja escrita para confirmar. | Se midió con la copia real: los equivalentes de otras marcas dan pista en 1 familia de 66, y las propias descripciones, una fuerte en 11 —y muchas veces nombran la pieza con la que va, no la que es—. Poner solo un nombre equivocado son cientos de descripciones mal. |
+
+**Lo que no se puede decidir desde acá**, porque es un dato del negocio y no una preferencia —
+inventarlo dejaría números falsos—. Dónde se carga cada uno (el asistente lleva: «bonificación»,
+«alias», «certificado de ARCA»):
+
+- **La bonificación de cada proveedor**: 🗂️ Administrar → 🏷️ Marcas → «💸 Bonificación del
+  proveedor (para el costo)». Es el descuento que le hace cada proveedor al negocio.
+- **El link de pago y el WhatsApp del negocio**: 🗂️ Administrar → 💬 Mensajería y cobros.
+- **Los datos de ARCA** (CUIT, condición, punto de venta, certificado): ahí mismo, con «🔑 No
+  tengo el certificado: armarlo paso a paso».
+- **La aplicación de Mercado Libre**: se crea con la cuenta de Mercado Libre del dueño.
+
+### 🖨️ El ticket de 80 mm
+
+`pdf_de_ticket()` (en `logica/ventas.py`) arma un PDF de 80 mm de ancho y **del alto de lo
+impreso**: se dibuja dos veces, la primera en una página larguísima para saber cuánto mide. La
+ticketera corta donde termina la página, y una hoja con medio metro en blanco es medio metro de
+rollo. `ticket_del_comprobante()` dice lo mismo que el comprobante en hoja, y
+`ticket_de_la_factura()` lleva todo lo de la factura: el negocio con su CUIT, la letra con su
+código y el número, el cliente, el detalle (sin IVA en la A), los totales —el neto y el IVA en
+la A, el IVA contenido de la Ley 27.743 en la B—, la leyenda de la A al monotributista, y el CAE
+con su QR. `pruebas_de_las_ventas.py` (11b) y `pruebas_de_las_facturas.py` (5) lo controlan: una
+página de 80 mm, del alto justo, que se alarga con 60 renglones y sigue siendo una, y que dice
+lo que tiene que decir.
+
+### 💡 La pista de qué pieza es cada familia
+
+En «🏷️ Qué pieza es cada familia de códigos», al elegir una familia la app muestra lo que
+nombran las pocas descripciones de esa familia que sí dicen algo —«de las 31 descripciones de
+esta familia que nombran una pieza, 23 dicen «AROS»; otras, «PERNO» (5), «VALVULAS» (3)»—, y
+si es fuerte (cinco o más, y siete de cada diez) la deja escrita en el campo. Con IMPERIAL hay
+pista en 29 de las 66 familias y es fuerte en 11. No cambia ninguna descripción: el nombre se
+pone, como antes, con «🏷️ Ponerle el nombre» y la contraseña de administrador.
+`pruebas_de_la_plata_y_el_stock.py` (11) lo controla.
+
 ## 🤖 El asistente: explica, lleva, y no hay nada que sacarle
 
 Lo pidió el dueño: «un asistente virtual que se pueda minimizar, que te pueda enviar, ayudar o

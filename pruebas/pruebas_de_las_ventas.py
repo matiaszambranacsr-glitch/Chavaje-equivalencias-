@@ -299,6 +299,69 @@ def probar(L):
                                ns["comprobante_para_descargar"](999999)()),
             (True, True, True, True, b"%PDF-", "", b""))
 
+    # 11b. EL TICKET DE 80 MM: el mismo comprobante, para ticketera. Se elige una vez (ver
+    # papel_del_comprobante()) y el botón de siempre baja el PDF en ese papel: 80 mm de ancho,
+    # una sola página del alto de lo impreso, y dice lo mismo que la hoja.
+    import re as _re
+    import zlib as _zlib
+
+    def _medidas(pdf):
+        """(páginas, ancho en mm, alto en mm) de un PDF de fpdf2."""
+        caja = _re.search(rb"/MediaBox \[([\d. ]+)\]", pdf).group(1).split()
+        return (len(_re.findall(rb"/Type /Page\b", pdf)), round(float(caja[2]) / 72 * 25.4),
+                round(float(caja[3]) / 72 * 25.4))
+
+    def _escrito(pdf):
+        partes = []
+        for tramo in _re.findall(rb"stream\r?\n(.*?)\r?\nendstream", pdf, _re.S):
+            try:
+                partes.append(_zlib.decompress(tramo).decode("latin-1"))
+            except _zlib.error:
+                continue
+        return "\n".join(partes)
+
+    esperar("de fábrica, hoja A4", ns["papel_del_comprobante"](), "Hoja A4")
+    esperar("la hoja mide lo de una A4", _medidas(ns["comprobante_para_descargar"](venta4)())[:2],
+            (1, 210))
+    try:
+        ns["guardar_papel_del_comprobante"]("Papel de calcar")
+        esperar("un papel que no existe no se guarda", "se guardó", "ValueError")
+    except ValueError:
+        pass
+    ns["guardar_papel_del_comprobante"]("Ticket de 80 mm")
+    esperar("queda elegido el ticket", ns["papel_del_comprobante"](), "Ticket de 80 mm")
+    _ticket = ns["comprobante_para_descargar"](venta4)()
+    _paginas, _ancho, _alto = _medidas(_ticket)
+    esperar("el ticket: una página de 80 mm de ancho", (_ticket[:5], _paginas, _ancho),
+            (b"%PDF-", 1, 80))
+    esperar("y del alto de lo impreso, no una hoja", 40 < _alto < 150, True)
+    _dice = _escrito(_ticket)
+    esperar("dice lo mismo que la hoja",
+            [x in _dice for x in (f"Comprobante de venta #{venta4}", "2 x PRUEBA P400",
+                                  "TOTAL", "Efectivo", "$12.500", "no v")],
+            [True] * 6)
+    esperar("una venta que no existe, tampoco en ticket",
+            ns["comprobante_para_descargar"](999999)(), b"")
+    # Muchos renglones: el ticket se alarga, y sigue siendo una sola página.
+    _larga = dict(ns["una_venta"](venta4))
+    _larga["items"] = [dict(_larga["items"][0], codigo=f"P{n}") for n in range(60)]
+    _p60, _a60, _alto60 = _medidas(ns["ticket_del_comprobante"](_larga))
+    esperar("con 60 renglones: una página, más larga", (_p60, _a60, _alto60 > 400),
+            (1, 80, True))
+    # Lo que no entra en un renglón baja al siguiente, sin pisar el importe.
+    _corta = dict(_larga, items=[dict(_larga["items"][0], descripcion="FILTRO")])
+    _larga["items"] = [dict(_larga["items"][0], descripcion="FILTRO DE ACEITE " * 6)]
+    esperar("una descripción larga hace el ticket más alto",
+            _medidas(ns["ticket_del_comprobante"](_larga))[2]
+            > _medidas(ns["ticket_del_comprobante"](_corta))[2], True)
+    ns["guardar_papel_del_comprobante"]("Hoja A4")
+    esperar("y de vuelta en hoja", _medidas(ns["comprobante_para_descargar"](venta4)())[1], 210)
+    ns["c"].execute("UPDATE configuracion SET valor = 'cualquiera' "
+                    "WHERE clave = 'papel_del_comprobante'")
+    esperar("un valor raro guardado no rompe nada: hoja", ns["papel_del_comprobante"](),
+            "Hoja A4")
+    ns["guardar_papel_del_comprobante"]("Hoja A4")
+
     # 12. Escanear: el código de barras de UN producto se suma solo. Corto, con letras,
     # repetido en dos productos, o que no cierra (un número de fábrica mal cargado ahí), no.
     c.execute("UPDATE productos SET codigo_barras = '7791234567898' WHERE id = ?", (ids["F100"],))

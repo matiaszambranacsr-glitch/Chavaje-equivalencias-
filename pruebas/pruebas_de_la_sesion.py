@@ -384,6 +384,44 @@ def probar():
     esperar("ni las pestañas del negocio", [b.label for b in at.button if "Administrar" in b.label], [])
     esperar("sin errores", [e.value for e in at.exception], [])
 
+    # 4b. EN EL PORTAL, EL PRECIO ES EL QUE SE LE DICE A UN CLIENTE: la lista que está en otra
+    # escala sale «precio a confirmar» y no se puede sumar al presupuesto (ver
+    # renglon_del_portal()). Antes mostraba el número tal cual —TARANTO, quince veces más
+    # barato— y el taller presupuestaba con eso.
+    _fila_cara = {"Marca": "PORTAL OTRA ESCALA", "Codigo": "JT100", "Descripcion": "JUNTA TAPA",
+                  "Precio": 1505}
+    esperar("el renglón de una lista en otra escala",
+            ns["renglon_del_portal"](_fila_cara, {"PORTAL OTRA ESCALA"}),
+            ("PORTAL OTRA ESCALA - JT100 — JUNTA TAPA (precio a confirmar)", False))
+    esperar("el de una lista en su escala",
+            ns["renglon_del_portal"](_fila_cara, set()),
+            ("PORTAL OTRA ESCALA - JT100 — JUNTA TAPA ($1.505)", True))
+    esperar("sin precio no hay nada que confirmar: se suma en cero, como siempre",
+            ns["renglon_del_portal"]({**_fila_cara, "Precio": 0}, {"PORTAL OTRA ESCALA"}),
+            ("PORTAL OTRA ESCALA - JT100 — JUNTA TAPA (s/precio)", True))
+    ns["c"].execute("INSERT INTO marcas (nombre, tipo) VALUES ('PORTAL OTRA ESCALA', 'PROVEEDOR')")
+    _marca_portal = ns["c"].lastrowid
+    ns["c"].execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                    "precio) VALUES ('JT100', 'JT100', 'JUNTA TAPA', ?, 1505)", (_marca_portal,))
+    ns["conn"].commit()
+    _gp = ns["mostrar_portal_mecanico"].__globals__
+    _fuera_del_portal = _gp["marcas_con_precios_fuera_de_escala"]
+    try:
+        for _fuera, _texto, _apagado in (
+                ({"PORTAL OTRA ESCALA"}, "(precio a confirmar)", True),
+                (set(), "($1.505)", False)):
+            _gp["marcas_con_precios_fuera_de_escala"] = lambda _f=_fuera: _f
+            at.text_input(key="mec_busqueda").set_value("JT100").run()
+            _renglon = [m.value for m in at.markdown if "JT100" in m.value]
+            esperar(f"en el portal, con la lista {'en otra escala' if _apagado else 'bien'}: "
+                    "lo que lee el taller", [_texto in x for x in _renglon], [True])
+            esperar("y si lo puede sumar al presupuesto",
+                    [b.disabled for b in at.button if b.key and b.key.startswith("add_mec_")],
+                    [_apagado])
+        esperar("el portal se dibuja sin errores", [e.value for e in at.exception], [])
+    finally:
+        _gp["marcas_con_precios_fuera_de_escala"] = _fuera_del_portal
+
     # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
     # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el
     # precio y el cliente que tenía— y, terminada, no queda nada guardado. A otro no se le

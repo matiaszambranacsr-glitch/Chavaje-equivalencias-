@@ -500,6 +500,24 @@ if pagina == PAGINAS[3]:
                                                    "sin decir qué pieza son"))
                         for _ej in _por_familia[_fam_elegida]["ejemplos"]:
                             st.caption(f"· {_ej}")
+                        # LA PISTA: lo que nombran las pocas descripciones de la familia que sí
+                        # dicen algo (ver _pista_de_la_familia()). Si es fuerte queda escrita en
+                        # el campo, al elegir la familia, para confirmarla o corregirla.
+                        _pista_fam = _por_familia[_fam_elegida].get("pista")
+                        if st.session_state.get("_familia_con_la_pista") != (_id_fam, _fam_elegida):
+                            st.session_state["_familia_con_la_pista"] = (_id_fam, _fam_elegida)
+                            st.session_state["familias_pieza"] = (
+                                _pista_fam["pieza"] if _pista_fam and _pista_fam["fuerte"] else "")
+                        if _pista_fam:
+                            st.info(
+                                f"💡 **Una pista**: de las {miles(_pista_fam['de'])} "
+                                "descripciones de esta familia que nombran una pieza, "
+                                f"{miles(_pista_fam['la_dicen'])} dicen «{_pista_fam['pieza']}»"
+                                + ("; otras, " + ", ".join(f"«{p}» ({n})"
+                                                           for p, n in _pista_fam["otras"])
+                                   if _pista_fam["otras"] else "")
+                                + ". A veces nombran la pieza con la que va y no la que es: "
+                                  "miralo en los ejemplos antes de ponerlo.")
                         _pieza_fam = st.text_input("¿Qué pieza es?", key="familias_pieza",
                                                    placeholder="Por ejemplo: CAMISA, AROS, PISTON")
                         if candado("ponerle nombre a una familia de códigos",
@@ -880,6 +898,25 @@ if pagina == PAGINAS[3]:
                     st.info("Sin resultados para esa marca.")
 
     if sub_admin == SUB_ADMIN[2]:
+        # EN QUÉ PAPEL SALEN EL COMPROBANTE Y LA FACTURA: hoja A4 o ticket de 80 mm (ver «EL
+        # TICKET DE 80 MM» en logica/ventas.py). Se elige una vez; los botones son los mismos.
+        _papel_ahora = papel_del_comprobante()
+        _papel_elegido = st.radio(
+            "🖨️ El comprobante y la factura se imprimen en:", PAPELES_DEL_COMPROBANTE,
+            index=PAPELES_DEL_COMPROBANTE.index(_papel_ahora), horizontal=True,
+            key="papel_del_comprobante_elegido",
+            help="Con ticketera térmica, «Ticket de 80 mm»: el PDF sale del ancho del rollo y "
+                 "del largo justo. Los botones de «📄 Comprobante (PDF)» y «📄 Factura (PDF)» "
+                 "son los mismos; cambia el papel.")
+        if _papel_elegido != _papel_ahora:
+            try:
+                guardar_papel_del_comprobante(_papel_elegido)
+                avisar("success", f"🖨️ Listo: el comprobante y la factura salen en "
+                                  f"«{_papel_elegido}».")
+                st.rerun()
+            except (PermissionError, ValueError) as _err:
+                st.error(el_error_en_castellano(_err))
+        st.markdown("---")
         # LA FACTURA ELECTRÓNICA (ver esa sección en logica/facturas.py): qué falta para
         # hacerlas y probar la conexión con ARCA, sin facturar nada.
         st.markdown("**🧾 Factura electrónica (ARCA)**")

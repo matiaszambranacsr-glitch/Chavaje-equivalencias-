@@ -2094,6 +2094,22 @@ def crear_cuentas_de_una_vez(texto):
     return {"creadas": len(nuevas), "ya_estaban": ya_estaban, "con_problemas": con_problemas}
 
 
+def renglon_del_portal(fila, marcas_sin_precio):
+    """Lo que el taller lee de un resultado en su portal, y si lo puede sumar a su presupuesto:
+    (texto, se puede sumar).
+
+    El precio es el que se le dice a un cliente (ver precio_para_el_cliente()): la lista que
+    está en otra escala —TARANTO, hasta que se le cargue el coeficiente, cuesta 0,07 veces lo
+    que sus equivalentes— sale «precio a confirmar» y no se suma. El portal mostraba el número
+    tal cual y lo sumaba: el taller le pasaba a su cliente un presupuesto con la junta de tapa
+    a $1.505 en vez de $24.140, y después venía a buscarla a ese precio. Lo decidió el dueño:
+    en el portal va lo mismo que en la cotización."""
+    precio = precio_para_el_cliente(fila, marcas_sin_precio) or "s/precio"
+    a_confirmar = bool(fila.get("Precio")) and fila.get("Marca") in marcas_sin_precio
+    return (f"{fila['Marca']} - {fila['Codigo']} — {fila.get('Descripcion') or ''} ({precio})",
+            not a_confirmar)
+
+
 def mostrar_portal_mecanico():
     """Portal separado para mecánicos externos — no ven ninguna de las pestañas internas del
     negocio, solo esto: buscar repuestos, armar su presupuesto con su propia mano de obra, y
@@ -2124,13 +2140,17 @@ def mostrar_portal_mecanico():
         if not resultados_mec:
             resultados_mec = buscar_por_texto(texto_busqueda_mec)
         if resultados_mec:
+            _sin_precio_mec = marcas_con_precios_fuera_de_escala()
             for fila in resultados_mec[:20]:
                 colm1, colm2, colm3 = st.columns([3, 1, 1])
-                precio_txt = f"${miles(fila['Precio'], 0)}" if fila.get("Precio") else "s/precio"
-                colm1.write(f"{fila['Marca']} - {fila['Codigo']} — {fila.get('Descripcion') or ''} ({precio_txt})")
+                _texto_mec, _se_suma = renglon_del_portal(fila, _sin_precio_mec)
+                colm1.write(_texto_mec)
                 cantidad_mec = colm2.number_input("Cant.", min_value=1, value=1, step=1,
                                                     key=f"cant_mec_{fila['ID']}", label_visibility="collapsed")
-                if colm3.button("➕", key=f"add_mec_{fila['ID']}"):
+                if colm3.button("➕", key=f"add_mec_{fila['ID']}", disabled=not _se_suma,
+                                help=None if _se_suma else "El precio de esta lista está a "
+                                     "confirmar: consultalo en el mostrador antes de "
+                                     "presupuestarlo."):
                     st.session_state["presupuesto_mecanico_items"].append({
                         "codigo": fila["Codigo"], "marca": fila["Marca"],
                         "descripcion": fila.get("Descripcion") or "",

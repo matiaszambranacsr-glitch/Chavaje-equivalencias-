@@ -952,11 +952,94 @@ def detalle_del_comprobante(factura):
     return detalle
 
 
+def _fecha_del_comprobante(iso):
+    """«2026-11-14…» → «14/11/2026», como va la fecha en un comprobante."""
+    iso = str(iso or "")
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(iso) >= 10 else iso
+
+
+def ticket_de_la_factura(f, cfg, detalle):
+    """Un comprobante en ticket de 80 mm (ver «EL TICKET DE 80 MM» en logica/ventas.py), con
+    lo mismo que lleva la hoja de factura_para_descargar(): el negocio, la letra y el número,
+    el cliente, lo vendido, los totales (el neto y el IVA en la A; el IVA contenido en la B), y
+    el CAE con su QR. `f` es la fila de facturas; `cfg`, la configuración de ARCA. bytes."""
+    que, letra = TIPOS_DE_COMPROBANTE[f["tipo"]]
+    discrimina = f["tipo"] in (1, 3)
+
+    cuit = re.sub(r"\D", "", str(cfg.get("cuit") or ""))
+    partes = [("centro", cfg.get("razon_social") or "El Chavo", 12, True)]
+    if cfg.get("domicilio"):
+        partes.append(("centro", cfg["domicilio"], 8, False))
+    if cuit:
+        partes.append(("centro", "CUIT " + (documento_legible(DOC_CUIT, cuit)[5:]
+                                            if len(cuit) == 11 else cuit), 8, False))
+    de_mas = [f"{rotulo}: {cfg[clave]}" for rotulo, clave in (
+        ("Ing. Brutos", "ingresos_brutos"), ("Inicio de actividades", "inicio_de_actividades"))
+        if cfg.get(clave)]
+    if de_mas:
+        partes.append(("centro", " · ".join(de_mas), 8, False))
+    partes += [("centro", "Responsable Monotributo" if cfg.get("condicion") == "monotributo"
+                else "IVA Responsable Inscripto", 8, False),
+               ("linea",),
+               ("centro", f"{que.upper()} {letra}", 13, True),
+               ("centro", f"Cód. {f['tipo']:03d} · N° {f['punto_de_venta']:05d}-{f['numero']:08d}",
+                10, True),
+               ("centro", f"Fecha de emisión: {_fecha_del_comprobante(f['fecha'])}", 9, False),
+               ("linea",)]
+    cond_cliente = next((k for k, v in CONDICIONES_DEL_CLIENTE.items()
+                         if v == f["condicion_receptor"]), "")
+    cliente = f["nombre_receptor"] or ("Consumidor final" if cond_cliente == "Consumidor final"
+                                       else "")
+    if cliente:
+        partes.append(("texto", f"Cliente: {cliente}", 9, False))
+    documento = documento_legible(f["doc_tipo"], f["doc_nro"])
+    if documento:
+        partes.append(("texto", documento, 9, False))
+    partes += [("texto", f"Condición frente al IVA: {cond_cliente}", 9, False),
+               ("texto", f"Condición de venta: {detalle['condicion_de_venta']}", 9, False)]
+    if f["asociada_a"]:
+        c.execute("SELECT tipo, punto_de_venta, numero, fecha FROM facturas WHERE id = ?",
+                  (f["asociada_a"],))
+        asociada = c.fetchone()
+        if asociada:
+            partes.append(("texto", "Comprobante asociado: "
+                           + nombre_del_comprobante(asociada["tipo"], asociada["punto_de_venta"],
+                                                    asociada["numero"])
+                           + f" del {_fecha_del_comprobante(asociada['fecha'])}", 9, False))
+    partes.append(("linea",))
+    for cantidad, texto, precio in detalle["renglones"]:
+        unitario = float(precio or 0) / ((1 + IVA_GENERAL / 100) if discrimina else 1)
+        partes.append(("texto", str(texto or "")[:90], 9, False))
+        partes.append(("par", f"   {miles(cantidad, 0)} x {formato_precio(unitario)}"
+                       + (" s/IVA" if discrimina else ""),
+                       formato_precio(unitario * cantidad), 9, False))
+    partes.append(("linea",))
+    if discrimina:
+        partes += [("par", "Importe neto gravado", formato_precio(f["neto"]), 9, False),
+                   ("par", f"IVA {miles(IVA_GENERAL, 0)}%", formato_precio(f["iva"]), 9, False)]
+    partes.append(("par", "TOTAL", formato_precio(f["total"]), 12, True))
+    if f["tipo"] in (6, 8):
+        partes.append(("texto", "Régimen de Transparencia Fiscal al Consumidor (Ley 27.743) - "
+                                f"IVA contenido: {formato_precio(f['iva'])}", 7.5, False))
+    if discrimina and f["condicion_receptor"] == CONDICIONES_DEL_CLIENTE["Monotributista"]:
+        partes.append(("texto", LEYENDA_DE_LA_A_AL_MONOTRIBUTISTA, 7, False))
+    if f["estado"] == "autorizada" and f["cae"]:
+        partes += [("linea",), ("qr", url_del_qr(f, cfg.get("cuit") or 0)),
+                   ("centro", "Comprobante autorizado por ARCA", 9, True),
+                   ("centro", f"CAE N° {f['cae']}", 9, False),
+                   ("centro", f"Vencimiento del CAE: {_fecha_del_comprobante(f['cae_vence'])}", 9, False)]
+        if f["ambiente"] != "produccion":
+            partes.append(("centro", "DE PRUEBA (homologación): no tiene validez fiscal", 8,
+                           True))
+    return pdf_de_ticket(partes)
+
+
 def factura_para_descargar(factura_id):
     """El PDF de un comprobante, armado como los de ARCA: arriba el negocio a la izquierda, la
     letra en su recuadro al medio y el número a la derecha; el cliente con su condición y la
     condición de venta; lo vendido; los totales (en la A, el neto y el IVA; en la B, el IVA
-    contenido de la Ley 27.743); y el CAE con el QR. bytes."""
+    contenido de la Ley 27.743); y el CAE con el QR. En hoja A4, o en ticket de 80 mm si así
+    imprime el mostrador (ver papel_del_comprobante()). bytes."""
     from fpdf import FPDF
     import qrcode
     cfg = configuracion_de_arca() or {}
@@ -965,13 +1048,11 @@ def factura_para_descargar(factura_id):
     que, letra = TIPOS_DE_COMPROBANTE[f["tipo"]]
     detalle = detalle_del_comprobante(f)
     discrimina = f["tipo"] in (1, 3)        # en la A el detalle va sin IVA
+    if papel_del_comprobante() == PAPELES_DEL_COMPROBANTE[1]:
+        return ticket_de_la_factura(f, cfg, detalle)
 
     def latin(texto):
         return str(texto or "").encode("latin-1", "replace").decode("latin-1")
-
-    def dia(iso):
-        iso = str(iso or "")
-        return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(iso) >= 10 else iso
 
     pdf = FPDF()
     pdf.set_auto_page_break(True, margin=15)
@@ -1022,7 +1103,7 @@ def factura_para_descargar(factura_id):
     cuit = re.sub(r"\D", "", str(cfg.get("cuit") or ""))
     renglones_derecha = [("Punto de venta", f"{f['punto_de_venta']:05d}",
                           "Comp. Nro", f"{f['numero']:08d}"),
-                         ("Fecha de emisión", dia(f["fecha"])),
+                         ("Fecha de emisión", _fecha_del_comprobante(f["fecha"])),
                          ("CUIT", documento_legible(DOC_CUIT, cuit)[5:] if len(cuit) == 11 else cuit)]
     if cfg.get("ingresos_brutos"):
         renglones_derecha.append(("Ingresos Brutos", cfg["ingresos_brutos"]))
@@ -1058,7 +1139,7 @@ def factura_para_descargar(factura_id):
             ("Comprobante asociado", nombre_del_comprobante(asociada["tipo"],
                                                             asociada["punto_de_venta"],
                                                             asociada["numero"]),
-             f"del {dia(asociada['fecha'])}"))
+             f"del {_fecha_del_comprobante(asociada['fecha'])}"))
     y = y0 + alto + 3
     pdf.rect(x0, y, ancho, 4 + 5.5 * len(renglones_cliente))
     y += 2
@@ -1130,7 +1211,7 @@ def factura_para_descargar(factura_id):
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 6, latin("Comprobante autorizado por ARCA"), new_x="LMARGIN", new_y="NEXT")
         for rotulo, valor in (("CAE N°", f["cae"]),
-                              ("Fecha de vencimiento del CAE", dia(f["cae_vence"]))):
+                              ("Fecha de vencimiento del CAE", _fecha_del_comprobante(f["cae_vence"]))):
             pdf.set_x(x0 + 38)
             pdf.set_font("Helvetica", "B", 9)
             pdf.cell(pdf.get_string_width(latin(rotulo + ": ")) + 1, 5, latin(rotulo + ": "))

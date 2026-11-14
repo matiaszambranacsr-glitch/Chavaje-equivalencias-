@@ -491,8 +491,16 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-14"
+VERSION_DE_LO_NUEVO = "2026-11-14b"
 LO_NUEVO = (
+    ("🖨️ El comprobante y la factura salen también en ticket de 80 mm, para ticketera: se elige "
+     "una vez el papel y los botones son los mismos.", "🗂️ Administrar → 💬 Mensajería y cobros"),
+    ("🔧 En el portal del taller, la lista que está en otra escala (TARANTO, hasta que tenga su "
+     "coeficiente) sale «precio a confirmar» y no se suma al presupuesto: antes mostraba el "
+     "precio quince veces más bajo.", "🗂️ Administrar → 🏷️ Marcas"),
+    ("💡 Al ponerle nombre a una familia de códigos, la app muestra una pista de qué pieza es "
+     "(lo que dicen las pocas descripciones que nombran una) y la deja escrita para confirmar.",
+     "🗂️ Administrar → 🏷️ Marcas"),
     ("🤖 Un asistente en todas las pantallas: preguntale cómo se hace algo («¿cómo hago una "
      "devolución?»), pedile que te lleve («llevame a la caja») o que busque un repuesto. "
      "Entiende sin acentos y con errores. No ve los datos ni las contraseñas, y lleva solo a "

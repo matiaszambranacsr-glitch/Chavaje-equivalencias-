@@ -597,12 +597,140 @@ def texto_del_comprobante(venta_id):
     return "\n".join(lineas)
 
 
+# EL TICKET DE 80 MM. El comprobante y la factura salían solo en hoja A4, y un mostrador con
+# ticketera térmica imprimía una hoja entera —o nada— por cada venta. El dueño dejó la decisión
+# en manos de la app («hacé todas las decisiones mías»): van los dos papeles, se elige una vez
+# en 🗂️ Administrar → 💬 Mensajería y cobros, y los mismos botones de siempre bajan el PDF en
+# ese papel. El ticket mide de alto lo que mide lo impreso: la ticketera corta donde termina
+# la página, y una hoja con medio metro en blanco es medio metro de rollo tirado.
+PAPELES_DEL_COMPROBANTE = ("Hoja A4", "Ticket de 80 mm")
+ANCHO_DEL_TICKET, MARGEN_DEL_TICKET = 80, 4      # en mm: quedan 72 de ancho para imprimir
+LADO_DEL_QR_EN_EL_TICKET = 34
+
+
+def papel_del_comprobante():
+    """En qué papel salen el comprobante y la factura: uno de PAPELES_DEL_COMPROBANTE."""
+    papel = obtener_config("papel_del_comprobante", PAPELES_DEL_COMPROBANTE[0])
+    return papel if papel in PAPELES_DEL_COMPROBANTE else PAPELES_DEL_COMPROBANTE[0]
+
+
+def guardar_papel_del_comprobante(papel):
+    """Lo elige cualquier empleado: es cómo imprime su mostrador, no un dato del negocio."""
+    if papel not in PAPELES_DEL_COMPROBANTE:
+        raise ValueError("Ese papel no existe: " + " o ".join(PAPELES_DEL_COMPROBANTE) + ".")
+    exigir_nivel("empleado", "cambiar el papel de los comprobantes")
+    guardar_config("papel_del_comprobante", papel)
+    conn.commit()
+
+
+def pdf_de_ticket(partes):
+    """Un PDF de 80 mm de ancho y del alto justo, para ticketera. `partes`, de arriba a abajo:
+        ("centro", texto, tamaño, negrita)     centrado, en los renglones que haga falta
+        ("texto", texto, tamaño, negrita)      a la izquierda, lo mismo
+        ("par", izquierda, derecha, tamaño, negrita)   un texto y su importe a la derecha
+        ("linea",)                             una raya de puntos
+        ("espacio", mm)
+        ("qr", lo que lleva adentro)           el QR, centrado
+    Se dibuja dos veces: la primera, en una página larguísima, para saber cuánto mide."""
+    from fpdf import FPDF
+
+    def latin(texto):
+        # Las fuentes básicas de fpdf2 no traen todo unicode: ver generar_pdf_cotizacion().
+        return str(texto or "").replace("×", "x").encode("latin-1", "replace").decode("latin-1")
+
+    ancho = ANCHO_DEL_TICKET - 2 * MARGEN_DEL_TICKET
+
+    def dibujar(alto):
+        pdf = FPDF(unit="mm", format=(ANCHO_DEL_TICKET, alto))
+        pdf.set_auto_page_break(False)
+        pdf.set_margins(MARGEN_DEL_TICKET, MARGEN_DEL_TICKET, MARGEN_DEL_TICKET)
+        pdf.add_page()
+        for parte in partes:
+            que = parte[0]
+            if que == "linea":
+                y = pdf.get_y() + 1.2
+                pdf.set_dash_pattern(dash=1, gap=1)
+                pdf.line(MARGEN_DEL_TICKET, y, ANCHO_DEL_TICKET - MARGEN_DEL_TICKET, y)
+                pdf.set_dash_pattern()
+                pdf.set_y(y + 1.2)
+            elif que == "espacio":
+                pdf.set_y(pdf.get_y() + parte[1])
+            elif que == "qr":
+                import qrcode
+                imagen = io.BytesIO()
+                qrcode.make(parte[1]).save(imagen, format="PNG")
+                imagen.seek(0)
+                y = pdf.get_y() + 1
+                pdf.image(imagen, x=(ANCHO_DEL_TICKET - LADO_DEL_QR_EN_EL_TICKET) / 2, y=y,
+                          w=LADO_DEL_QR_EN_EL_TICKET)
+                pdf.set_y(y + LADO_DEL_QR_EN_EL_TICKET + 1.5)
+            elif que == "par":
+                _que, izquierda, derecha, puntos, negrita = parte
+                pdf.set_font("Helvetica", "B" if negrita else "", puntos)
+                renglon = puntos * 0.42
+                ancho_del_importe = pdf.get_string_width(latin(derecha)) + 1.5
+                y = pdf.get_y()
+                pdf.multi_cell(ancho - ancho_del_importe - 1, renglon, latin(izquierda),
+                               align="L", new_x="LMARGIN", new_y="NEXT")
+                y_al_terminar = max(pdf.get_y(), y + renglon)
+                pdf.set_xy(MARGEN_DEL_TICKET + ancho - ancho_del_importe, y)
+                pdf.cell(ancho_del_importe, renglon, latin(derecha), align="R")
+                pdf.set_xy(MARGEN_DEL_TICKET, y_al_terminar)
+            else:
+                _que, texto, puntos, negrita = parte
+                pdf.set_font("Helvetica", "B" if negrita else "", puntos)
+                pdf.multi_cell(ancho, puntos * 0.42, latin(texto),
+                               align="C" if que == "centro" else "L",
+                               new_x="LMARGIN", new_y="NEXT")
+        return pdf
+
+    alto = dibujar(3000).get_y() + MARGEN_DEL_TICKET
+    return bytes(dibujar(alto).output())
+
+
+def ticket_del_comprobante(venta):
+    """El comprobante de una venta ya leída (ver una_venta()), en ticket de 80 mm. Dice lo
+    mismo que pdf_del_comprobante(). b"" si no hay venta."""
+    if not venta:
+        return b""
+    _fecha = a_la_hora_de_aca(venta["fecha"]) or datetime.strptime(venta["fecha"][:16],
+                                                                   "%Y-%m-%d %H:%M")
+    partes = [("centro", "EL CHAVO", 13, True),
+              ("centro", f"Comprobante de venta #{venta['id']}", 9, False),
+              ("centro", f"{_fecha:%d/%m/%Y %H:%M}", 9, False)]
+    if venta["cliente"]:
+        partes.append(("texto", f"Cliente: {venta['cliente']}", 9, False))
+    if venta["patente"]:
+        partes.append(("texto", f"Patente: {venta['patente']}", 9, False))
+    partes.append(("linea",))
+    for it in venta["items"]:
+        partes.append(("texto", f"{it['cantidad']} x {it['marca']} {it['codigo']}", 9, True))
+        partes.append(("par", (it["descripcion"] or "")[:70]
+                       + (f" (devueltos: {it['devuelto']})" if it["devuelto"] else ""),
+                       f"${miles(it['cantidad'] * it['precio'], 0)}", 9, False))
+    partes.append(("linea",))
+    if venta.get("descuento"):
+        partes.append(("texto", f"Descuento {como_porcentaje(venta['descuento'])}% (era "
+                                f"${miles(venta.get('total_de_lista') or 0, 0)})", 9, False))
+    partes.append(("par", "TOTAL" + (f" ({como_se_pago(venta)})" if venta["forma_de_pago"]
+                                      else ""), f"${miles(venta['total'] or 0, 0)}", 12, True))
+    if not venta.get("cobrada", 1) and not venta["anulada"]:
+        partes.append(("centro", "PENDIENTE DE COBRO", 10, True))
+    if venta["anulada"]:
+        partes.append(("centro", "ANULADA", 10, True))
+    partes += [("espacio", 2), ("centro", NO_ES_FACTURA, 8, False),
+               ("centro", "¡Gracias por tu compra!", 9, False)]
+    return pdf_de_ticket(partes)
+
+
 def comprobante_para_descargar(venta_id):
-    """Para el botón de descarga: los datos de la venta se leen ahora, y el PDF se arma recién
-    al tocar el botón (Streamlit lo corre en otro hilo, que no tiene que tocar la base). Así no
-    se arma un PDF en cada toque de la pantalla, y si armarlo fallara, no se cae Ventas."""
+    """Para el botón de descarga: los datos de la venta y el papel se leen ahora, y el PDF se
+    arma recién al tocar el botón (Streamlit lo corre en otro hilo, que no tiene que tocar la
+    base). Así no se arma un PDF en cada toque de la pantalla, y si armarlo fallara, no se cae
+    Ventas. En hoja A4 o en ticket de 80 mm: ver papel_del_comprobante()."""
     venta = una_venta(venta_id)
-    return lambda: pdf_del_comprobante(venta)
+    en_ticket = papel_del_comprobante() == PAPELES_DEL_COMPROBANTE[1]
+    return lambda: ticket_del_comprobante(venta) if en_ticket else pdf_del_comprobante(venta)
 
 
 def pdf_del_comprobante(venta):

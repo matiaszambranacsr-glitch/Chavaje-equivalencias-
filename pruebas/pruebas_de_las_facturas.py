@@ -591,6 +591,30 @@ def probar(L):
                 (_pdf[:4], [x in _escrito for x in ("COD. 001", "Comp. Nro", "30-71234567-1",
                                                      "Transferencia bancaria", "s/IVA")]),
                 (b"%PDF", [True] * 5))
+        # EN TICKET DE 80 MM (ver «EL TICKET DE 80 MM» en logica/ventas.py): la misma factura,
+        # con todo lo que lleva la hoja —el código y el número, el CUIT, la condición de
+        # venta, el detalle sin IVA de la A, el CAE— y el QR, en una sola página de 80 mm.
+        ns["guardar_papel_del_comprobante"]("Ticket de 80 mm")
+        try:
+            _ticket = ns["factura_para_descargar"](_fa["id"])
+            _caja = re.search(rb"/MediaBox \[([\d. ]+)\]", _ticket).group(1).split()
+            _dice = _texto_del_pdf(_ticket)
+            esperar("la factura en ticket: una página de 80 mm, con el QR",
+                    (_ticket[:4], len(re.findall(rb"/Type /Page\b", _ticket)),
+                     round(float(_caja[2]) / 72 * 25.4), b"/Subtype /Image" in _ticket),
+                    (b"%PDF", 1, 80, True))
+            esperar("y dice lo que tiene que decir",
+                    [x in _dice for x in ("FACTURA A", "001", f"{_fa['numero']:08d}",
+                                          "30-71234567-1", "Transferencia bancaria", "s/IVA",
+                                          "Importe neto gravado", "TOTAL", str(_fa["cae"]),
+                                          "autorizado por ARCA")], [True] * 10)
+            esperar("del alto de lo impreso",
+                    60 < round(float(_caja[3]) / 72 * 25.4) < 260, True)
+        finally:
+            ns["guardar_papel_del_comprobante"]("Hoja A4")
+        esperar("y de vuelta en hoja A4",
+                round(float(re.search(rb"/MediaBox \[([\d. ]+)\]", ns["factura_para_descargar"](
+                    _fa["id"])).group(1).split()[2]) / 72 * 25.4), 210)
         # A un monotributista, la A con la leyenda de la RG 5003.
         v12, _ = ns["cerrar_venta"]([item()], a_la_caja=True)
         ns["cobrar_venta"](v12, "Efectivo")
