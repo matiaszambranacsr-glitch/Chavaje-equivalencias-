@@ -411,8 +411,8 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
   búsqueda al entrar a Ventas (también recién entrado con la contraseña) y al Buscador, F2, F9
   (con el cursor en un campo pregunta y no graba; Enter manda a la caja), F1 y Escape del asistente,
   F10 (cobrar, sin abrir otra ventana encima), el menú del click derecho y los textos de Streamlit
-  pasados al castellano ya tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (se corre a
-  mano: en GitHub no hay navegador; sin Playwright, se saltea). Lo mismo el formato de los gráficos
+  pasados al castellano ya tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (corre en
+  GitHub en cada subida, en el trabajo «navegador»; a mano, sin Playwright se saltea). Lo mismo el formato de los gráficos
   (`grafico_de_barras()`), lo que se mueve en la pantalla (la barra que trabaja, los números que
   se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) que el aviso al vendedor llegue solo cada
   20 segundos, el cursor en la caja de búsqueda de las demás pantallas y, en el teléfono, que

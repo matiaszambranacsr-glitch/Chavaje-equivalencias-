@@ -44,3 +44,26 @@ jobs:
         run: |
           sudo apt-get install -y faketime
           python .github/correr_las_pruebas.py --de-noche
+
+  # LO QUE CORRE EN EL NAVEGADOR: el cursor en la caja de búsqueda para el lector de códigos de
+  # barras, F1, F2, F9, F10, el click derecho y los textos en castellano. Ninguna de las pruebas
+  # de arriba lo ve (corren la app sin navegador), y esta se corría solo a mano. Así, al sumar
+  # la burbuja del asistente el cursor dejó de quedar en la búsqueda de Ventas y pasaron seis
+  # subidas sin que nadie se enterara. Va en su propio trabajo, a la par del otro: no lo demora.
+  # La versión de Playwright es la misma que en mantener_despierta.yml.
+  navegador:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Instalar las librerías y el navegador
+        run: |
+          pip install -r requirements.txt
+          pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+      - name: Lo que corre en el navegador
+        run: python pruebas/navegador.py --sin-saltear

@@ -7660,7 +7660,7 @@ python3 -m venv /tmp/pw && /tmp/pw/bin/pip install -q "playwright==<esa versión
 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers /tmp/pw/bin/python pruebas/navegador.py --python "$(which python)"
 ```
 
-Se corre a mano (en GitHub no hay navegador; si falta Playwright, avisa y no falla), y tarda cerca de un minuto y medio. Probada contra un JavaScript roto a propósito: con F2 cambiado por F3 y sin la traducción de «Upload», falla en las dos. De paso se vio que Streamlit 1.65 ya no dice «Drag and drop file here» ni «Browse files» sino «Upload»: la app lo traducía igual.
+**Corre en GitHub en cada subida**, en su propio trabajo («navegador», a la par de las otras pruebas: instala Playwright y Chromium como ya hacía el que mantiene despierta la app), y también a mano; tarda cerca de un minuto y medio. A mano, si falta Playwright avisa y no falla; en GitHub (`--sin-saltear`) sí. Probada contra un JavaScript roto a propósito: con F2 cambiado por F3 y sin la traducción de «Upload», falla en las dos. De paso se vio que Streamlit 1.65 ya no dice «Drag and drop file here» ni «Browse files» sino «Upload»: la app lo traducía igual.
 
 ## 🚪 La entrada, más rápida
 

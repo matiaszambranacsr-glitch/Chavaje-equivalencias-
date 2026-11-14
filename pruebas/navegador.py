@@ -9,10 +9,12 @@ Streamlit pasados al castellano se probaban a mano con un navegador, y si un cam
 nadie se enteraba (estaba en «Sin prueba automática todavía» de CONTRATOS.md). Esto levanta la
 app con una base de prueba y los recorre.
 
-Necesita Playwright y Chromium; si no están, lo dice y no falla. No corre en GitHub (no hay
-navegador): se corre a mano antes de publicar un cambio que toque el JavaScript o las pantallas
-de Ventas y el Buscador. --python es el que tiene Streamlit, si no es el mismo que corre esto
-(Playwright y Streamlit pueden estar instalados en dos Python distintos).
+Necesita Playwright y Chromium; si no están, lo dice y no falla (con --sin-saltear, sí falla:
+es como lo corre GitHub, que instala los dos, para que un día sin navegador no pase por verde).
+Corre en GitHub en cada subida, en su propio trabajo (.github/workflows/pruebas.yml), desde que
+el asistente rompió el cursor de Ventas y nadie se enteró: hasta ahí se corría solo a mano.
+--python es el que tiene Streamlit, si no es el mismo que corre esto (Playwright y Streamlit
+pueden estar instalados en dos Python distintos).
 
 Corre en una carpeta temporal: nunca toca la base de trabajo. La contraseña de la base de prueba
 se inventa en cada corrida y se borra con la carpeta.
@@ -234,7 +236,7 @@ def main():
         import playwright  # noqa: F401
     except ImportError:
         print("⏭️ navegador: no está Playwright en este Python, no se prueba")
-        return 0
+        return 1 if "--sin-saltear" in sys.argv else 0
     python_app = _argumento("--python", sys.executable)
     carpeta = tempfile.mkdtemp(prefix="pruebas_navegador_")
     clave = secrets.token_hex(8)
