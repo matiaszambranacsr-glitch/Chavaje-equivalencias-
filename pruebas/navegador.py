@@ -227,6 +227,36 @@ def probar(url, clave, carpeta):
                 if not _hasta(lambda: pagina.locator(
                         ".st-key-asistente_minimizado").count() == 1):
                     fallas.append("Escape no minimiza el asistente")
+
+        # 8. EN UN TELÉFONO, sin contraseña, que es como lo abre un cliente. Un teléfono
+        # simulado de verdad (táctil): achicando la ventana de la computadora lo del celular no
+        # se aplica, y así se pasó por alto que la burbuja del asistente salía de 16 x 54
+        # —app.py estira todos los botones a lo ancho—. Y después de buscar, la pantalla baja
+        # sola hasta lo encontrado: el formulario ocupa la pantalla y los resultados quedan abajo.
+        telefono = navegador.new_context(**pw.devices["Pixel 7"])
+        celular = telefono.new_page()
+        celular.goto(url, wait_until="networkidle", timeout=180000)
+        _esperar(celular, 3)
+        burbuja = celular.locator(".st-key-asis_abrir button:visible")
+        medida = burbuja.first.bounding_box() if burbuja.count() else None
+        if not medida:
+            fallas.append("en el teléfono no está la burbuja del asistente")
+        elif abs(medida["width"] - medida["height"]) > 2 or medida["width"] < 44:
+            fallas.append("en el teléfono la burbuja del asistente no es redonda: "
+                          f"{medida['width']:.0f} x {medida['height']:.0f}")
+        celular.locator(".st-key-busqueda_input input").fill("F100")
+        celular.get_by_role("button", name="Buscar equivalencias").first.tap()
+        _esperar(celular, 2)
+
+        def _donde_quedo_lo_encontrado():
+            return celular.evaluate("""() => {
+                const r = document.querySelector('[class*="st-key-exp_resultado_"]');
+                return r ? r.getBoundingClientRect().top / window.innerHeight : null; }""")
+        if not _hasta(lambda: _donde_quedo_lo_encontrado() is not None
+                      and 0 <= _donde_quedo_lo_encontrado() < 0.6):
+            fallas.append("en el teléfono, después de buscar la pantalla no baja hasta lo "
+                          f"encontrado: quedó en {_donde_quedo_lo_encontrado()} de la pantalla")
+        telefono.close()
         navegador.close()
     return fallas
 
@@ -260,8 +290,8 @@ def main():
         fallas = probar(url, clave, carpeta)
         for f in fallas:
             print("   ✗", f)
-        print("✅ navegador: el cursor al entrar, el click derecho, F1, F2, F9, F10 y los "
-              "textos en castellano"
+        print("✅ navegador: el cursor al entrar, el click derecho, F1, F2, F9, F10, los "
+              "textos en castellano y el teléfono"
               if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:

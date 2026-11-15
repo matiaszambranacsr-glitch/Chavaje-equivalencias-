@@ -276,6 +276,20 @@ def probar(L):
     for pregunta, buscado in BUSCA:
         r = responder(pregunta, empleado)
         esperar(f"«{pregunta}» busca", r["buscar"], buscado)
+    # Debajo de una respuesta, ningún botón que lleve al mismo lugar sin ser otro «cómo hago»:
+    # a «cómo hago una lista de WhatsApp» le seguía, además de «➡️ Llevame a 📋 Lista WhatsApp»,
+    # un «📋 Lista WhatsApp» que abría la pantalla misma. En el celular, dos botones grandes.
+    _por_nombre = ns["fichas_del_asistente"]()["por_nombre"]
+    _repetidos = []
+    for pregunta, _ficha in ENTIENDE + (("como hago una lista de whatsapp", ""),):
+        for _quien in (empleado, invitado):
+            r = responder(pregunta, _quien)
+            if r["ficha"]:
+                _repetidos += [
+                    (pregunta, cual) for _rotulo, que, cual in r["botones"]
+                    if que == "ver" and _por_nombre[cual]["tipo"] != "como"
+                    and _por_nombre[cual]["destino"] == _por_nombre[r["ficha"]]["destino"]]
+    esperar("ningún botón repite el lugar de la respuesta", _repetidos, [])
     # Explicar no es llevar: sin «llevame», responde y ofrece el botón.
     r = responder("como cobro una venta", empleado)
     esperar("explicar no lleva solo", (r["ir"], r["botones"][0][1:]), (None, ("ir", "como:cobrar")))

@@ -1599,11 +1599,14 @@ def responder_del_asistente(pregunta, contexto):
         if not otra or otra[0] < max(ASISTENTE_SEGURO, acierto * 0.7):
             return _asis_no_se_puede(primera, contexto)
         acierto, primera = otra
-    # Las otras que podrían ser: van como botones. Una ayuda del mismo lugar no suma nada.
+    # Las otras que podrían ser: van como botones. Lo que no es otro «cómo hago» y lleva al
+    # mismo lugar no suma nada: a «cómo hago una lista de WhatsApp» le seguía, debajo de
+    # «➡️ Llevame a 📋 Lista WhatsApp», otro botón «📋 Lista WhatsApp» que abría la pantalla
+    # misma, con el mismo «Llevame». En el celular eran dos botones grandes para un solo lugar.
     parecidas = [f for a, f in mejores[:9]
                  if f is not primera and _asis_se_puede(f, contexto)
                  and a >= max(ASISTENTE_QUIZAS, acierto * 0.6)
-                 and not (f["tipo"] == "ayuda" and f["destino"] == primera["destino"])][:3]
+                 and not (f["tipo"] != "como" and f["destino"] == primera["destino"])][:3]
     if acierto < ASISTENTE_SEGURO:
         return _asis_simple(
             "No estoy seguro de qué buscás. ¿Es alguna de estas?",

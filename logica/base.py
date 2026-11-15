@@ -773,8 +773,17 @@ button:disabled { opacity: 0.45 !important; }
 .st-key-asistente_minimizado, .st-key-asistente_abierto {
   position: fixed; left: 14px; bottom: 14px; z-index: 1000; width: auto !important;
 }
-.st-key-asistente_minimizado button {
-  width: 54px !important; height: 54px; min-height: 54px; padding: 0 !important;
+/* La clase repetida tres veces es a propósito: en el celular, app.py estira TODOS los botones
+   y sus cajas a lo ancho («width: 100% !important», para acertarles con el pulgar), y esa regla
+   va después y le ganaba a esta. La burbuja quedaba del ancho de su caja, que por estar fija no
+   tiene ninguno: un óvalo de 16 px por 54. Se vio simulando un teléfono de verdad; achicando la
+   ventana de la computadora no pasa, porque ahí no se aplica lo del celular. */
+.st-key-asistente_minimizado.st-key-asistente_minimizado.st-key-asistente_minimizado div {
+  width: auto !important;
+}
+.st-key-asistente_minimizado.st-key-asistente_minimizado.st-key-asistente_minimizado button {
+  width: 54px !important; min-width: 54px !important; height: 54px !important;
+  min-height: 54px !important; padding: 0 !important;
   border-radius: 50% !important; border: 0 !important; background: var(--accent) !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55); opacity: 0.94;
 }
@@ -782,15 +791,6 @@ button:disabled { opacity: 0.45 !important; }
 .st-key-asistente_minimizado button:active {
   background: var(--accent) !important; opacity: 1; transform: scale(1.07) !important;
 }
-.st-key-asistente_minimizado button p { font-size: 1.6rem; line-height: 1; }
-.st-key-asistente_abierto {
-  position: fixed; left: 14px; bottom: 14px; z-index: 1000; width: auto !important;
-}
-.st-key-asistente_minimizado button {
-  width: 54px; height: 54px; min-height: 54px; padding: 0; border-radius: 50%; border: 0;
-  background: var(--accent); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-.st-key-asistente_minimizado button:hover { background: var(--accent); transform: scale(1.06); }
 .st-key-asistente_minimizado button p { font-size: 1.6rem; line-height: 1; }
 .st-key-asistente_abierto {
   width: min(390px, calc(100vw - 28px)) !important; max-height: min(76vh, 640px);
