@@ -35,7 +35,9 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
   F1, F2, F9, click derecho, castellano) con la app de verdad. Correrlo si se toca
   `AYUDAS_DEL_NAVEGADOR` **o se suma algo que se dibuja en todas las pantallas** (el asistente
   rompió el cursor de Ventas sin tocar ese código). GitHub lo corre en cada subida (trabajo
-  «navegador»). Si dice que falta Playwright para Python,
+  «navegador»). **«En el celular» no es achicar la ventana**: `… navegador.py --barrido --base
+  <copia>` recorre todas las pantallas en un teléfono simulado y dice dónde algo se sale o
+  queda aplastado (así se vio la burbuja del asistente de 16 px). Si dice que falta Playwright para Python,
   armarlo aparte con la versión del de Node (`cd /tmp && node -e
   "console.log(require('playwright/package.json').version)"`):
   `python3 -m venv /tmp/pw && /tmp/pw/bin/pip install -q "playwright==<esa versión>"`, y

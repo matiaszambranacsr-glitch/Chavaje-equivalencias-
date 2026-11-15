@@ -2141,16 +2141,22 @@ def mostrar_portal_mecanico():
             resultados_mec = buscar_por_texto(texto_busqueda_mec)
         if resultados_mec:
             _sin_precio_mec = marcas_con_precios_fuera_de_escala()
+            # En el teléfono las columnas se apilan y cada botón ocupa el ancho de la pantalla:
+            # un «➕» o un «🗑️» solos, de punta a punta, no dicen qué hacen (se vio simulando
+            # un teléfono con el portal). Ahí van con las palabras; en la computadora, donde la
+            # columna es angosta, el dibujo con su globito.
+            _en_el_telefono = es_celular()
             for fila in resultados_mec[:20]:
                 colm1, colm2, colm3 = st.columns([3, 1, 1])
                 _texto_mec, _se_suma = renglon_del_portal(fila, _sin_precio_mec)
                 colm1.write(_texto_mec)
                 cantidad_mec = colm2.number_input("Cant.", min_value=1, value=1, step=1,
                                                     key=f"cant_mec_{fila['ID']}", label_visibility="collapsed")
-                if colm3.button("➕", key=f"add_mec_{fila['ID']}", disabled=not _se_suma,
-                                help=None if _se_suma else "El precio de esta lista está a "
-                                     "confirmar: consultalo en el mostrador antes de "
-                                     "presupuestarlo."):
+                if colm3.button("➕ Sumar al presupuesto" if _en_el_telefono else "➕",
+                                key=f"add_mec_{fila['ID']}", disabled=not _se_suma,
+                                help=("Sumar al presupuesto" if _se_suma else
+                                      "El precio de esta lista está a confirmar: consultalo en "
+                                      "el mostrador antes de presupuestarlo.")):
                     st.session_state["presupuesto_mecanico_items"].append({
                         "codigo": fila["Codigo"], "marca": fila["Marca"],
                         "descripcion": fila.get("Descripcion") or "",
@@ -2170,7 +2176,8 @@ def mostrar_portal_mecanico():
             subtotal_repuestos += subtotal_item
             coli1, coli2 = st.columns([4, 1])
             coli1.write(f"{it['marca']} - {it['codigo']} x{it['cantidad']} — ${miles(subtotal_item, 0)}")
-            coli2.button("🗑️", key=f"quitar_mec_{i}",
+            coli2.button("🗑️ Quitar" if es_celular() else "🗑️", key=f"quitar_mec_{i}",
+                          help="Quitar del presupuesto",
                           on_click=quitar_item_lista_sesion, args=("presupuesto_mecanico_items", i))
 
         cliente_nombre_mec = st.text_input("Nombre del cliente (opcional):", key="mec_cliente")

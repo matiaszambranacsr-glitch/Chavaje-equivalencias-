@@ -2,6 +2,11 @@
 
 Uso:
     python3 pruebas/navegador.py [--python <el Python que tiene Streamlit>]
+    python3 pruebas/navegador.py --barrido --base <copia de la base real> [--python …]
+
+--barrido no corre los pasos de siempre: entra como administrador a una COPIA de esa base y
+recorre todas las pantallas y solapas en un teléfono simulado, diciendo en cuáles algo se sale
+de la pantalla o un botón quedó aplastado (ver barrer_en_el_telefono()).
 
 El JavaScript de AYUDAS_DEL_NAVEGADOR (logica/interfaz.py) no lo corre AppTest: el cursor en la
 caja de búsqueda al entrar a cada pantalla, F2, el menú del click derecho y los textos de
@@ -261,6 +266,88 @@ def probar(url, clave, carpeta):
     return fallas
 
 
+# EL BARRIDO EN EL TELÉFONO. «Probar en el celular» achicando la ventana de la computadora no
+# prueba el celular: lo que app.py le cambia al teléfono (los botones a lo ancho, las columnas
+# apiladas) no se aplica, y así la burbuja del asistente salió aplastada sin que nadie la viera.
+# Esto usa un teléfono simulado de verdad —táctil, con su navegador— y mide en vez de mirar:
+# en cada pantalla, lo que se sale por un costado sin estar en algo que se desliza, la página
+# que se corre de costado, y los botones de la app más angostos o más bajos que un dedo.
+_MEDIR_LA_PANTALLA = """() => {
+  const ancho = window.innerWidth, main = document.querySelector('[data-testid="stMain"]');
+  const seVe = e => { const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
+  const seDesliza = e => { for (let x = e.parentElement; x && x !== document.body; x = x.parentElement) {
+    const s = getComputedStyle(x);
+    if ((s.overflowX === 'auto' || s.overflowX === 'scroll') && x.scrollWidth > x.clientWidth + 2) return true;
+    if (x.getAttribute('data-testid') === 'stDataFrame') return true; } return false; };
+  const nombre = e => (e.innerText || e.getAttribute('aria-label') || e.tagName).trim()
+    .replace(/\\s+/g, ' ').slice(0, 34);
+  const fuera = [], chicos = [];
+  document.querySelectorAll('[data-testid="stMain"] button, [data-testid="stMain"] input, ' +
+      '[data-testid="stMain"] [data-testid="stMarkdownContainer"], ' +
+      '[data-testid="stMain"] [data-testid="stMetric"], [data-testid="stMain"] [data-testid="stAlert"], ' +
+      '[data-testid="stMain"] [data-testid="stExpander"]').forEach(e => {
+    if (!seVe(e)) return;
+    const r = e.getBoundingClientRect();
+    if ((r.right > ancho + 3 || r.left < -3) && !seDesliza(e))
+      fuera.push(nombre(e) + ' (de ' + Math.round(r.left) + ' a ' + Math.round(r.right) + ' px)');
+    if (e.tagName === 'BUTTON' && (r.width < 40 || r.height < 30) &&
+        e.closest('.stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton'))
+      chicos.push(nombre(e) + ' (' + Math.round(r.width) + ' x ' + Math.round(r.height) + ')');
+  });
+  return {corrida: Math.max(main ? main.scrollWidth - main.clientWidth : 0,
+                            document.documentElement.scrollWidth - ancho),
+          fuera: fuera.slice(0, 5), chicos: [...new Set(chicos)].slice(0, 5),
+          rota: [...document.querySelectorAll('[data-testid="stException"]')]
+                  .map(e => e.innerText.slice(0, 120))}; }"""
+
+
+def barrer_en_el_telefono(url, clave):
+    """Recorre todas las pantallas y solapas, entrando como administrador, en un teléfono
+    simulado. Imprime una línea por pantalla y devuelve las que tienen algo."""
+    from playwright.sync_api import sync_playwright
+    barra, solapas_de = ".st-key-nav_principal [role='radiogroup'] label", \
+        "[class*='st-key-sub_'] [role='radiogroup'] label"
+    con_algo = []
+    with sync_playwright() as pw:
+        navegador = pw.chromium.launch(
+            **({"executable_path": CHROMIUM} if os.path.exists(CHROMIUM) else {}))
+        pagina = navegador.new_context(**pw.devices["Pixel 7"]).new_page()
+        pagina.goto(url, wait_until="networkidle", timeout=180000)
+        _esperar(pagina, 3)
+        pagina.get_by_text("🔑 Ingresar").first.tap()
+        _esperar(pagina, 0.5)
+        pagina.locator(".st-key-login_inicial_nombre input").fill("navegador")
+        pagina.locator(".st-key-login_inicial_clave input").fill(clave)
+        pagina.get_by_role("button", name="Ingresar con contraseña").tap()
+        _esperar(pagina, 5)
+        for entendido in pagina.get_by_role("button", name="Entendido").all():
+            entendido.tap()
+            _esperar(pagina, 1)
+        for seccion in [x.strip() for x in pagina.locator(barra).all_inner_texts()]:
+            pagina.locator(barra).filter(has_text=seccion).first.tap()
+            _esperar(pagina, 2)
+            for solapa in [x.strip() for x in pagina.locator(solapas_de).all_inner_texts()] or [""]:
+                if solapa:
+                    pagina.locator(solapas_de).filter(has_text=solapa).first.tap()
+                    _esperar(pagina, 2)
+                donde = seccion + (f" → {solapa}" if solapa else "")
+                medido = pagina.evaluate(_MEDIR_LA_PANTALLA)
+                problemas = (
+                    ([f"la página se corre {medido['corrida']} px de costado"]
+                     if medido["corrida"] > 3 else [])
+                    + [f"se sale de la pantalla: {x}" for x in medido["fuera"]]
+                    + [f"botón aplastado: {x}" for x in medido["chicos"]]
+                    + [f"la pantalla se rompió: {x}" for x in medido["rota"]])
+                print(("   ✗ " if problemas else "   ✓ ") + donde)
+                for problema in problemas:
+                    print("       ", problema)
+                if problemas:
+                    con_algo.append(donde)
+        navegador.close()
+    return con_algo
+
+
 def main():
     try:
         import playwright  # noqa: F401
@@ -272,6 +359,10 @@ def main():
     clave = secrets.token_hex(8)
     servidor = None
     try:
+        # --barrido: sobre una COPIA de la base que se le pasa, que se borra con la carpeta. El
+        # usuario «navegador» y su contraseña inventada quedan solo en esa copia.
+        if "--barrido" in sys.argv:
+            shutil.copy(_argumento("--base"), os.path.join(carpeta, "equivalencias_app.db"))
         subprocess.run([python_app, "-c", PREPARAR, RAIZ, carpeta, clave], check=True,
                        capture_output=True, timeout=300)
         puerto = _puerto_libre()
@@ -287,6 +378,11 @@ def main():
                 break
             except OSError:
                 time.sleep(1)
+        if "--barrido" in sys.argv:
+            con_algo = barrer_en_el_telefono(url, clave)
+            print(f"📱 el barrido en el teléfono: {len(con_algo)} pantalla(s) con algo"
+                  if con_algo else "✅ el barrido en el teléfono: nada se sale ni queda aplastado")
+            return 1 if con_algo else 0
         fallas = probar(url, clave, carpeta)
         for f in fallas:
             print("   ✗", f)

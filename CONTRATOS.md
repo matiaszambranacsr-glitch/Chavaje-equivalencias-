@@ -410,7 +410,8 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
   (`AYUDAS_DEL_NAVEGADOR`) y se probaron con un navegador de verdad. El cursor en la caja de
   búsqueda al entrar a Ventas (también recién entrado con la contraseña) y al Buscador, F2, F9
   (con el cursor en un campo pregunta y no graba; Enter manda a la caja), F1 y Escape del asistente,
-  la burbuja redonda y el salto a lo encontrado en un teléfono simulado,
+  la burbuja redonda y el salto a lo encontrado en un teléfono simulado (y, a mano, el barrido de
+  todas las pantallas en ese teléfono: `--barrido --base <copia>`),
   F10 (cobrar, sin abrir otra ventana encima), el menú del click derecho y los textos de Streamlit
   pasados al castellano ya tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (corre en
   GitHub en cada subida, en el trabajo «navegador»; a mano, sin Playwright se saltea). Lo mismo el formato de los gráficos
