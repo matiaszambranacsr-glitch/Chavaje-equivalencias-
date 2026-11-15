@@ -491,8 +491,11 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-14c"
+VERSION_DE_LO_NUEVO = "2026-11-15"
 LO_NUEVO = (
+    ("🔧 En el portal del taller salen primero los repuestos que puede presupuestar (antes, "
+     "buscando «junta tapa valvulas», los 20 que veía eran «precio a confirmar»), y cada uno "
+     "dice si hay stock, cuando esté cargado.", "el portal de cada taller"),
     ("🌐 El código de SKF que no tenés: «Ver qué pieza es según SKF» dice qué es y sus medidas, "
      "y si es un rodamiento o un tensor, lo tuyo que mide lo mismo. SKF mudó su catálogo y ya "
      "no publica los números originales, así que dejó de leerse en segundo plano.",
@@ -2486,6 +2489,24 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
             st.rerun()
 
 
+
+def alguno_trae_stock(filas):
+    """¿Alguna de estas filas sabe su stock? Si ninguna lo trae, no se dice nada en cada una."""
+    return any(f.get("Libre", f.get("Stock")) not in (None, "") for f in filas)
+
+
+def semaforo_del_stock(fila):
+    """Si hay, para mirar de reojo: «🟢 **5** en stock», «🔴 sin stock» o «⚪ stock s/d» (la
+    lista no trae stock). Cuenta lo libre —sin lo apartado— si la fila lo trae. Es lo mismo en
+    las tarjetas del Buscador y en el portal del taller."""
+    stock = fila.get("Libre", fila.get("Stock"))
+    if stock is None or stock == "":
+        return "⚪ stock s/d"
+    if stock > 0:
+        return f"🟢 **{miles(stock, 0)}** en stock".replace(",", ".")
+    return "🔴 sin stock"
+
+
 def mostrar_tarjetas_de_resultados(filas, tope=40):
     """Los resultados como tarjetas, para el celular.
 
@@ -2496,17 +2517,9 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
     El stock va con color, porque se mira de reojo mientras se habla con el cliente: 🟢 hay,
     🔴 no hay, ⚪ no se sabe (la lista no trae stock). Si NINGUNO trae stock, no se dice en
     cada tarjeta: «⚪ stock s/d» repetido diez veces no le contesta nada a nadie."""
-    _alguno_con_stock = any(f.get("Libre", f.get("Stock")) not in (None, "") for f in filas)
+    _alguno_con_stock = alguno_trae_stock(filas)
     for f in filas[:tope]:
-        _stock = f.get("Libre", f.get("Stock"))
-        if not _alguno_con_stock:
-            _semaforo = ""
-        elif _stock is None or _stock == "":
-            _semaforo = "⚪ stock s/d"
-        elif _stock > 0:
-            _semaforo = f"🟢 **{miles(_stock, 0)}** en stock".replace(",", ".")
-        else:
-            _semaforo = "🔴 sin stock"
+        _semaforo = semaforo_del_stock(f) if _alguno_con_stock else ""
         _precio = formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio"
         # Sin sesión, sin el análisis ni dónde está en el depósito: igual que en la tabla (ver
         # COLUMNAS_DEL_NEGOCIO).

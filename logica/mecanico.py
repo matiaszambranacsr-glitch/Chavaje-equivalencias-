@@ -2094,9 +2094,14 @@ def crear_cuentas_de_una_vez(texto):
     return {"creadas": len(nuevas), "ya_estaban": ya_estaban, "con_problemas": con_problemas}
 
 
-def renglon_del_portal(fila, marcas_sin_precio):
+def renglon_del_portal(fila, marcas_sin_precio, con_stock=False):
     """Lo que el taller lee de un resultado en su portal, y si lo puede sumar a su presupuesto:
-    (texto, se puede sumar).
+    (texto, se puede sumar). El texto va listo para st.markdown: una descripción con «*» o «_»
+    —«JUNTA 1_8 *REF*»— salía en cursiva o se comía los guiones.
+
+    Con con_stock, al final va si hay («🟢 **5** en stock», «🔴 sin stock»), igual que en el
+    Buscador que ve cualquiera sin contraseña: el taller armaba el presupuesto sin saber si el
+    repuesto estaba, y se enteraba en el mostrador.
 
     El precio es el que se le dice a un cliente (ver precio_para_el_cliente()): la lista que
     está en otra escala —TARANTO, hasta que se le cargue el coeficiente, cuesta 0,07 veces lo
@@ -2106,8 +2111,35 @@ def renglon_del_portal(fila, marcas_sin_precio):
     en el portal va lo mismo que en la cotización."""
     precio = precio_para_el_cliente(fila, marcas_sin_precio) or "s/precio"
     a_confirmar = bool(fila.get("Precio")) and fila.get("Marca") in marcas_sin_precio
-    return (f"{fila['Marca']} - {fila['Codigo']} — {fila.get('Descripcion') or ''} ({precio})",
-            not a_confirmar)
+    texto = (f"{texto_para_markdown(fila['Marca'])} - {texto_para_markdown(fila['Codigo'])} — "
+             f"{texto_para_markdown(fila.get('Descripcion') or '')} ({precio})")
+    if con_stock:
+        texto += " · " + semaforo_del_stock(fila)
+    return texto, not a_confirmar
+
+
+# Cuántos resultados muestra el portal. Con más, se le dice al taller que afine la búsqueda.
+RESULTADOS_DEL_PORTAL = 20
+
+
+def resultados_para_el_portal(filas, marcas_sin_precio):
+    """Los resultados que el taller ve, de a RESULTADOS_DEL_PORTAL: (los que se muestran,
+    cuántos «a confirmar» quedaron sin mostrar).
+
+    Si entran todos, van como salieron. Si no entran, PRIMERO LOS QUE PUEDE PRESUPUESTAR: con
+    la base real, «junta tapa valvulas» trae 200 y los primeros 20 eran todos de TARANTO
+    —«precio a confirmar», que no se suma—: el taller veía veinte renglones con el botón
+    apagado y ninguno de los que sí podía pasarle a su cliente. Dentro de cada grupo queda el
+    orden de la búsqueda."""
+    if len(filas) <= RESULTADOS_DEL_PORTAL:
+        return list(filas), 0
+
+    def _a_confirmar(fila):
+        return bool(fila.get("Precio")) and fila.get("Marca") in marcas_sin_precio
+    ordenadas = sorted(filas, key=_a_confirmar)
+    a_la_vista = ordenadas[:RESULTADOS_DEL_PORTAL]
+    return a_la_vista, (sum(1 for f in filas if _a_confirmar(f))
+                        - sum(1 for f in a_la_vista if _a_confirmar(f)))
 
 
 def mostrar_portal_mecanico():
@@ -2146,9 +2178,13 @@ def mostrar_portal_mecanico():
             # un teléfono con el portal). Ahí van con las palabras; en la computadora, donde la
             # columna es angosta, el dibujo con su globito.
             _en_el_telefono = es_celular()
-            for fila in resultados_mec[:20]:
+            # Si ninguna lista de lo encontrado trae stock, no se dice nada en cada renglón.
+            _a_la_vista_mec, _a_confirmar_mec = resultados_para_el_portal(resultados_mec,
+                                                                          _sin_precio_mec)
+            _con_stock_mec = alguno_trae_stock(_a_la_vista_mec)
+            for fila in _a_la_vista_mec:
                 colm1, colm2, colm3 = st.columns([3, 1, 1])
-                _texto_mec, _se_suma = renglon_del_portal(fila, _sin_precio_mec)
+                _texto_mec, _se_suma = renglon_del_portal(fila, _sin_precio_mec, _con_stock_mec)
                 colm1.write(_texto_mec)
                 cantidad_mec = colm2.number_input("Cant.", min_value=1, value=1, step=1,
                                                     key=f"cant_mec_{fila['ID']}", label_visibility="collapsed")
@@ -2163,6 +2199,12 @@ def mostrar_portal_mecanico():
                         "precio": float(fila.get("Precio") or 0), "cantidad": int(cantidad_mec)
                     })
                     st.rerun()
+            if len(resultados_mec) > len(_a_la_vista_mec):
+                st.caption(
+                    f"Se ven {len(_a_la_vista_mec)} de {miles(len(resultados_mec))}: sumale el "
+                    "auto o el motor para afinar."
+                    + (f" Hay {miles(_a_confirmar_mec)} más con el precio a confirmar: "
+                       "consultalos en el mostrador." if _a_confirmar_mec else ""))
         else:
             st.caption("Sin resultados.")
 

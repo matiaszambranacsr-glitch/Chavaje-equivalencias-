@@ -7177,6 +7177,27 @@ inventarlo dejaría números falsos—. Dónde se carga cada uno (el asistente l
   tengo el certificado: armarlo paso a paso».
 - **La aplicación de Mercado Libre**: se crea con la cuenta de Mercado Libre del dueño.
 
+### 🔧 El portal del taller: primero lo que puede presupuestar, y si hay
+
+Salió de recorrer el portal en un teléfono simulado con la base real (15/11/2026):
+
+- **Primero lo que se puede sumar.** El portal muestra 20 resultados, y los de la lista en otra
+  escala salen «precio a confirmar», con el botón apagado. Buscando «junta tapa valvulas» (200
+  resultados), **los 20 que veía el taller eran todos de TARANTO**: no podía sumar ninguno, y
+  los que sí podía pasarle a su cliente quedaban afuera del corte. Con «reten», 2 de 20. Ahora,
+  cuando no entran todos, van primero los que se pueden presupuestar, en el orden de la búsqueda
+  (`resultados_para_el_portal()`): 20 de 20 en los dos casos. Abajo dice cuántos se ven de
+  cuántos, y cuántos más hay «a confirmar» para consultar en el mostrador. Si entran todos, van
+  como salieron.
+- **Si hay.** Cada renglón termina con «🟢 5 en stock» o «🔴 sin stock», lo mismo que ve
+  cualquiera en el Buscador sin contraseña (`semaforo_del_stock()`, una sola para los dos). El
+  taller armaba el presupuesto sin saber si el repuesto estaba. **En la base real todavía no se
+  ve**: ningún producto tiene stock cargado, y si nada de lo encontrado lo trae no se dice nada.
+- **Botones que dicen qué hacen.** En el teléfono las columnas se apilan y «➕» y «🗑️» ocupaban
+  el ancho de la pantalla, solos: ahora «➕ Sumar al presupuesto» y «🗑️ Quitar».
+- **La descripción, tal cual.** Una con «*» o «_» —«JUNTA 1_8 *REF*»— salía en cursiva o se
+  comía los guiones: va escapada.
+
 ### 🖨️ El ticket de 80 mm
 
 `pdf_de_ticket()` (en `logica/ventas.py`) arma un PDF de 80 mm de ancho y **del alto de lo

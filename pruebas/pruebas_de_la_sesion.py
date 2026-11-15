@@ -399,6 +399,29 @@ def probar():
     esperar("sin precio no hay nada que confirmar: se suma en cero, como siempre",
             ns["renglon_del_portal"]({**_fila_cara, "Precio": 0}, {"PORTAL OTRA ESCALA"}),
             ("PORTAL OTRA ESCALA - JT100 — JUNTA TAPA (s/precio)", True))
+    # Y SI HAY: el taller armaba el presupuesto sin saber si el repuesto estaba. Lo mismo que
+    # ve cualquiera en el Buscador: lo libre si la fila lo trae, y la descripción con signos
+    # de markdown, escapada.
+    esperar("el renglón del portal dice si hay",
+            [ns["renglon_del_portal"]({**_fila_cara, **_stock}, set(), True)[0].split(" · ")[-1]
+             for _stock in ({"Stock": 3}, {"Stock": 0}, {"Stock": 5, "Libre": 2}, {"Stock": None})],
+            ["🟢 **3** en stock", "🔴 sin stock", "🟢 **2** en stock", "⚪ stock s/d"])
+    # Con más resultados de los que entran, primero los que se pueden presupuestar: con la base
+    # real, los 20 que se veían de «junta tapa valvulas» eran todos «precio a confirmar».
+    _muchos = ([{"Codigo": f"T{n}", "Marca": "PORTAL OTRA ESCALA", "Precio": 100} for n in range(25)]
+               + [{"Codigo": f"B{n}", "Marca": "BUENA", "Precio": 100} for n in range(6)]
+               + [{"Codigo": "S1", "Marca": "PORTAL OTRA ESCALA", "Precio": 0}])
+    _vista, _quedan = ns["resultados_para_el_portal"](_muchos, {"PORTAL OTRA ESCALA"})
+    esperar("portal: primero lo que se puede presupuestar, en su orden, y cuántos quedaron",
+            ([f["Codigo"] for f in _vista[:8]], len(_vista), _quedan),
+            (["B0", "B1", "B2", "B3", "B4", "B5", "S1", "T0"], 20, 12))
+    esperar("portal: si entran todos, van como salieron",
+            ([f["Codigo"] for f in ns["resultados_para_el_portal"](_muchos[20:], {"PORTAL OTRA ESCALA"})[0]][:3],
+             ns["resultados_para_el_portal"](_muchos[20:], {"PORTAL OTRA ESCALA"})[1]),
+            (["T20", "T21", "T22"], 0))
+    esperar("y no rompe el texto una descripción con signos",
+            ns["renglon_del_portal"]({**_fila_cara, "Descripcion": "JUNTA 1_8 *REF*"}, set())[0],
+            "PORTAL OTRA ESCALA - JT100 — JUNTA 1\\_8 \\*REF\\* ($1.505)")
     ns["c"].execute("INSERT INTO marcas (nombre, tipo) VALUES ('PORTAL OTRA ESCALA', 'PROVEEDOR')")
     _marca_portal = ns["c"].lastrowid
     ns["c"].execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
