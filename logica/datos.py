@@ -1658,6 +1658,15 @@ def _esquema_gestion(c):
         activo INTEGER DEFAULT 1,
         creado_en TEXT DEFAULT (datetime('now'))
     )""")
+    # CUÁNDO ENTRÓ CADA CUENTA POR ÚLTIMA VEZ, Y CUÁNTAS VECES. Desde que el Modo Mecánico es
+    # solo para clientes con cuenta (lo pidió el dueño, para que no lo use cualquiera), lo que
+    # sigue es saber qué clientes la usan: hasta acá la app no lo anotaba. En UTC, como todo lo
+    # que se guarda (ver «LA HORA DE ACÁ» en logica/base.py).
+    _cols_mecanicos = [f[1] for f in c.execute("PRAGMA table_info(mecanicos)").fetchall()]
+    if "ultimo_ingreso" not in _cols_mecanicos:
+        c.execute("ALTER TABLE mecanicos ADD COLUMN ultimo_ingreso TEXT")
+    if "ingresos" not in _cols_mecanicos:
+        c.execute("ALTER TABLE mecanicos ADD COLUMN ingresos INTEGER DEFAULT 0")
 
     # Presupuestos armados por mecánicos externos: repuestos elegidos + su propia mano de obra.
     c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_mecanico (

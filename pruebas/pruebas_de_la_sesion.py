@@ -12,6 +12,7 @@ Ver cerrar_sesion() y nivel_vigente_de_la_sesion() en logica/base.py.
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -460,6 +461,30 @@ def probar():
         st.session_state.update(_estado)
     esperar("quién ve el Modo Mecánico", _quien_lo_ve,
             {"invitado": False, "taller": True, "operador": True, "administrador": True})
+
+    # 4a''. QUÉ CLIENTES USAN SU CUENTA: desde que el Modo Mecánico es para clientes con cuenta,
+    # el administrador ve cuándo entró cada una por última vez y cuántas veces. Entrar con la
+    # contraseña mal no cuenta, y el que nunca entró figura vacío.
+    _cuenta_i = ns["crear_mecanico"]("Taller Que Entra", "clave-del-que-entra-1")
+    ns["crear_mecanico"]("Taller Que No Entra", "clave-del-que-no-entra-1")
+
+    def _ingresos():
+        return {m["Nombre"]: (m["Veces"], bool(m["Última vez que entró"]))
+                for m in ns["listar_mecanicos"]() if m["Nombre"].startswith("Taller Que")}
+    esperar("recién creadas, ninguna entró", _ingresos(),
+            {"Taller Que Entra": (0, False), "Taller Que No Entra": (0, False)})
+    for _clave_i, _veces in (("una-clave-que-no-es-1", 0), ("clave-del-que-entra-1", 1),
+                             ("clave-del-que-entra-1", 2)):
+        _sesion_i = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+        _sesion_i.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+        _sesion_i.run()
+        _entrar(_sesion_i, str(_cuenta_i), _clave_i)
+        esperar(f"entrando con «{_clave_i[:12]}…»: las veces que entró", _ingresos(),
+                {"Taller Que Entra": (_veces, _veces > 0), "Taller Que No Entra": (0, False)})
+    _ultima = next(m["Última vez que entró"] for m in ns["listar_mecanicos"]()
+                   if m["Nombre"] == "Taller Que Entra")
+    esperar("la última vez se lee como una fecha de acá (día/mes/año y hora)",
+            bool(re.fullmatch(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}", _ultima)), True)
 
     # 4a'. EL ORDEN DE LA BARRA: tres grupos de cuatro, con la rayita entre uno y otro para el
     # que tiene las doce; el invitado, el del depósito y el taller no tienen qué separar.

@@ -1250,9 +1250,12 @@ if pagina == PAGINAS[3]:
                              "contraseña.")
             mecanicos_actuales = listar_mecanicos()
             if mecanicos_actuales:
+                _con_portal = [m for m in mecanicos_actuales if m["Portal"]]
                 st.caption(f"{miles(len(mecanicos_actuales))} cuenta(s), "
-                           f"{miles(sum(1 for m in mecanicos_actuales if m['Portal']))} con portal. "
-                           "«ID» es el número de cuenta.")
+                           f"{miles(len(_con_portal))} con portal"
+                           + (f", {miles(sum(1 for m in _con_portal if m['Veces']))} que ya "
+                              "entraron" if _con_portal else "")
+                           + ". «ID» es el número de cuenta.")
                 st.dataframe(mecanicos_actuales, width="stretch", hide_index=True,
                              height=min(420, 38 * (len(mecanicos_actuales) + 1)))
 

@@ -7131,6 +7131,11 @@ lista de WhatsApp y esto). Ahora es un servicio para los clientes del negocio:
   «mi portal»). Al sumarle pantallas al taller, «¿qué hay de nuevo?» le hubiera contado las
   novedades internas del negocio: lo atajó la prueba que barre todas las preguntas como taller,
   antes de publicarse.
+- **Qué clientes usan su cuenta.** Si la idea es que lo usen los clientes y no cualquiera, lo
+  que sigue es saber cuáles lo usan, y la app no lo anotaba. Ahora cada ingreso de un taller
+  queda anotado (`anotar_ingreso_del_taller()`: cuándo, en UTC, y una vez más; con la
+  contraseña mal no cuenta, y nunca traba el ingreso), y la lista de cuentas de 🗂️ Administrar
+  → 👥 Usuarios muestra «Última vez que entró» y «Veces», y arriba cuántas ya entraron.
 - **Lo que hace falta del lado del negocio:** que los clientes tengan cuenta. En la base real
   todavía no hay ninguna: se crean en 🗂️ Administrar → 👥 Usuarios («🔧 Mecánicos externos:
   talleres, mayoristas y clientes con cuenta»), de a una o pegando muchas de Excel.

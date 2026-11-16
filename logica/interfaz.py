@@ -584,7 +584,8 @@ VERSION_DE_LO_NUEVO = "2026-11-16"
 LO_NUEVO = (
     ("🔒 El 🛠️ Modo Mecánico ya no se ve sin contraseña: es para tus clientes. Lo ve el personal "
      "y el taller o cliente que entra con su cuenta, al lado de su portal. Para que lo usen, "
-     "creales la cuenta (de a una, o pegando muchas de Excel).",
+     "creales la cuenta (de a una, o pegando muchas de Excel): ahí mismo ves cuál entró, "
+     "cuándo y cuántas veces.",
      "🗂️ Administrar → 👥 Usuarios"),
     ("🧭 La barra de arriba va en tres grupos, con una rayita entre uno y otro: el mostrador "
      "(Ventas, Caja, Depósito, Devoluciones), buscar (Buscador, Lista WhatsApp, Modo Mecánico, "

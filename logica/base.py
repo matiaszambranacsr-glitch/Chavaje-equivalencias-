@@ -1517,12 +1517,33 @@ def cambiar_password_mecanico(mecanico_id, nueva_password):
 
 
 def listar_mecanicos():
+    """Las cuentas de taller, mayorista o cliente, para el administrador. «Última vez que entró»
+    y «Veces» dicen cuáles usan su cuenta (ver anotar_ingreso_del_taller())."""
     c.execute("""SELECT id AS "ID", nombre AS "Nombre",
                  CASE WHEN activo=1 THEN 'Sí' ELSE 'No' END AS "Activo",
                  CASE WHEN password_hash <> '' THEN '🔑 Sí' ELSE '' END AS "Portal",
-                 date(creado_en, '-3 hours') AS "Creado"
+                 date(creado_en, '-3 hours') AS "Creado",
+                 ultimo_ingreso AS "Última vez que entró",
+                 COALESCE(ingresos, 0) AS "Veces"
                  FROM mecanicos ORDER BY nombre COLLATE NOCASE""")
-    return filas_a_listas(c)
+    filas = filas_a_listas(c)
+    for fila in filas:
+        # Guardada en UTC, se muestra en la hora de acá; el que nunca entró, vacío.
+        fila["Última vez que entró"] = (fecha_legible(fila["Última vez que entró"])
+                                        if fila["Última vez que entró"] else "")
+    return filas
+
+
+def anotar_ingreso_del_taller(mecanico_id):
+    """Deja anotado que esa cuenta entró recién: cuándo, y una vez más. Nunca traba el ingreso:
+    si la base está ocupada, entra igual y esa vez no queda anotada."""
+    try:
+        with db_lock:
+            c.execute("UPDATE mecanicos SET ultimo_ingreso = datetime('now'), "
+                      "ingresos = COALESCE(ingresos, 0) + 1 WHERE id = ?", (mecanico_id,))
+            conn.commit()
+    except sqlite3.Error as _err:
+        anotar_error("anotar_ingreso_del_taller", _err)
 
 
 def validar_password_mecanico(password, cuenta=None, nombre=None, probadas=None):
@@ -2010,6 +2031,7 @@ def mostrar_login_inicial():
             st.session_state.nivel_usuario = "mecanico"
             st.session_state.admin_nombre = nombre
             st.session_state.mecanico_id = c.fetchone()["id"]
+            anotar_ingreso_del_taller(st.session_state.mecanico_id)
             st.rerun()
         elif nivel:
             st.session_state.nivel_usuario = nivel
