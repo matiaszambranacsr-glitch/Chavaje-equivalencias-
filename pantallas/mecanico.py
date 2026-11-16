@@ -51,7 +51,8 @@ if pagina == PAGINAS[7]:
                     for _grupo in _reps_dtc:
                         with st.expander(f"{_grupo['pieza']} — {len(_grupo['productos'])} "
                                           f"en tu catálogo", key=f"exp_dtc_{codigo_buscar}_{_grupo['pieza']}"):
-                            st.dataframe(_grupo["productos"], width="stretch", hide_index=True)
+                            st.dataframe(filas_con_el_precio_para_el_cliente(
+                                _grupo["productos"]), width="stretch", hide_index=True)
                 elif _auto_dtc or _modelo_dtc:
                     st.caption("No encontré en tu catálogo ninguna de las piezas que nombra "
                                "ese código para ese auto. Probá sin el modelo.")
@@ -728,12 +729,34 @@ if pagina == PAGINAS[7]:
                     st.success(f"**{len(items)}** repuesto(s) para {resumen_filtro}")
 
                 if items:
-                    st.caption("👆 Tocá un código para ver todas sus equivalencias:")
+                    # EL TALLER CON CUENTA mira esta lista como un cliente: el precio de la
+                    # lista en otra escala sale «a confirmar» (ver precio_para_el_cliente()), el
+                    # código lo lleva a SU portal —no tiene Buscador— y cada renglón tiene el
+                    # «➕» que lo suma a su presupuesto (ver «DEL AUTO AL PRESUPUESTO»).
+                    _es_taller_v = st.session_state.get("nivel_usuario") == "mecanico"
+                    _fuera_v = marcas_con_precios_fuera_de_escala() if solo_mirar() else set()
+                    _no_se_venden_v = marcas_que_no_se_venden() if _es_taller_v else set()
+                    st.caption("👆 Tocá un código para buscarlo en tu portal, con sus marcas y "
+                               "precios, o «➕» para sumarlo a tu presupuesto:" if _es_taller_v
+                               else "👆 Tocá un código para ver todas sus equivalencias:")
                     for it in items[:30]:
-                        cvv1, cvv2 = st.columns([1.2, 3])
+                        if _es_taller_v:
+                            cvv1, cvv2, cvv3 = st.columns([1.2, 3, 0.9])
+                            _item_v = item_para_el_presupuesto(it, _fuera_v, _no_se_venden_v)
+                            cvv3.button(
+                                "➕ Sumar al presupuesto" if es_celular() else "➕",
+                                key=f"veh_mas_{it['ID']}", disabled=not _item_v,
+                                help=("Sumar a mi presupuesto" if _item_v else
+                                      "No se puede presupuestar desde acá (precio a confirmar, "
+                                      "o es un número de fábrica): consultalo en el mostrador."),
+                                on_click=poner_en_el_presupuesto, args=([_item_v],))
+                        else:
+                            cvv1, cvv2 = st.columns([1.2, 3])
                         cvv1.button(f"🔎 {it['Codigo']}", key=f"veh_{it['ID']}",
                                      on_click=cb_ver_equivalencias, args=(it["Codigo"],))
-                        precio_v = f"${miles(it['Precio'], 0)}" if it.get("Precio") else "s/precio"
+                        precio_v = ((precio_para_el_cliente(it, _fuera_v) if _fuera_v else
+                                     f"${miles(it['Precio'], 0)}") if it.get("Precio")
+                                    else "s/precio")
                         stock_v = it.get("Stock")
                         detalle = it.get("_aplicacion") or it.get("Descripcion") or ""
                         desde_a, hasta_a = extraer_anios(it["Descripcion"])

@@ -580,8 +580,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-16"
+VERSION_DE_LO_NUEVO = "2026-11-16b"
 LO_NUEVO = (
+    ("🚙 El taller que entra con su cuenta arma el presupuesto desde el auto: en el Modo "
+     "Mecánico → Repuestos por vehículo cada repuesto tiene su «➕», y el código lo lleva a su "
+     "portal. Ahí ve el precio como un cliente: la lista en otra escala sale «a confirmar» "
+     "(antes le mostraba TARANTO quince veces más barato).", "el portal de cada taller"),
     ("🔒 El 🛠️ Modo Mecánico ya no se ve sin contraseña: es para tus clientes. Lo ve el personal "
      "y el taller o cliente que entra con su cuenta, al lado de su portal. Para que lo usen, "
      "creales la cuenta (de a una, o pegando muchas de Excel): ahí mismo ves cuál entró, "

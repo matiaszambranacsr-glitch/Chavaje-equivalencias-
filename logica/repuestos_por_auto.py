@@ -548,10 +548,16 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
                              if version_de_la_fila(f.get("Descripcion")).get(_pregunta)
                              in (None, _elegida)]
         st.caption(f"Mostrando {len(filas)} de {len(r['del_catalogo'])}.")
-        st.dataframe(quitar_id(filas), width="stretch", hide_index=True)
+        # Al que no es del negocio, el precio como se le dice a un cliente (la lista en otra
+        # escala, «a confirmar»): en la tabla y en el Excel.
+        _a_la_vista = quitar_id(filas_con_el_precio_para_el_cliente(filas))
+        st.dataframe(_a_la_vista, width="stretch", hide_index=True)
+        # El taller, de acá a su presupuesto (ver «DEL AUTO AL PRESUPUESTO» en mecanico.py).
+        if st.session_state.get("nivel_usuario") == "mecanico":
+            elegir_para_el_presupuesto(filas, f"{clave}_al_presupuesto")
         st.download_button(
             "⬇️ Bajar estos códigos en Excel",
-            data=to_excel_bytes(quitar_id(filas)),
+            data=to_excel_bytes(_a_la_vista),
             file_name=f"repuestos_{marca}_{modelo or 'todos'}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{clave}_dl"

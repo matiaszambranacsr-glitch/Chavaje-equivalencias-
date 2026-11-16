@@ -7136,6 +7136,20 @@ lista de WhatsApp y esto). Ahora es un servicio para los clientes del negocio:
   queda anotado (`anotar_ingreso_del_taller()`: cuándo, en UTC, y una vez más; con la
   contraseña mal no cuenta, y nunca traba el ingreso), y la lista de cuentas de 🗂️ Administrar
   → 👥 Usuarios muestra «Última vez que entró» y «Veces», y arriba cuántas ya entraron.
+- **Del auto al presupuesto.** El taller ve en «🚙 Repuestos por vehículo» lo que le entra a
+  un auto, y para presupuestarlo tenía que anotar cada código, volver a su portal y buscarlos
+  de a uno. Ahora cada repuesto tiene su «➕» (`poner_en_el_presupuesto()`), y debajo de la
+  tabla del chasis se eligen varios de una vez (`elegir_para_el_presupuesto()`). Con la regla
+  de su portal (`item_para_el_presupuesto()`): lo de la lista en otra escala no se suma, lo
+  que no tiene precio tampoco, y los números de fábrica, que no se venden, tampoco. Tocar el
+  código lo lleva a su portal con eso buscado: para el taller ese botón no hacía nada a la
+  vista, porque dejaba la búsqueda hecha en el Buscador, que él no tiene.
+- **El precio, como a un cliente.** Esas listas le mostraban el número crudo: con la base
+  real, para el Gol, 16 repuestos de TARANTO a $745 —la lista que cuesta 0,07 veces lo que sus
+  equivalentes—. El dueño ya había decidido que al cliente ese número no se le muestra; faltaban
+  estas tablas. Ahora, para quien no es del negocio, salen «precio a confirmar»
+  (`filas_con_el_precio_para_el_cliente()`): en la lista, en la tabla del chasis, en su Excel y
+  en los repuestos de un código de falla. El personal sigue viendo el número.
 - **Lo que hace falta del lado del negocio:** que los clientes tengan cuenta. En la base real
   todavía no hay ninguna: se crean en 🗂️ Administrar → 👥 Usuarios («🔧 Mecánicos externos:
   talleres, mayoristas y clientes con cuenta»), de a una o pegando muchas de Excel.

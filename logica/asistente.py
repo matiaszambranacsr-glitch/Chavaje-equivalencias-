@@ -807,9 +807,11 @@ COMO_HAGO_DEL_ASISTENTE = (
     ("portal_presupuesto", "Armar un presupuesto para mi cliente",
      "presupuesto cotizacion cotizar armar cliente mano obra sumar agregar cantidad pdf "
      "whatsapp mandar enviar guardar total",
-     "Buscá cada repuesto, poné la cantidad y sumalo con «➕». Abajo, en «📋 Presupuesto "
-     "actual», agregá el nombre del cliente y tu mano de obra: se guarda con «💾 Guardar "
-     "presupuesto» y se manda con «📄 PDF» o «📲 WhatsApp».",
+     "Buscá cada repuesto, poné la cantidad y sumalo con «➕». Si no sabés el código, andá "
+     "al 🛠️ Modo Mecánico → 🚙 Repuestos por vehículo, elegí el auto y sumá desde ahí con el "
+     "«➕» de cada repuesto. Abajo, en «📋 Presupuesto actual», agregá el nombre del cliente "
+     "y tu mano de obra: se guarda con «💾 Guardar presupuesto» y se manda con «📄 PDF» o "
+     "«📲 WhatsApp».",
      None, "taller"),
     ("portal_cuenta", "Ver cuánto debo (mi cuenta corriente)",
      "deuda saldo cuenta corriente vencido disponible limite credito movimientos pagar "

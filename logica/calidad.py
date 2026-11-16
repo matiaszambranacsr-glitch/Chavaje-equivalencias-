@@ -802,6 +802,14 @@ def cb_ver_equivalencias(codigo_raw):
     """Callback para que cualquier código listado en pantalla sea clickeable: al tocarlo,
     busca sus equivalencias y las deja mostradas arriba, sin tener que copiar el código a mano
     y volver a buscarlo."""
+    # EL TALLER NO TIENE BUSCADOR: tiene su portal, que busca el código y muestra las marcas
+    # con su precio y el «➕» para sumarlo al presupuesto. Desde que el taller ve el Modo
+    # Mecánico, tocar un código en «🚙 Repuestos por vehículo» no hacía nada a la vista: lo
+    # dejaba buscado en una pantalla que él no tiene.
+    if st.session_state.get("nivel_usuario") == "mecanico":
+        st.session_state["_asis_para_el_portal"] = str(codigo_raw)[:60]
+        st.session_state["pagina_actual"] = PAGINA_DEL_PORTAL
+        return
     clean = sanitizar(codigo_raw)
     # Con las opciones elegidas en el buscador (qué tan lejos, sin vínculos flojos): antes se
     # buscaba con toda la cadena. Ver opciones_de_busqueda_actuales().

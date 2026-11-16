@@ -486,6 +486,81 @@ def probar():
     esperar("la última vez se lee como una fecha de acá (día/mes/año y hora)",
             bool(re.fullmatch(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}", _ultima)), True)
 
+    # 4c. DEL AUTO AL PRESUPUESTO DEL TALLER. En «🚙 Repuestos por vehículo» el taller ve lo que
+    # le entra a un auto; cada renglón tiene su «➕» que lo suma a su presupuesto, el código lo
+    # lleva a SU portal (no tiene Buscador), y el precio es el que se le dice a un cliente: la
+    # lista en otra escala, «precio a confirmar», y no se suma. Los números de fábrica, que no
+    # se venden, tampoco.
+    _f_ok = {"ID": 1, "Codigo": "AM100", "Marca": "BUENA", "Precio": 1500.0,
+             "Descripcion": "AMORTIGUADOR  DELANTERO\nGOL"}
+    _fuera_v = {"PORTAL OTRA ESCALA"}
+    esperar("el ítem que va al presupuesto, con la descripción en un renglón",
+            ns["item_para_el_presupuesto"](_f_ok, _fuera_v, {"OEM / FABRICA"}),
+            {"codigo": "AM100", "marca": "BUENA", "descripcion": "AMORTIGUADOR DELANTERO GOL",
+             "precio": 1500.0, "cantidad": 1})
+    esperar("no se presupuesta: otra escala, sin precio, número de fábrica, sin código",
+            [ns["item_para_el_presupuesto"]({**_f_ok, **_cambio}, _fuera_v, {"OEM / FABRICA"})
+             for _cambio in ({"Marca": "PORTAL OTRA ESCALA"}, {"Precio": 0},
+                             {"Marca": "OEM / FABRICA"}, {"Codigo": ""})], [None] * 4)
+    esperar("la tabla del chasis trae el código como «Código»: también",
+            ns["item_para_el_presupuesto"]({"Código": "X9", "Marca": "BUENA", "Precio": 10},
+                                           set())["codigo"], "X9")
+    _op = ns["repuestos_para_el_presupuesto"](
+        [_f_ok, {**_f_ok, "Marca": "PORTAL OTRA ESCALA"}, {**_f_ok, "Codigo": "AM200"}], _fuera_v)
+    esperar("lo que se ofrece para elegir: solo lo que se puede sumar, con su precio",
+            list(_op), ["BUENA AM100 — AMORTIGUADOR DELANTERO GOL ($1.500)",
+                        "BUENA AM200 — AMORTIGUADOR DELANTERO GOL ($1.500)"])
+    import streamlit as st
+    _estado_v = dict(st.session_state)
+    try:
+        st.session_state.clear()
+        st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "mecanico", "x"
+        st.session_state["elegidos_v"] = list(_op) + ["uno que no estaba en la lista"]
+        ns["sumar_lo_elegido_al_presupuesto"]("elegidos_v", _op)
+        ns["poner_en_el_presupuesto"]([_op["BUENA AM100 — AMORTIGUADOR DELANTERO GOL ($1.500)"]])
+        esperar("sumar lo elegido: va al presupuesto, lo repetido suma una unidad, y la lista "
+                "queda vacía",
+                ([(i["codigo"], i["cantidad"])
+                  for i in st.session_state["presupuesto_mecanico_items"]],
+                 st.session_state["elegidos_v"]), ([("AM100", 2), ("AM200", 1)], []))
+        esperar("y avisa dónde quedó",
+                [a for a in st.session_state.get("_avisos", []) if "Mi portal" in a[1]] != [], True)
+        # Para el taller la tabla dice «precio a confirmar»; en su escala, el precio.
+        _g_v = ns["filas_con_el_precio_para_el_cliente"].__globals__
+        _fuera_de_verdad = _g_v["marcas_con_precios_fuera_de_escala"]
+        _g_v["marcas_con_precios_fuera_de_escala"] = lambda: _fuera_v
+        try:
+            _tabla = [_f_ok, {**_f_ok, "Marca": "PORTAL OTRA ESCALA", "Precio": 745.0}]
+            esperar("al taller, el precio de la tabla como a un cliente",
+                    [f["Precio"] for f in ns["filas_con_el_precio_para_el_cliente"](_tabla)],
+                    ["$1.500", "precio a confirmar"])
+            esperar("si no hay ninguna de esas listas, la tabla va tal cual",
+                    ns["filas_con_el_precio_para_el_cliente"]([_f_ok])[0]["Precio"], 1500.0)
+            st.session_state["nivel_usuario"] = "operador"
+            esperar("al personal, el número",
+                    [f["Precio"] for f in ns["filas_con_el_precio_para_el_cliente"](_tabla)],
+                    [1500.0, 745.0])
+        finally:
+            _g_v["marcas_con_precios_fuera_de_escala"] = _fuera_de_verdad
+        # «🔎 código»: al taller lo lleva a su portal con el código buscado; al personal, no.
+        st.session_state.clear()
+        st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "mecanico", "x"
+        st.session_state["pagina_actual"] = mecanico
+        ns["cb_ver_equivalencias"]("AM100")
+        esperar("tocar un código, el taller: a su portal, con eso buscado",
+                (st.session_state.get("pagina_actual"),
+                 st.session_state.get("_asis_para_el_portal"),
+                 "ultima_busqueda_codigo" in st.session_state), (portal, "AM100", False))
+        st.session_state.clear()
+        st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "operador", "x"
+        ns["cb_ver_equivalencias"]("AM100")
+        esperar("y al personal le sigue buscando las equivalencias",
+                ("ultima_busqueda_codigo" in st.session_state,
+                 "_asis_para_el_portal" in st.session_state), (True, False))
+    finally:
+        st.session_state.clear()
+        st.session_state.update(_estado_v)
+
     # 4a'. EL ORDEN DE LA BARRA: tres grupos de cuatro, con la rayita entre uno y otro para el
     # que tiene las doce; el invitado, el del depósito y el taller no tienen qué separar.
     esperar("el orden es de las doce pantallas, cada una una vez",

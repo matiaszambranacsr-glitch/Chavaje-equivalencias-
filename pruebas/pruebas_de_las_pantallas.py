@@ -703,6 +703,39 @@ def probar():
         if _del_negocio or at.exception:
             fallas.append(f"taller, Modo Mecánico → {_solapa}: {_del_negocio} "
                           f"{[e.value[:120] for e in at.exception]}")
+    # DEL AUTO AL PRESUPUESTO: en «🚙 Repuestos por vehículo» cada repuesto tiene su «➕», que lo
+    # suma al presupuesto del taller, y tocar el código lo lleva a su portal con eso buscado
+    # (ver «DEL AUTO AL PRESUPUESTO» en logica/mecanico.py). Con la base chica de la prueba
+    # puede no haber ningún auto: se controla si la lista aparece (con --base, siempre).
+    at.session_state["pagina_actual"], at.session_state["sub_mec"] = (ns["PAGINAS"][7],
+                                                                      ns["SUB_MEC"][3])
+    at.run()
+    _codigos_v = [b for b in at.button if (b.key or "").startswith("veh_")
+                  and not b.key.startswith("veh_mas_")]
+    _mas_v = [b for b in at.button if (b.key or "").startswith("veh_mas_")]
+    if _codigos_v:
+        if len(_mas_v) != len(_codigos_v):
+            fallas.append(f"taller, repuestos por vehículo: {len(_codigos_v)} repuestos y "
+                          f"{len(_mas_v)} «➕»")
+        _se_puede_v = [b for b in _mas_v if not b.disabled]
+        if _se_puede_v:
+            _se_puede_v[0].click().run()
+            _presupuesto_v = at.session_state["presupuesto_mecanico_items"]
+            if len(_presupuesto_v) != 1 or not _presupuesto_v[0]["precio"]:
+                fallas.append(f"taller, «➕» en repuestos por vehículo: {_presupuesto_v}")
+            if not any("a tu presupuesto" in str(getattr(x, "value", ""))
+                       for x in list(at.success) + list(at.toast)):
+                fallas.append("taller, «➕»: no avisa que lo sumó")
+        [b for b in at.button if (b.key or "").startswith("veh_")
+         and not b.key.startswith("veh_mas_")][0].click().run()
+        if (at.radio(key="pagina_actual").value != ns["PAGINA_DEL_PORTAL"]
+                or not at.text_input(key="mec_busqueda").value or at.exception):
+            fallas.append("taller, tocar un código en repuestos por vehículo: no lo lleva a su "
+                          f"portal con el código buscado ({at.radio(key='pagina_actual').value}, "
+                          f"{[e.value[:80] for e in at.exception]})")
+        elif _se_puede_v and "Presupuesto actual (1 ítem(s))" not in " ".join(
+                m.value for m in at.markdown):
+            fallas.append("taller, en su portal no está lo que sumó desde el auto")
     tiempos.sort(reverse=True)
     if len(abiertos) < 5:
         fallas.append(f"se abrieron pocos desplegables perezosos: {sorted(abiertos)}")

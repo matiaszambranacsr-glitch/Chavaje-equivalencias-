@@ -3181,6 +3181,26 @@ def precio_para_el_cliente(fila, marcas_sin_precio):
     return f"${miles(fila['Precio'], 0)}"
 
 
+def filas_con_el_precio_para_el_cliente(filas):
+    """Las mismas filas para una TABLA que mira alguien que no es del negocio —el taller con su
+    cuenta, en el Modo Mecánico—: el «Precio» de la lista que está en otra escala sale «precio
+    a confirmar», como en su portal y en la cotización (ver precio_para_el_cliente()). Para el
+    personal, y si en esas filas no hay ninguna de esas listas, van tal cual.
+
+    «🚙 Repuestos por vehículo» mostraba el número crudo: con la base real, para el Gol, 16
+    repuestos de TARANTO a $745 —la lista que cuesta 0,07 veces lo que sus equivalentes—, a la
+    vista del taller que después viene a buscarlo a ese precio. El dueño ya había decidido que
+    al cliente ese número no se le muestra; faltaba esta tabla."""
+    if not solo_mirar():
+        return filas
+    fuera = marcas_con_precios_fuera_de_escala()
+    if not any(f.get("Precio") and f.get("Marca") in fuera for f in filas):
+        return filas
+    # Toda la columna pasa a texto: mezclar números y «precio a confirmar» rompe la tabla.
+    return [{**f, "Precio": precio_para_el_cliente(f, fuera)} if "Precio" in f else f
+            for f in filas]
+
+
 def texto_para_pagar(alias):
     """Los renglones del mensaje con cómo pagar, para el alias elegido (una fila de
     listar_alias_transferencia()). El link primero: en WhatsApp se toca y abre la página de

@@ -569,6 +569,7 @@ if st.session_state.get("nivel_usuario") == "mecanico":
     if pagina == PAGINA_DEL_PORTAL:
         mostrar_portal_mecanico()
     else:
+        mostrar_avisos_pendientes()        # «sumaste 3 a tu presupuesto»: el portal muestra los suyos
         try:
             exec(pantallas.codigo_de_la_pantalla("mecanico.py"), globals())
         except Exception as _err_de_la_pantalla:

@@ -2120,6 +2120,93 @@ def renglon_del_portal(fila, marcas_sin_precio, con_stock=False):
 
 # Cuántos resultados muestra el portal. Con más, se le dice al taller que afine la búsqueda.
 RESULTADOS_DEL_PORTAL = 20
+# Y cuántos ofrece para sumar al presupuesto desde el Modo Mecánico: con más, que filtre.
+REPUESTOS_PARA_ELEGIR_DE_UN_AUTO = 150
+
+
+# DEL AUTO AL PRESUPUESTO. El taller que entra con su cuenta tiene el Modo Mecánico al lado de
+# su portal: en «🚙 Repuestos por vehículo» ve lo que le entra a un auto, y para presupuestarlo
+# tenía que anotar cada código, volver a su portal y buscarlos de a uno. Ahora cada renglón
+# tiene su «➕», y debajo de la tabla del chasis se eligen varios de una vez. Con la regla de su
+# portal: lo de la lista en otra escala no se puede sumar (ver renglon_del_portal()), lo que no
+# tiene precio tampoco, y los números de fábrica, que no se venden, tampoco.
+def marcas_que_no_se_venden():
+    """Los nombres de las marcas que son números de fábrica: están para cruzar, no para vender."""
+    c.execute("SELECT nombre FROM marcas WHERE tipo = 'OEM'")
+    return {fila[0] for fila in c.fetchall()}
+
+
+def item_para_el_presupuesto(fila, marcas_sin_precio, no_se_venden=()):
+    """El repuesto de esa fila como va en el presupuesto del taller, o None si no se puede
+    presupuestar. La fila es de cualquiera de las listas de repuestos de un auto: el código
+    viene como «Código» en una y «Codigo» en la otra."""
+    codigo = fila.get("Código") or fila.get("Codigo")
+    if (not codigo or not fila.get("Precio") or fila.get("Marca") in marcas_sin_precio
+            or fila.get("Marca") in no_se_venden):
+        return None
+    return {"codigo": codigo, "marca": fila["Marca"],
+            "descripcion": " ".join(str(fila.get("Descripcion") or "").split()),
+            "precio": float(fila["Precio"]), "cantidad": 1}
+
+
+def poner_en_el_presupuesto(items):
+    """Suma esos repuestos al presupuesto del taller que está mirando: el que ya estaba, una
+    unidad más. Avisa cuántos, y dónde quedó. Para un on_click."""
+    presupuesto = st.session_state.setdefault("presupuesto_mecanico_items", [])
+    for nuevo in items:
+        ya = next((it for it in presupuesto if (it["codigo"], it["marca"])
+                   == (nuevo["codigo"], nuevo["marca"])), None)
+        if ya:
+            ya["cantidad"] += 1
+        else:
+            presupuesto.append(dict(nuevo))
+    if items:
+        avisar("success", f"➕ {miles(len(items))} repuesto(s) a tu presupuesto, que ya tiene "
+                          f"{miles(len(presupuesto))}. Está en {PAGINA_DEL_PORTAL}: ahí le ponés "
+                          "tu mano de obra y lo mandás.")
+
+
+def repuestos_para_el_presupuesto(filas, marcas_sin_precio, no_se_venden=()):
+    """{rótulo para elegir: el ítem como va en el presupuesto} de esas filas, las que se pueden
+    presupuestar (ver item_para_el_presupuesto()), hasta REPUESTOS_PARA_ELEGIR_DE_UN_AUTO."""
+    opciones = {}
+    for fila in filas:
+        item = item_para_el_presupuesto(fila, marcas_sin_precio, no_se_venden)
+        if not item:
+            continue
+        opciones.setdefault(f"{item['marca']} {item['codigo']} — {item['descripcion'][:60]} "
+                            f"(${miles(item['precio'], 0)})", item)
+        if len(opciones) >= REPUESTOS_PARA_ELEGIR_DE_UN_AUTO:
+            break
+    return opciones
+
+
+def sumar_lo_elegido_al_presupuesto(clave, opciones):
+    """Pasa al presupuesto del taller lo que eligió en la lista de `clave`, y la deja vacía. Va
+    como on_click: es cuando Streamlit deja vaciar el campo."""
+    elegidos = [opciones[rotulo] for rotulo in st.session_state.get(clave) or []
+                if rotulo in opciones]
+    st.session_state[clave] = []
+    poner_en_el_presupuesto(elegidos)
+
+
+def elegir_para_el_presupuesto(filas, clave):
+    """Debajo de la tabla de repuestos de un auto, para el taller: elegir varios y sumarlos."""
+    opciones = repuestos_para_el_presupuesto(filas, marcas_con_precios_fuera_de_escala(),
+                                             marcas_que_no_se_venden())
+    if not opciones:
+        return
+    st.multiselect(
+        "➕ Sumar a mi presupuesto:", list(opciones), key=clave,
+        placeholder="Elegí de la lista de arriba (escribí el código o una palabra)",
+        help="Lo que elijas va a tu presupuesto, en 🔧 Mi portal. Lo que tiene el precio a "
+             "confirmar no se puede sumar: consultalo en el mostrador."
+             + (f" Se ofrecen los primeros {REPUESTOS_PARA_ELEGIR_DE_UN_AUTO}: filtrá por "
+                "tipo de pieza para ver otros."
+                if len(opciones) >= REPUESTOS_PARA_ELEGIR_DE_UN_AUTO else ""))
+    st.button("➕ Sumar lo elegido a mi presupuesto", key=f"{clave}_sumar", type="primary",
+              disabled=not st.session_state.get(clave),
+              on_click=sumar_lo_elegido_al_presupuesto, args=(clave, opciones))
 
 
 def resultados_para_el_portal(filas, marcas_sin_precio):
