@@ -384,6 +384,101 @@ def probar():
     esperar("ni las pestañas del negocio", [b.label for b in at.button if "Administrar" in b.label], [])
     esperar("sin errores", [e.value for e in at.exception], [])
 
+    # 4a. EL MODO MECÁNICO ES PARA CLIENTES CON CUENTA. Lo pidió el dueño: «si no ponés la
+    # contraseña, la parte de los mecánicos no se tiene que ver, porque si no cualquiera se mete
+    # en la página y la usa sin ser cliente nuestro». Sin contraseña no está en la barra ni se
+    # llega poniéndolo a mano; el taller con cuenta lo tiene al lado de su portal, y lo ve como
+    # lo veía el invitado: mira, no toca.
+    mecanico, portal = ns["PAGINAS"][7], ns["PAGINA_DEL_PORTAL"]
+    esperar("sin contraseña se ven el Buscador y la lista de WhatsApp",
+            ns["PAGINAS_ABIERTAS"], ["🔍 Buscador", "📋 Lista WhatsApp"])
+    esperar("la barra del taller: su portal y el Modo Mecánico",
+            (at.radio(key="pagina_actual").options, at.radio(key="pagina_actual").value),
+            ([portal, mecanico], portal))
+    at.radio(key="pagina_actual").set_value(mecanico).run()
+    esperar("el taller entra al Modo Mecánico, con sus solapas",
+            (at.radio(key="sub_mec").options, [e.value for e in at.exception],
+             "Portal de mecánico" in " ".join(m.value for m in at.markdown)),
+            (ns["SUB_MEC"], [], False))
+    esperar("y ahí mira, no toca",
+            [b.label for b in at.button if "Guardar" in b.label or "Enseñar" in b.label], [])
+    at.radio(key="pagina_actual").set_value(portal).run()
+    esperar("y vuelve a su portal",
+            "Portal de mecánico" in " ".join(m.value for m in at.markdown), True)
+    # El que no entró: ni en la barra, ni poniéndolo a mano en la sesión, ni con el candado.
+    invitado = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+    invitado.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+    invitado.run()
+    esperar("sin contraseña, la barra no tiene el Modo Mecánico",
+            invitado.radio(key="pagina_actual").options, ns["PAGINAS_ABIERTAS"])
+    # En una sesión nueva, con eso ya puesto: AppTest no deja poner a mano un valor que la
+    # barra no ofrece (como un link viejo, o una sesión que quedó de antes del cambio).
+    invitado = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+    invitado.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+    invitado.session_state["pagina_actual"] = mecanico
+    invitado.session_state["sub_mec"] = ns["SUB_MEC"][0]
+    invitado.run()
+    esperar("puesto a mano en la sesión, vuelve al Buscador y no dibuja nada de eso",
+            (invitado.radio(key="pagina_actual").value,
+             [r.key for r in invitado.radio if r.key == "sub_mec"],
+             [e.value for e in invitado.exception]), ("🔍 Buscador", [], []))
+    esperar("y «🔑 Ingresar» le dice al cliente dónde quedó",
+            any("¿Sos taller o cliente?" in x.value and "Modo Mecánico" in x.value
+                for x in invitado.caption), True)
+    # Y EL CANDADO DE LA PANTALLA, por si se llega de otra forma: se le pone a mano en la barra
+    # (como si un cambio futuro la volviera a ofrecer) y la pantalla igual no se dibuja.
+    ns["PAGINAS_ABIERTAS"].append(mecanico)
+    try:
+        colado = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+        colado.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+        colado.session_state["pagina_actual"] = mecanico
+        colado.run()
+        esperar("llegando igual sin cuenta, la pantalla dice que es para clientes y corta",
+                (colado.radio(key="pagina_actual").value,
+                 # El cartel muestra el candado del texto como su ícono: se mira lo que sigue.
+                 len([i for i in colado.info
+                      if i.value and i.value in ns["TEXTO_MODO_MECANICO_CERRADO"]
+                      and "es para los clientes del negocio" in i.value]),
+                 [r.key for r in colado.radio if r.key == "sub_mec"],
+                 [e.value for e in colado.exception]),
+                (mecanico, 1, [], []))
+    finally:
+        ns["PAGINAS_ABIERTAS"].remove(mecanico)
+    # El candado de la función, que es el que usa la pantalla: quién lo ve.
+    import streamlit as st
+    _estado = dict(st.session_state)
+    try:
+        _quien_lo_ve = {}
+        for _quien, _nivel in (("invitado", None), ("taller", "mecanico"),
+                               ("operador", "operador"), ("administrador", "admin")):
+            st.session_state.clear()
+            if _nivel:
+                st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = _nivel, "x"
+            _quien_lo_ve[_quien] = ns["puede_ver_el_modo_mecanico"]()
+    finally:
+        st.session_state.clear()
+        st.session_state.update(_estado)
+    esperar("quién ve el Modo Mecánico", _quien_lo_ve,
+            {"invitado": False, "taller": True, "operador": True, "administrador": True})
+
+    # 4a'. EL ORDEN DE LA BARRA: tres grupos de cuatro, con la rayita entre uno y otro para el
+    # que tiene las doce; el invitado, el del depósito y el taller no tienen qué separar.
+    esperar("el orden es de las doce pantallas, cada una una vez",
+            (sorted(ns["ORDEN_DE_LAS_PAGINAS"]), [len(g) for g in ns["GRUPOS_DE_LA_BARRA"]]),
+            (sorted(ns["PAGINAS"]), [4, 4, 4]))
+    esperar("ventas y depósito primero, y la configuración al final",
+            (ns["ORDEN_DE_LAS_PAGINAS"][:4], ns["ORDEN_DE_LAS_PAGINAS"][-1]),
+            (["🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ Devoluciones"], "🗂️ Administrar"))
+    esperar("dónde va la rayita, para cada barra",
+            [ns["cortes_de_la_barra"](b) for b in (
+                ns["ORDEN_DE_LAS_PAGINAS"], ns["PAGINAS_ABIERTAS"], ns["PAGINAS_DEL_DEPOSITO"],
+                ns["PAGINAS_DEL_TALLER"])], [[4, 8], [], [], []])
+    _rayitas = ns["rayitas_de_la_barra"](ns["ORDEN_DE_LAS_PAGINAS"])
+    esperar("la rayita va después de la cuarta y de la octava",
+            (":nth-child(4)" in _rayitas, ":nth-child(8)::after" in _rayitas,
+             ":nth-child(12)" in _rayitas, ns["rayitas_de_la_barra"](ns["PAGINAS_ABIERTAS"])),
+            (True, True, False, ""))
+
     # 4b. EN EL PORTAL, EL PRECIO ES EL QUE SE LE DICE A UN CLIENTE: la lista que está en otra
     # escala sale «precio a confirmar» y no se puede sumar al presupuesto (ver
     # renglon_del_portal()). Antes mostraba el número tal cual —TARANTO, quince veces más

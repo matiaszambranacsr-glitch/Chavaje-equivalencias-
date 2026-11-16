@@ -455,13 +455,6 @@ with _barra_superior:
             if not _VISTA_AL_PIE:
                 selector_de_vista(st)
 
-if st.session_state.get("nivel_usuario") == "mecanico":
-    # El taller también tiene al asistente, para lo de su portal y nada más (ver «EL ASISTENTE:
-    # QUÉ PUEDE Y QUÉ NO» en logica/asistente.py). Antes que el portal, por si el portal corta.
-    mostrar_el_asistente()
-    mostrar_portal_mecanico()
-    st.stop()
-
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje
 
@@ -527,15 +520,18 @@ if es_operador_o_admin() and not _es_del_deposito and obtener_usuario_actual():
             st.toast(f"🛒 Quedó un presupuesto a medio armar ({len(_guardado['items'])} ítem(s), "
                      f"${miles(_guardado['total'], 0)}): recuperalo en el 🔍 Buscador.",
                      duration="long")
-# En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin sesión ve solo lo
-# abierto (ver PAGINAS_ABIERTAS) y arranca en el Buscador.
+# En grupos, con lo que más se usa primero (ver GRUPOS_DE_LA_BARRA). Quien entra sin sesión ve
+# solo lo abierto (ver PAGINAS_ABIERTAS) y arranca en el Buscador.
 # La cuenta es una sola, para esta barra y para el asistente: ver paginas_a_la_vista().
+# El taller o cliente que entró con su cuenta tiene su portal y el Modo Mecánico, y arranca en
+# su portal (ver PAGINAS_DEL_TALLER en logica/interfaz.py).
 _paginas_a_la_vista = paginas_a_la_vista(_es_del_deposito)
 if st.session_state.pop("_al_principio_de_la_barra", False):        # recién entró: ver
     st.session_state["pagina_actual"] = _paginas_a_la_vista[0]       # mostrar_login_inicial()
 if st.session_state.get("pagina_actual") not in _paginas_a_la_vista:
     st.session_state["pagina_actual"] = (
-        PAGINAS[0] if hay_claves_configuradas() and not es_operador_o_admin()
+        PAGINAS[0] if (PAGINAS[0] in _paginas_a_la_vista and hay_claves_configuradas()
+                       and not es_operador_o_admin())
         else _paginas_a_la_vista[0])
 recordar_lo_elegido_al_cambiar_de_pantalla()
 
@@ -547,7 +543,11 @@ recordar_lo_elegido_al_cambiar_de_pantalla()
 # un campo de texto adentro para filtrar, y en el celular eso abre el teclado cada vez que lo
 # tocás, que es molesto para algo que se usa todo el tiempo. Con radio es un toque y listo.
 # El CSS los muestra como pastillas, en un solo renglón: en el celular se deslizan de costado
-# (ver «La navegación principal» en logica/base.py).
+# (ver «La navegación principal» en logica/base.py). Entre un grupo y otro va una rayita: ver
+# rayitas_de_la_barra() en logica/interfaz.py.
+_rayitas = rayitas_de_la_barra(_paginas_a_la_vista)
+if _rayitas:
+    st.markdown(_rayitas, unsafe_allow_html=True)
 with st.container(key="nav_principal"):
     st.radio("Sección:", _paginas_a_la_vista, key="pagina_actual", horizontal=True,
              label_visibility="collapsed")
@@ -559,6 +559,21 @@ pagina = st.session_state["pagina_actual"]
 # dónde se ve lo decide el CSS, no este lugar (ver «LA BURBUJA DEL ASISTENTE» en
 # logica/asistente.py). Minimizada es un botón: no consulta nada.
 mostrar_el_asistente()
+
+# EL TALLER O CLIENTE QUE ENTRÓ CON SU CUENTA: su portal y el Modo Mecánico, y nada más de la
+# app. El Modo Mecánico lo ve como lo veía cualquiera antes de que el dueño lo pidiera solo para
+# clientes: mira, no toca, y lo del negocio —los clientes de cada auto, lo que la app aprendió—
+# no se le muestra (ver solo_mirar() en logica/base.py). Acá termina su pantalla: los avisos,
+# la salud y las demás pantallas de más abajo son del negocio.
+if st.session_state.get("nivel_usuario") == "mecanico":
+    if pagina == PAGINA_DEL_PORTAL:
+        mostrar_portal_mecanico()
+    else:
+        try:
+            exec(pantallas.codigo_de_la_pantalla("mecanico.py"), globals())
+        except Exception as _err_de_la_pantalla:
+            mostrar_error_inesperado(f"pantalla {pagina}", _err_de_la_pantalla, "MEC")
+    st.stop()
 
 # EL TÍTULO DE LA SECCIÓN: en la computadora la pantalla arranca diciendo dónde estás (en el
 # celular no: la barra ya marca la sección, y es un renglón menos para bajar). Para qué sirve

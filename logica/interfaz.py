@@ -114,20 +114,42 @@ def herramientas_que_coinciden(texto):
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
            "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones", "💵 Caja"]
-# EN QUÉ ORDEN SE VEN, por lo que más se usa: lo pidió el dueño («ventas y depósito son más
-# importantes que las equivalencias»). Es solo el orden de la barra: PAGINAS[n] sigue siendo
-# la misma pantalla en todo el código.
-ORDEN_DE_LAS_PAGINAS = ["🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ Devoluciones", "🔍 Buscador",
-                        "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico", "📊 Estadísticas",
-                        "🗂️ Administrar", "📁 Cargar Excel", "🔗 Vincular manual"]
+# EN QUÉ ORDEN SE VEN: EN TRES GRUPOS, con una rayita entre uno y otro (ver
+# rayitas_de_la_barra()). Primero lo que más se usa, que lo pidió el dueño («ventas y depósito
+# son más importantes que las equivalencias»), y después pidió «mejorar el orden»: eran doce
+# pastillas en fila, sin nada que dijera cuáles iban juntas, y las de la trastienda estaban
+# mezcladas (Estadísticas, Administrar, Cargar Excel, Vincular manual).
+#   · el mostrador: vender, cobrar, buscar en el depósito y devolver;
+#   · buscar y presupuestar: el Buscador, la lista para WhatsApp, el Modo Mecánico y los autos
+#     de los clientes (el Modo Mecánico al lado de la lista: son las dos de consulta);
+#   · la trastienda: los números, cargar listas, vincular, y al final la configuración, que es
+#     donde uno la busca en cualquier programa.
+# Es solo el orden de la barra: PAGINAS[n] sigue siendo la misma pantalla en todo el código.
+GRUPOS_DE_LA_BARRA = (
+    ("🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ Devoluciones"),
+    ("🔍 Buscador", "📋 Lista WhatsApp", "🛠️ Modo Mecánico", "🚗 Vehículos"),
+    ("📊 Estadísticas", "📁 Cargar Excel", "🔗 Vincular manual", "🗂️ Administrar"),
+)
+ORDEN_DE_LAS_PAGINAS = [pagina for grupo in GRUPOS_DE_LA_BARRA for pagina in grupo]
 # Lo único que ven los «del depósito» (ver es_del_deposito()): entran directo al depósito, sin
 # el buscador, las estadísticas ni los avisos de administración en el medio.
 PAGINAS_DEL_DEPOSITO = [PAGINAS[8], PAGINAS[10]]
-# Lo único que ve quien entra SIN SESIÓN (un cliente o un taller con el link): el Buscador, la
-# lista de WhatsApp y el Modo Mecánico, que se pueden mirar sin contraseña (ver «EL INVITADO
-# MIRA, NO TOCA» en logica/base.py). Las demás secciones aparecen al entrar: antes estaban todas
-# en la barra y cada una pedía la contraseña, y al cliente lo mareaban. Lo pidió el dueño.
-PAGINAS_ABIERTAS = [PAGINAS[0], PAGINAS[5], PAGINAS[7]]
+# Lo único que ve quien entra SIN SESIÓN (cualquiera con el link): el Buscador y la lista de
+# WhatsApp, que se pueden mirar sin contraseña (ver «EL INVITADO MIRA, NO TOCA» en
+# logica/base.py). Las demás secciones aparecen al entrar: antes estaban todas en la barra y
+# cada una pedía la contraseña, y al cliente lo mareaban. Lo pidió el dueño.
+#
+# EL MODO MECÁNICO YA NO ES DE CUALQUIERA. Estaba acá, abierto, y el dueño pidió sacarlo: «si no
+# ponés la contraseña, la parte de los mecánicos no se tiene que ver, porque si no cualquiera se
+# mete en la página y la usa sin ser cliente nuestro». Identificar un auto por la patente, leer
+# un chasis o un código de falla es un servicio para los clientes del negocio: lo ven el
+# personal y el taller que entra con su cuenta (ver PAGINAS_DEL_TALLER), y nadie más.
+PAGINAS_ABIERTAS = [PAGINAS[0], PAGINAS[5]]
+# Lo que ve el taller o el cliente que entra con su cuenta: su portal —que no es una de las
+# PAGINAS: lo dibuja mostrar_portal_mecanico()— y el Modo Mecánico, como lo veía el invitado
+# (mira, no toca: ver solo_mirar()).
+PAGINA_DEL_PORTAL = "🔧 Mi portal"
+PAGINAS_DEL_TALLER = [PAGINA_DEL_PORTAL, PAGINAS[7]]
 
 # Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
 # que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
@@ -342,6 +364,73 @@ def miga_hasta(nombre):
     raise ValueError(f"miga_hasta(): no hay ninguna pantalla, solapa ni herramienta «{nombre}»")
 
 
+def cortes_de_la_barra(paginas):
+    """Después de cuáles pastillas (contando desde 1) va la rayita que separa un grupo de otro
+    en la barra de quien mira: ver GRUPOS_DE_LA_BARRA. Con pocas pastillas —el invitado, el
+    del depósito, el taller— no hay grupos que separar."""
+    if len(paginas) <= 4:
+        return []
+    grupo_de = {pagina: n for n, grupo in enumerate(GRUPOS_DE_LA_BARRA) for pagina in grupo}
+    return [n + 1 for n in range(len(paginas) - 1)
+            if grupo_de.get(paginas[n]) != grupo_de.get(paginas[n + 1])]
+
+
+# Hasta qué ancho de pantalla la barra de doce se parte en dos renglones. Más ancha, entran
+# las doce en uno (medido: hacen falta unos 1.350 px, y con otra letra, algo más).
+ANCHO_EN_QUE_ENTRA_LA_BARRA = 1500
+# Y desde qué ancho entran dos grupos (ocho pastillas) en un renglón: medido, unos 905 px.
+ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS = 940
+
+
+def rayitas_de_la_barra(paginas):
+    """El estilo que pone una rayita entre un grupo y otro de la barra de quien mira, o "" si
+    no hay nada que separar. La barra la dibuja app.py justo después.
+
+    La rayita va DESPUÉS de la última de cada grupo, no antes de la primera del que sigue:
+    cuando la barra no entra en un renglón, queda al final del de arriba y no como un palito
+    suelto al principio del de abajo.
+
+    Y SI NO ENTRAN LAS DOCE, EL RENGLÓN SE CORTA ENTRE GRUPOS: arriba el mostrador y la
+    búsqueda, abajo la trastienda. Sola, la barra cortaba donde se le acababa el lugar, y a
+    1.300 px «🗂️ Administrar» quedaba sola en el segundo renglón. El corte es un renglón vacío
+    que se mete entre las dos mitades (las de antes van primero, las de después al final): la
+    barra es un st.radio y no hay cómo ponerle un salto adentro. En una ventana angosta, un
+    grupo por renglón. Solo en la computadora: en el
+    celular va en un renglón que se desliza (ver «La navegación principal» en logica/base.py)."""
+    cortes = cortes_de_la_barra(paginas)
+    if not cortes:
+        return ""
+    barra = '.st-key-nav_principal [role="radiogroup"]'
+    cuales = ", ".join(f"{barra} > :nth-child({n})" for n in cortes)
+    despues = ", ".join(f"{barra} > :nth-child({n})::after" for n in cortes)
+    estilo = (f"{cuales} {{ margin-right: 17px !important; position: relative; }} "
+              f"{despues} {{ content: ''; position: absolute; right: -10px; top: 22%; "
+              "height: 56%; width: 1px; background: var(--border-strong); }")
+    if len(cortes) >= 2:
+        primero, ultimo = cortes[0], cortes[-1]
+        # Entre 940 px y donde entran todas: dos renglones, cortando antes de la trastienda.
+        estilo += (
+            f" @media (min-width: {ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS}px) and "
+            f"(max-width: {ANCHO_EN_QUE_ENTRA_LA_BARRA - 1}px) {{ "
+            f"{barra} > :nth-child(-n+{ultimo}) {{ order: 1; }} "
+            f"{barra}::after {{ content: ''; flex-basis: 100%; height: 0; order: 2; }} "
+            f"{barra} > :nth-child(n+{ultimo + 1}) {{ order: 3; }} "
+            # Al final del renglón la rayita no separa nada.
+            f"{barra} > :nth-child({ultimo})::after {{ display: none; }} }}")
+        # Más angosta (una ventana chica, una tableta): ni dos grupos entran en un renglón, y a
+        # 900 px «🚗 Vehículos» quedaba sola en el medio. Un grupo por renglón.
+        estilo += (
+            f" @media (min-width: 768px) and (max-width: {ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS - 1}px) {{ "
+            f"{barra} > :nth-child(-n+{primero}) {{ order: 1; }} "
+            f"{barra}::before {{ content: ''; flex-basis: 100%; height: 0; order: 2; }} "
+            f"{barra} > :nth-child(n+{primero + 1}) {{ order: 3; }} "
+            f"{barra}::after {{ content: ''; flex-basis: 100%; height: 0; order: 4; }} "
+            f"{barra} > :nth-child(n+{ultimo + 1}) {{ order: 5; }} "
+            f"{cuales} {{ margin-right: 0 !important; }} "
+            f"{despues} {{ display: none; }} }}")
+    return f"<style>{estilo}</style>"
+
+
 def ir_a_donde_dice_el_aviso(donde):
     """Lleva a donde dice una miga («📍 Estadísticas → 📌 Para pedir»). Va como on_click.
 
@@ -491,8 +580,16 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-15"
+VERSION_DE_LO_NUEVO = "2026-11-16"
 LO_NUEVO = (
+    ("🔒 El 🛠️ Modo Mecánico ya no se ve sin contraseña: es para tus clientes. Lo ve el personal "
+     "y el taller o cliente que entra con su cuenta, al lado de su portal. Para que lo usen, "
+     "creales la cuenta (de a una, o pegando muchas de Excel).",
+     "🗂️ Administrar → 👥 Usuarios"),
+    ("🧭 La barra de arriba va en tres grupos, con una rayita entre uno y otro: el mostrador "
+     "(Ventas, Caja, Depósito, Devoluciones), buscar (Buscador, Lista WhatsApp, Modo Mecánico, "
+     "Vehículos) y la trastienda (Estadísticas, Cargar Excel, Vincular manual, Administrar).",
+     "la barra de arriba"),
     ("🔧 En el portal del taller salen primero los repuestos que puede presupuestar (antes, "
      "buscando «junta tapa valvulas», los 20 que veía eran «precio a confirmar»), y cada uno "
      "dice si hay stock, cuando esté cargado.", "el portal de cada taller"),
@@ -514,7 +611,7 @@ LO_NUEVO = (
      "devolución?»), pedile que te lleve («llevame a la caja») o que busque un repuesto. "
      "Entiende sin acentos y con errores. No ve los datos ni las contraseñas, y lleva solo a "
      "las pantallas que cada uno ya tiene: el que entra sin contraseña lo tiene para el "
-     "Buscador, la lista de WhatsApp y el Modo Mecánico, y el taller para su portal, y nada "
+     "Buscador y la lista de WhatsApp, y el taller para su portal y el Modo Mecánico, y nada "
      "más. Se abre también con F1; «temas» lista todo lo que sabe.",
      "🤖 la burbuja de abajo a la izquierda"),
     ("🔥 Lo que más se busca en Mercado Libre en repuestos esta semana, contra tu catálogo: lo "

@@ -12,6 +12,7 @@ Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -675,6 +676,33 @@ def probar():
     [b for b in at.button if b.label == "Salir"][0].click().run()
     entrar("duenio", "clave-duenio-1")
     recorrer("administrador")
+
+    # EL TALLER O CLIENTE CON CUENTA: su portal y el Modo Mecánico (ver PAGINAS_DEL_TALLER), y
+    # nada más. El Modo Mecánico lo ve como lo veía el que entraba sin contraseña —mira, no
+    # toca— desde que el dueño lo pidió solo para clientes: acá se recorren sus siete solapas
+    # con la cuenta de un taller, que antes las recorría «sin contraseña».
+    _clave_taller = secrets.token_hex(8)
+    _cuenta_taller = ns["crear_mecanico"]("Taller De Las Pantallas", _clave_taller)
+    [b for b in at.button if b.label == "Salir"][0].click().run()
+    entrar(str(_cuenta_taller), _clave_taller)
+    if at.radio(key="pagina_actual").options != ns["PAGINAS_DEL_TALLER"]:
+        fallas.append(f"el taller, la barra: {at.radio(key='pagina_actual').options}")
+    if at.radio(key="pagina_actual").value != ns["PAGINA_DEL_PORTAL"]:
+        fallas.append(f"el taller no arranca en su portal: {at.radio(key='pagina_actual').value}")
+    recorrer("taller")
+    # Lo que en el Modo Mecánico es del negocio no se le muestra ni se le ofrece: ni el
+    # cliente de cada auto, ni lo que la app aprendió, ni cargar o corregir nada.
+    for _solapa in ns["SUB_MEC"]:
+        at.session_state["pagina_actual"], at.session_state["sub_mec"] = ns["PAGINAS"][7], _solapa
+        at.run()
+        _del_negocio = ([b.label for b in at.button
+                         if any(x in b.label for x in ("Guardar", "Anotar", "Enseñar", "Subir",
+                                                       "Borrar", "Corregir", "Agregar"))]
+                        + [m.value[:60] for m in at.markdown
+                           if "Lo que la app fue aprendiendo" in m.value])
+        if _del_negocio or at.exception:
+            fallas.append(f"taller, Modo Mecánico → {_solapa}: {_del_negocio} "
+                          f"{[e.value[:120] for e in at.exception]}")
     tiempos.sort(reverse=True)
     if len(abiertos) < 5:
         fallas.append(f"se abrieron pocos desplegables perezosos: {sorted(abiertos)}")

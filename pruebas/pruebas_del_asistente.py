@@ -199,7 +199,10 @@ def probar(L):
     empleado = {"visibles": todas, "pagina": "🧾 Ventas", "nivel": "operador"}
     invitado = {"visibles": abiertas, "pagina": "🔍 Buscador", "nivel": "invitado"}
     deposito = {"visibles": del_deposito, "pagina": "📦 Depósito", "nivel": "operador"}
-    taller_en_su_portal = {"visibles": [], "pagina": None, "nivel": "taller"}
+    # El taller o cliente con cuenta: su portal y el Modo Mecánico (ver PAGINAS_DEL_TALLER).
+    portal, del_taller = ns["PAGINA_DEL_PORTAL"], list(ns["PAGINAS_DEL_TALLER"])
+    taller_en_su_portal = {"visibles": del_taller, "pagina": portal, "nivel": "taller"}
+    taller_en_el_mecanico = {**taller_en_su_portal, "pagina": "🛠️ Modo Mecánico"}
     indice = ns["fichas_del_asistente"]()
     por_nombre = indice["por_nombre"]
 
@@ -207,7 +210,8 @@ def probar(L):
     clases = {}
     for ficha in indice["fichas"]:
         clases[ficha["tipo"]] = clases.get(ficha["tipo"], 0) + 1
-    esperar("conoce las doce pantallas", clases.get("pantalla"), len(ns["PAGINAS"]))
+    esperar("conoce las doce pantallas, y el portal del taller", clases.get("pantalla"),
+            len(ns["PAGINAS"]) + 1)
     esperar("conoce todas las solapas", clases.get("solapa"),
             sum(len(s) for s, _ in ns["SOLAPAS_DE_LA_PAGINA"].values()))
     esperar("conoce todas las herramientas de Mantenimiento", clases.get("herramienta"),
@@ -221,8 +225,10 @@ def probar(L):
         destino = ficha["destino"]
         if destino is None:
             continue
+        # El portal no es una de las PAGINAS, y es solo del taller.
         cierto(f"«{ficha['nombre']}» lleva a una pantalla que existe",
-               destino["pagina"] in ns["PAGINAS"], destino)
+               destino["pagina"] in ns["PAGINAS"]
+               or (destino == {"pagina": portal} and ficha["quien"] == "taller"), destino)
         if destino.get("solapa"):
             solapas = ns["SOLAPAS_DE_LA_PAGINA"].get(destino["pagina"], ((), ""))[0]
             cierto(f"«{ficha['nombre']}» lleva a una solapa de esa pantalla",
@@ -364,7 +370,10 @@ def probar(L):
     cierto("contesta en milisegundos", por_pregunta < 0.05, f"{por_pregunta * 1000:.1f} ms")
 
     # 3. A CADA UNO, LO SUYO. EL INVITADO TIENE ASISTENTE, PERO SOLO PARA LO QUE VE SIN
-    # CONTRASEÑA (lo pidió el dueño): el Buscador, la lista de WhatsApp y el Modo Mecánico.
+    # CONTRASEÑA (lo pidió el dueño): el Buscador y la lista de WhatsApp. El Modo Mecánico
+    # estaba, y el dueño lo pidió solo para clientes con cuenta: más abajo.
+    esperar("sin contraseña se ven el Buscador y la lista de WhatsApp, y nada más",
+            abiertas, ["🔍 Buscador", "📋 Lista WhatsApp"])
     # De lo demás, ni los pasos, ni los botones, ni el nombre de la pantalla: con qué sí lo
     # ayuda, y ejemplos de lo suyo.
     ejemplos_del_invitado = ns["ejemplos_del_asistente"](invitado)
@@ -397,20 +406,43 @@ def probar(L):
                             ("no encuentro un repuesto", "como:no_esta"),
                             ("quiero un presupuesto", "como:whatsapp"),
                             ("mandar una lista por wasap", "como:whatsapp"),
-                            ("codigo de falla del escaner", "como:dtc"),
-                            ("que auto es por la patente", "como:patente"),
                             ("buscar por medidas", "como:medidas"),
                             ("teclas", "como:teclas_de_todos"),
                             ("como entro a mi cuenta de taller", "como:entrar")):
         esperar(f"invitado, «{pregunta}»", responder(pregunta, invitado)["ficha"], ficha)
-    esperar("y lo lleva a lo abierto", responder("llevame al modo mecanico", invitado)["ir"],
-            "pantalla:🛠️ Modo Mecánico")
+    esperar("y lo lleva a lo abierto",
+            por_nombre[responder("llevame a la lista de whatsapp", invitado)["ir"]]["destino"],
+            {"pagina": "📋 Lista WhatsApp"})
+    # EL MODO MECÁNICO NO ES DE CUALQUIERA: «si no ponés la contraseña no se tiene que ver,
+    # porque si no cualquiera se mete y lo usa sin ser cliente nuestro» (el dueño). Al que
+    # pregunta sin entrar se le dice que es para clientes y cómo se entra —el que lo usaba tiene
+    # que saber dónde quedó—, sin los pasos y sin un botón que lleve.
+    for pregunta in ("codigo de falla del escaner", "que auto es por la patente",
+                     "llevame al modo mecanico", "modo mecanico", "pasar de libras a newton",
+                     "leer un chasis", "repuestos por vehiculo"):
+        r = responder(pregunta, invitado)
+        esperar(f"invitado, «{pregunta}»: no lleva, no explica",
+                (r["ir"], r["buscar"], r["ficha"]), (None, None, None))
+        cierto(f"invitado, «{pregunta}»: es para clientes, y cómo se entra",
+               r["texto"].startswith("🔒 Eso es del **🛠️ Modo Mecánico**")
+               and "clientes" in r["texto"] and "🔑 Ingresar" in r["texto"]
+               and all(p in r["texto"] for p in abiertas), r["texto"][:70])
+        esperar(f"invitado, «{pregunta}»: los botones son ejemplos de lo suyo",
+                [b for b in r["botones"] if b[1] != "preguntar"
+                 or b[2] not in ejemplos_del_invitado], [])
+    # Una patente o un código de falla sueltos, sin el Modo Mecánico: los ofrece buscar.
+    for suelto in ("AB123CD", "P0300"):
+        esperar(f"invitado, «{suelto}»: solo buscarlo",
+                [b[1:] for b in responder(suelto, invitado)["botones"]], [("buscar", suelto)])
     esperar("al empleado «no me aparece un código» le sigue contestando lo del negocio",
             responder("no me aparece un codigo", empleado)["ficha"], "como:no_encuentro")
     esperar("y las teclas, todas", responder("teclas", empleado)["ficha"], "como:teclas")
     # Le habla de lo suyo: el saludo, «qué podés hacer», «quién sos», «acá» y lo que no
     # entiende no nombran una sola pantalla del personal, ni un botón de adentro.
-    ocultas = [re.sub(r"^\W+", "", p) for p in ns["PAGINAS"] if p not in abiertas]
+    # El Modo Mecánico se le nombra a propósito, y solo para decirle que es para clientes: no
+    # es una pantalla de adentro del negocio (se controla aparte, abajo).
+    ocultas = [re.sub(r"^\W+", "", p) for p in ns["PAGINAS"]
+               if p not in abiertas and p not in del_taller]
     de_adentro = ocultas + ["cuentas corrientes", "devolución", "lista de precios", "backup",
                             "cobrar", "«💳", "«📒", "➕ Crear", "arqueo", "Usuarios"]
     todo_lo_que_pregunta = ([p for p, _ in ENTIENDE + LLEVA + BUSCA + NO_SE_DEJA]
@@ -438,16 +470,41 @@ def probar(L):
             nombradas = [x for x in de_adentro if re.search(
                 rf"(?<![a-záéíóúñ]){re.escape(x)}(?![a-záéíóúñ])", textos)]
             esperar(f"invitado, «{pregunta}»: no nombra lo de adentro", nombradas, [])
-    # EL TALLER, EN SU PORTAL: lo de su portal y nada del negocio. Todo lo que se pregunta en
-    # esta batería, preguntado por un taller, contesta con una ficha de su portal (o de todos,
-    # sin lugar), no lleva a ningún lado y no ofrece un botón de ir.
+            cierto(f"invitado, «{pregunta}»: del Modo Mecánico, solo que es para clientes",
+                   "Modo Mecánico" not in textos
+                   or r["texto"].startswith("🔒 Eso es del **🛠️ Modo Mecánico**"), textos[:80])
+    # EL TALLER O CLIENTE CON CUENTA: lo de su portal y el Modo Mecánico, y nada del negocio.
     for pregunta, ficha in (("como genero un codigo de retiro", "como:portal_codigo"),
                             ("cuanto debo", "como:portal_cuenta"),
                             ("armar un presupuesto", "como:portal_presupuesto"),
                             ("presupuestos viejos", "como:portal_anteriores"),
                             ("me olvide la contraseña", "como:portal_contrasena"),
-                            ("salir", "como:entrar")):
+                            ("salir", "como:entrar"),
+                            # El Modo Mecánico, desde que es para clientes con cuenta:
+                            ("que auto es por la patente", "como:patente"),
+                            ("codigo de falla del escaner", "como:dtc")):
         esperar(f"taller, «{pregunta}»", responder(pregunta, taller_en_su_portal)["ficha"], ficha)
+    esperar("al taller lo lleva al Modo Mecánico",
+            responder("llevame al modo mecanico", taller_en_su_portal)["ir"],
+            "pantalla:🛠️ Modo Mecánico")
+    esperar("un código de falla, al taller: primero qué significa",
+            responder("P0300", taller_en_su_portal)["botones"][0][1:],
+            ("ir", "solapa:📖 Códigos DTC"))
+    esperar("y una patente: primero el auto",
+            responder("AB123CD", taller_en_su_portal)["botones"][0][1:],
+            ("ir", "solapa:🔤 Por patente"))
+    # Estando en su portal no se le ofrece llevarlo a su portal; desde el Modo Mecánico, sí, y
+    # «volver» y «mi portal» lo traen.
+    esperar("en su portal, lo del portal va sin botón de ir",
+            responder("armar un presupuesto", taller_en_su_portal)["botones"], [])
+    esperar("desde el Modo Mecánico, con el botón que lo lleva a su portal",
+            responder("armar un presupuesto", taller_en_el_mecanico)["botones"],
+            [("➡️ Llevame a 🔧 Mi portal", "ir", "como:portal_presupuesto")])
+    esperar("«volver» lo trae a su portal",
+            responder("volver", {**taller_en_el_mecanico, "volver": portal})["ir"],
+            f"pantalla:{portal}")
+    esperar("y «mi portal» también",
+            responder("llevame a mi portal", taller_en_el_mecanico)["ir"], f"pantalla:{portal}")
     esperar("al taller le busca un repuesto",
             responder("buscar W712/75", taller_en_su_portal)["buscar"], "W712/75")
     esperar("y «¿cuánto sale…?» es buscarlo, para el taller",
@@ -457,20 +514,43 @@ def probar(L):
             "filtro de aire")
     esperar("«hay que pedir al proveedor» no es buscar nada",
             responder("hay que pedir al proveedor", empleado)["buscar"], None)
-    for pregunta in todo_lo_que_pregunta:
-        r = responder(pregunta, taller_en_su_portal)
-        ficha = por_nombre.get(r["ficha"] or "")
-        esperar(f"taller, «{pregunta}»: no lo lleva a ningún lado", r["ir"], None)
-        cierto(f"taller, «{pregunta}»: contesta con lo de su portal",
-               ficha is None or ficha["quien"] == "taller"
-               or (not ficha["quien"] and not ficha["destino"]), ficha and ficha["nombre"])
-        esperar(f"taller, «{pregunta}»: sin botones de ir",
-                [b for b in r["botones"] if b[1] == "ir"], [])
-        for boton_de_ver in [b for b in r["botones"] if b[1] == "ver"]:
-            de_boton = por_nombre[boton_de_ver[2]]
-            cierto(f"taller, «{pregunta}»: el botón «{boton_de_ver[0]}» es de su portal",
-                   de_boton["quien"] == "taller" or (not de_boton["quien"]
-                                                    and not de_boton["destino"]))
+
+    def del_taller_es(ficha):
+        """Lo que el taller puede: lo de su portal; lo de todos sin lugar; lo de todos en una
+        pantalla que tiene."""
+        return ficha["quien"] == "taller" or (not ficha["quien"] and (
+            not ficha["destino"] or ficha["destino"]["pagina"] in del_taller))
+    # Todo lo que se pregunta en esta batería, preguntado por un taller: contesta con lo suyo,
+    # y si lleva u ofrece llevar, es a su portal o al Modo Mecánico. Nunca a lo del negocio.
+    for donde_esta in (taller_en_su_portal, taller_en_el_mecanico):
+        for pregunta in todo_lo_que_pregunta:
+            r = responder(pregunta, donde_esta)
+            for cual in [r["ficha"], r["ir"]] + [b[2] for b in r["botones"]
+                                                 if b[1] in ("ir", "ver")]:
+                cierto(f"taller, «{pregunta}»: «{cual}» es de lo suyo",
+                       cual is None or del_taller_es(por_nombre[cual]), cual)
+            esperar(f"taller, «{pregunta}»: no nombra las pantallas del negocio",
+                    [x for x in ocultas if re.search(
+                        rf"(?<![a-záéíóúñ]){re.escape(x)}(?![a-záéíóúñ])",
+                        r["texto"] + " " + " ".join(b[0] for b in r["botones"]))]
+                    if not (por_nombre.get(r["ficha"] or "") or {}).get("tipo") == "ayuda"
+                    else [], [])
+    esperar("en su portal, ningún botón lo lleva a su portal",
+            [(p, b) for p in todo_lo_que_pregunta
+             for b in responder(p, taller_en_su_portal)["botones"]
+             if b[1] == "ir" and por_nombre[b[2]]["destino"] == {"pagina": portal}], [])
+    # Lo que en el Modo Mecánico es solo del personal (anotar una consulta, enseñarle al
+    # lector de chasis) no es del taller: mira, no toca.
+    for pregunta in ("que hay de nuevo", "novedades"):
+        cierto(f"taller, «{pregunta}»: las novedades del negocio no son para él",
+               "Lo último que se sumó" not in responder(pregunta, taller_en_su_portal)["texto"])
+    cierto("«qué puedo hacer acá», al taller: lo de su cuenta, y que lo lleva",
+           all(x in responder("que puedo hacer aca", taller_en_el_mecanico)["texto"]
+               for x in ("Con tu cuenta te ayudo con", "el Modo Mecánico", "«volver»")))
+    esperar("lo del personal adentro del Modo Mecánico no es del taller",
+            [f["nombre"] for f in indice["fichas"]
+             if f["destino"] and f["destino"]["pagina"] == "🛠️ Modo Mecánico" and f["quien"]
+             and ns["_asis_se_puede"](f, taller_en_su_portal)], [])
     # Y lo del portal es SOLO del taller: nadie más lo ve.
     for quien, contexto in (("empleado", empleado), ("invitado", invitado),
                             ("administrador", {**empleado, "nivel": "admin"})):
@@ -651,7 +731,7 @@ def probar(L):
                 "b W712 /b --")
         cierto("y no deja nada para el portal del taller",
                "_asis_para_el_portal" not in st.session_state)
-        # Con contraseñas: el invitado tiene tres pantallas, y a las demás no lo lleva.
+        # Con contraseñas: el invitado tiene dos pantallas, y a las demás no lo lleva.
         ns["crear_usuario"]("ana", "clave-de-ana-1", "admin")
         st.session_state.clear()
         st.session_state["pagina_actual"] = "🔍 Buscador"
@@ -663,21 +743,34 @@ def probar(L):
                not [k for k in st.session_state if str(k).startswith("exp_")])
         esperar("y se quedó donde estaba", st.session_state.get("pagina_actual"), "🔍 Buscador")
         cierto("sin tocar las solapas", "sub_admin" not in st.session_state)
-        esperar("al invitado sí lo lleva a lo abierto", llevar("solapa:🔤 Por patente"),
-                "🛠️ Modo Mecánico → 🔤 Por patente")
-        # El taller en su portal no tiene barra: no lo lleva a ningún lado. Buscar le escribe
-        # en la caja de búsqueda de SU portal, limpio, y no toca la navegación del negocio.
+        esperar("al invitado sí lo lleva a lo abierto", llevar("pantalla:📋 Lista WhatsApp"),
+                "📋 Lista WhatsApp")
+        st.session_state["pagina_actual"] = "🔍 Buscador"
+        for nombre in ("pantalla:🛠️ Modo Mecánico", "solapa:🔤 Por patente", "como:dtc"):
+            esperar(f"al invitado no lo lleva al Modo Mecánico («{nombre}»)", llevar(nombre), None)
+        esperar("y se quedó en el Buscador", st.session_state.get("pagina_actual"), "🔍 Buscador")
+        # El taller o cliente con cuenta: a su portal y al Modo Mecánico, y a nada del negocio.
+        # Buscar le escribe en la caja de búsqueda de SU portal, limpio, y lo deja ahí.
         st.session_state.clear()
         st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "mecanico", "x"
+        st.session_state["pagina_actual"] = portal
         for nombre in ("pantalla:🔍 Buscador", "pantalla:💵 Caja", "solapa:👥 Usuarios",
-                       "como:cierre", "como:portal_codigo"):
-            esperar(f"al taller en su portal no lo lleva a «{nombre}»", llevar(nombre), None)
+                       "como:cierre", "herramienta:🗑️ Papelera"):
+            esperar(f"al taller no lo lleva a «{nombre}»", llevar(nombre), None)
+        esperar("y se quedó en su portal", st.session_state.get("pagina_actual"), portal)
+        esperar("al taller sí lo lleva al Modo Mecánico", llevar("solapa:📖 Códigos DTC"),
+                "🛠️ Modo Mecánico → 📖 Códigos DTC")
+        esperar("y queda ahí, con de dónde vino",
+                (st.session_state.get("pagina_actual"), st.session_state.get("sub_mec"),
+                 st.session_state.get("_asis_volver")),
+                ("🛠️ Modo Mecánico", "📖 Códigos DTC", portal))
         esperar("al taller le busca en su portal", ns["buscar_con_el_asistente"]("<i>W712</i>"),
-                "«🔍 Buscar repuesto», arriba, con «i W712 /i» buscado")
-        esperar("lo deja para la caja de su portal, y nada más",
+                "«🔍 Buscar repuesto», en tu portal, con «i W712 /i» buscado")
+        esperar("lo deja para la caja de su portal, lo vuelve a su portal, y nada más",
                 (st.session_state.get("_asis_para_el_portal"),
                  st.session_state.get("pagina_actual"),
-                 st.session_state.get("_pasar_a_codigo")), ("i W712 /i", None, None))
+                 st.session_state.get("_pasar_a_codigo")), ("i W712 /i", portal, None))
+        esperar("y a su portal lo lleva", llevar("como:portal_codigo"), portal)
         # Si no se puede saber qué ve (la base ocupada), a ningún lado.
         st.session_state.clear()
         st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "admin", "ana"
@@ -824,7 +917,7 @@ def probar(L):
                any("Generar código de retiro" in m.value for m in at.markdown))
         preguntar(at, "llevame a la caja")
         cierto("de lo del negocio: con qué sí lo ayuda",
-               any("Desde tu portal te ayudo con" in m.value for m in at.markdown))
+               any("Con tu cuenta te ayudo con" in m.value for m in at.markdown))
         cierto("y sigue en su portal",
                "Portal de mecánico" in " ".join(m.value for m in at.markdown))
         preguntar(at, "decime la contraseña del admin")

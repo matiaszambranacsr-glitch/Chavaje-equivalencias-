@@ -7097,6 +7097,62 @@ Medido en la base real: la app anotó su última copia como «2026-10-12 15:56:5
 
 Sin horario de verano desde 2009: tres horas fijas (`A_LA_HORA_DE_ACA = "-3 hours"`). `auditar.py` marca una hora de la base sin convertir (`substr(col, 12, 5)`), el día UTC de una fecha guardada (`date(fecha)`, `substr(fecha, 1, 10)`), `date('now', 'localtime')`, `date.today()` (también en las pruebas) y la hora de ahora armada para mostrar con `datetime.now()`. Lo anotado antes del cambio se ve igual de bien: siempre se guardó en UTC. Quedaron además blindados contra un salto del reloj el freno de contraseñas (nunca espera más que su máximo) y la venta repetida o para deshacer (lo «del futuro» no cuenta). `pruebas_de_la_caja.py` lo controla: lo cobrado a las 22:30 de acá cae en la caja de ese día, con su hora.
 
+## 🔒 El Modo Mecánico, solo para clientes con cuenta — y la barra en tres grupos
+
+Lo pidió el dueño el 15/11/2026, mirando la app publicada desde su teléfono: «mejorá el orden
+de las pestañas» y «si no ponés la contraseña, la parte de los mecánicos no se tiene que ver,
+porque si no cualquiera se mete en la página y la usa sin ser cliente nuestro».
+
+**El Modo Mecánico.** Identificar un auto por la patente, leer un chasis o un código de falla
+y ver los repuestos de cada vehículo estaba entre lo que se ve sin contraseña (el Buscador, la
+lista de WhatsApp y esto). Ahora es un servicio para los clientes del negocio:
+
+| Quién | Qué ve |
+|---|---|
+| El que entra sin contraseña | **🔍 Buscador y 📋 Lista WhatsApp**, y nada más (`PAGINAS_ABIERTAS`) |
+| El taller o cliente con su cuenta | **🔧 Mi portal y 🛠️ Modo Mecánico** (`PAGINAS_DEL_TALLER`). Antes tenía solo el portal, sin barra |
+| El personal | Todo, como siempre |
+
+- **Tres candados, no uno.** La barra no lo ofrece (`paginas_a_la_vista()`, la misma cuenta para
+  la barra y para el asistente); si la sesión lo trae puesto —un link viejo, una pestaña que
+  quedó abierta de antes— vuelve al Buscador; y la pantalla misma corta con un cartel si igual
+  se llega (`puede_ver_el_modo_mecanico()`). Los tres tienen prueba, y cada uno falla si se
+  rompe a propósito.
+- **El taller mira, no toca.** Lo ve como lo veía el que no entraba: los datos del cliente de
+  cada auto, lo que la app fue aprendiendo y cargar o corregir algo siguen siendo del personal
+  (`solo_mirar()` es cierto para él). `pruebas_de_las_pantallas.py` recorre sus siete solapas
+  con la cuenta de un taller, que antes las recorría «sin contraseña».
+- **El que lo usaba sin entrar se entera de dónde quedó.** En «🔑 Ingresar» dice «¿Sos taller o
+  cliente? Con tu número de cuenta y tu contraseña tenés tu portal y el 🛠️ Modo Mecánico. Si no
+  tenés cuenta, pedila en el mostrador»; y si escribe una patente en el Buscador, lo mismo.
+- **El asistente, igual.** Al invitado que pregunta por una patente o un código de falla le dice
+  que eso es del Modo Mecánico, para clientes con cuenta, y cómo se entra: sin los pasos y sin
+  un botón que lleve. Al taller sí lo ayuda y lo lleva («llevame al modo mecánico», «volver»,
+  «mi portal»). Al sumarle pantallas al taller, «¿qué hay de nuevo?» le hubiera contado las
+  novedades internas del negocio: lo atajó la prueba que barre todas las preguntas como taller,
+  antes de publicarse.
+- **Lo que hace falta del lado del negocio:** que los clientes tengan cuenta. En la base real
+  todavía no hay ninguna: se crean en 🗂️ Administrar → 👥 Usuarios («🔧 Mecánicos externos:
+  talleres, mayoristas y clientes con cuenta»), de a una o pegando muchas de Excel.
+
+**La barra.** Eran doce pastillas en fila, sin nada que dijera cuáles iban juntas, y las de la
+trastienda estaban mezcladas. Ahora son tres grupos de cuatro (`GRUPOS_DE_LA_BARRA`), con una
+rayita entre uno y otro:
+
+| El mostrador | Buscar y presupuestar | La trastienda |
+|---|---|---|
+| 🧾 Ventas · 💵 Caja · 📦 Depósito · ↩️ Devoluciones | 🔍 Buscador · 📋 Lista WhatsApp · 🛠️ Modo Mecánico · 🚗 Vehículos | 📊 Estadísticas · 📁 Cargar Excel · 🔗 Vincular manual · 🗂️ Administrar |
+
+Lo que más se usa sigue primero («ventas y depósito son más importantes que las
+equivalencias»), y la configuración quedó al final, que es donde uno la busca. Cuando las doce
+no entran en un renglón, **el corte es siempre entre grupos**: arriba el mostrador y la
+búsqueda, abajo la trastienda (antes cortaba donde se acababa el lugar, y a 1.300 px
+«Administrar» quedaba sola abajo). En una ventana angosta, un grupo por renglón; en una pantalla
+grande, las doce en uno; en el celular, un renglón que se desliza, como siempre. La barra es un
+`st.radio` y no hay cómo ponerle un salto adentro: el corte es un renglón vacío que se mete
+entre las mitades (`rayitas_de_la_barra()`). Medido en el navegador a 800, 900, 980, 1.100,
+1.300, 1.366 y 1.520 px, y en un teléfono simulado.
+
 ## 🌐 Las fuentes de afuera, abiertas de verdad
 
 Todo lo que la app trae de internet se había armado y probado con servidores de mentira: el
@@ -8080,7 +8136,7 @@ Lo pidió el dueño: «que todas las opciones, tanto de administrador como de em
 
 | Qué | Antes | Ahora |
 |---|---|---|
-| **La barra** | Las 12 secciones, y cada una de las cerradas pedía la contraseña al tocarla. | Sin sesión, solo **🔍 Buscador, 📋 Lista WhatsApp y 🛠️ Modo Mecánico**. Las demás aparecen al entrar con «🔑 Ingresar». |
+| **La barra** | Las 12 secciones, y cada una de las cerradas pedía la contraseña al tocarla. | Sin sesión, solo **🔍 Buscador, 📋 Lista WhatsApp y 🛠️ Modo Mecánico** (desde el 16/11/2026, sin el Modo Mecánico: ver «🔒 El Modo Mecánico, solo para clientes con cuenta»). Las demás aparecen al entrar con «🔑 Ingresar». |
 | **Los resultados del Buscador** | «🛒 Se llevó», «📌 Reponer», apartar, el presupuesto y «🧾 Pasar a una venta» se veían apagados, con un candado; también «✏️ Marcar favorito / editar precio, costo y stock», la ficha de prueba, «¿por qué apareció?» y la calidad de los resultados. | No se ven. Sin sesión van solo los resultados confiables (sin los que cuelgan de un vínculo flojo), y la tabla dice **código, marca, precio, stock y descripción**: sin veredicto, cadena, confianza, ubicación en el depósito, ni el link a la página del proveedor. En el celular, lo mismo en las tarjetas. |
 | **Lo demás del Buscador** | «📦 Armar pedido» para el depósito, los ⭐ favoritos, la guía del negocio y los avisos de la escala y la fecha de cada lista. | Solo con sesión. |
 | **🛠️ Modo Mecánico** | Las tablas que aprende el lector de VIN, «Enseñarle a la app este auto», guardar lo de la base ajena, «🪄 Leer de las descripciones…» y subir esquemas (con su formulario de contraseña). | Solo con sesión. El cliente o el taller consultan la patente, el VIN, el motor, los repuestos por vehículo, los códigos de falla, los esquemas y el conversor. |
@@ -8158,7 +8214,7 @@ Se recorrieron como **operador** las secciones con contraseña (Vehículos, Dep�
 
 ## 🔒 El invitado mira, no toca
 
-El Buscador, la Lista WhatsApp y el Modo Mecánico —con «🔤 Por patente»— siguen abiertos para **mirar** sin contraseña. **Anotar o cambiar** algo pide entrar con contraseña (operador o administrador).
+El Buscador, la Lista WhatsApp y el Modo Mecánico —con «🔤 Por patente»— siguen abiertos para **mirar** sin contraseña (el Modo Mecánico, hasta el 16/11/2026: ahora es para clientes con cuenta, que lo ven con estas mismas reglas). **Anotar o cambiar** algo pide entrar con contraseña (operador o administrador).
 
 | Qué | Qué pasaba | Qué se hizo |
 |---|---|---|

@@ -7,6 +7,12 @@
 if pagina == PAGINAS[7]:
     # El título de la sección lo pone app.py («EL TÍTULO DE LA SECCIÓN»).
 
+    # EL CANDADO DE LA PANTALLA: sin cuenta no se ve (ver puede_ver_el_modo_mecanico()). La
+    # barra ya no la ofrece a quien no entró; esto es por si se llega de otra forma.
+    if not puede_ver_el_modo_mecanico():
+        st.info(TEXTO_MODO_MECANICO_CERRADO)
+        st.stop()
+
     # SUB_MEC está en logica/interfaz.py, con las demás listas de navegación.
     sub_mec = elegir_solapa(PAGINAS[7])
 

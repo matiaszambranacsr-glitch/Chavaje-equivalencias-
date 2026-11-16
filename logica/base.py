@@ -578,7 +578,8 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 .st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; font-size: 0.9rem; }
-/* Con pocas secciones —sin sesión son tres: Buscador, Lista WhatsApp y Modo Mecánico— van en
+/* Con pocas secciones —sin sesión son dos, Buscador y Lista WhatsApp; el taller, su portal y
+   el Modo Mecánico— van en
    uno o dos renglones también en el celular. Deslizándose, al elegir la de la derecha la primera
    quedaba cortada («r» de «Buscador»), y el cliente no veía cómo volver. Cada opción va en su
    propia caja: se cuentan las cajas (con «label:nth-of-type» se aplicaba también a las doce). */
@@ -1878,9 +1879,10 @@ def es_empleado_o_abierto():
     return es_operador_o_admin() or not hay_claves_configuradas()
 
 
-# EL INVITADO MIRA, NO TOCA. El Buscador, la lista de WhatsApp y el Modo Mecánico quedan
-# abiertos para mirar —es el mostrador, y «Por patente» lo puede consultar cualquiera—, pero
-# anotar o cambiar algo pide entrar con contraseña. Recorriendo la app como invitado y tocando
+# EL INVITADO MIRA, NO TOCA. El Buscador y la lista de WhatsApp quedan abiertos para mirar —es
+# el mostrador—, pero anotar o cambiar algo pide entrar con contraseña. (El Modo Mecánico
+# estaba abierto también, hasta que el dueño lo pidió solo para clientes con cuenta: ver
+# puede_ver_el_modo_mecanico(). El taller que entra lo ve con estas mismas reglas.) Recorriendo la app como invitado y tocando
 # cada botón se encontró que, sin contraseña, se podía anotar «Se llevó» (pesa en las
 # equivalencias sugeridas), «Reponer», marcar favoritos, apartar stock, anotar consultas de
 # clientes con nombre y teléfono, enseñarle modelos y fabricantes al lector de VIN y prender
@@ -1893,8 +1895,24 @@ TEXTO_SOLO_MIRAR = ("🔒 Mirar se puede sin entrar. Para anotar o cambiar algo,
 
 def solo_mirar():
     """True para un invitado cuando la app tiene contraseñas: ve lo abierto y no cambia nada.
-    Ver «EL INVITADO MIRA, NO TOCA»."""
+    Ver «EL INVITADO MIRA, NO TOCA». También para el taller que entra con su cuenta: en el Modo
+    Mecánico mira, y lo del negocio (los clientes, lo que la app aprendió) no lo ve."""
     return not es_empleado_o_abierto()
+
+
+# Lo que lee quien llega al Modo Mecánico sin cuenta. Por la barra no se llega —no lo
+# ofrece—; es el candado de la pantalla, por si se llega de otra forma.
+TEXTO_MODO_MECANICO_CERRADO = (
+    "🔒 El 🛠️ Modo Mecánico —identificar un auto por la patente o el chasis, los códigos de "
+    "falla, los repuestos de cada vehículo— es para los clientes del negocio. Si tenés cuenta, "
+    "entrá con tu número y tu contraseña en «🔑 Ingresar», arriba. Si no, pedila en el mostrador.")
+
+
+def puede_ver_el_modo_mecanico():
+    """¿Quien mira tiene el Modo Mecánico? El personal y el taller o cliente que entró con su
+    cuenta. Sin contraseña, no: lo pidió el dueño (ver PAGINAS_ABIERTAS en logica/interfaz.py).
+    Si la app no tiene ninguna contraseña configurada sigue abierto, como todo lo demás."""
+    return es_empleado_o_abierto() or st.session_state.get("nivel_usuario") == "mecanico"
 
 
 def seccion_permitida(nivel, motivo=""):
@@ -1960,6 +1978,10 @@ def mostrar_login_inicial():
         "el nombre es opcional (separa tus búsquedas de las de tus compañeros) y sin nombre "
         "figurás como «Invitado»."
     )
+    # Desde que el Modo Mecánico es solo para clientes con cuenta, el que lo usaba sin entrar
+    # tiene que saber dónde quedó y cómo se llega: si no, para él simplemente desapareció.
+    st.caption("🔧 **¿Sos taller o cliente?** Con tu número de cuenta y tu contraseña tenés tu "
+               "portal y el 🛠️ Modo Mecánico. Si no tenés cuenta, pedila en el mostrador.")
     # EL LINK DE UN TALLER (…/?cuenta=123) trae su número de cuenta puesto como usuario.
     _cuenta_del_link = str(st.query_params.get("cuenta", "") or "").strip()
     if _cuenta_del_link.isdigit() and "login_inicial_nombre" not in st.session_state:

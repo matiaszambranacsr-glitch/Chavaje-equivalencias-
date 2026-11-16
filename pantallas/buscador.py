@@ -1047,9 +1047,15 @@ if pagina == PAGINAS[0]:
                                if _pat_en_buscador["provincia"] else "")
                             + (f", patentada entre **{_d_b} y {_h_b}**." if _d_b and _h_b
                                else ".")
-                            + "\n\nLas patentes se buscan en **🛠️ Modo Mecánico → 🔤 Por "
-                              "patente**: si el auto está cargado, de ahí salen los repuestos "
-                              "que le entran. Y si no está, se carga con una foto de la cédula."
+                            # Al que no entró no se lo manda a una pantalla que no tiene
+                            # (el Modo Mecánico es para clientes con cuenta): se le dice eso.
+                            + ("\n\nLas patentes se buscan en **🛠️ Modo Mecánico → 🔤 Por "
+                               "patente**: si el auto está cargado, de ahí salen los repuestos "
+                               "que le entran. Y si no está, se carga con una foto de la cédula."
+                               if puede_ver_el_modo_mecanico() else
+                               "\n\nBuscar un auto por la patente es del **🛠️ Modo Mecánico**, "
+                               "para los clientes con cuenta: entrá con «🔑 Ingresar», arriba, "
+                               "o pedí la tuya en el mostrador.")
                         )
                     # 🕯️ UNA BUJÍA QUE NO ESTÁ EN TUS LISTAS: el cliente trae una NGK o una Bosch que
                     # no vendés con ese código. Por el código se sabe cómo es, y cuáles de las tuyas
