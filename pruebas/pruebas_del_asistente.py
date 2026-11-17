@@ -60,6 +60,8 @@ ENTIENDE = (
     # _ASIS_PIDE_SALTEAR, a propósito. Aflojarlo para esto le abriría la puerta a «¿cómo veo
     # Caja sin contraseña?». El dueño lo encuentra con cualquiera de estas.)
     ("que solo mis clientes puedan ver el buscador", "como:solo_con_cuenta"),
+    ("como veo lo que le cambiaron a mi auto", "como:ver_mi_auto"),
+    ("que le pusieron a mi coche", "como:ver_mi_auto"),
     ("cuanto me debe un cliente", "como:cuenta_corriente"),
     ("el taller de juan vino a pagar lo que debe", "como:cuenta_corriente"),
     ("cambiar el limite de credito", "como:limite"),
@@ -414,7 +416,10 @@ def probar(L):
                             ("mandar una lista por wasap", "como:whatsapp"),
                             ("buscar por medidas", "como:medidas"),
                             ("teclas", "como:teclas_de_todos"),
-                            ("como entro a mi cuenta de taller", "como:entrar")):
+                            ("como entro a mi cuenta de taller", "como:entrar"),
+                            # El dueño de un auto, con su patente (no hace falta cuenta):
+                            ("quiero ver el historial de mi auto por la patente",
+                             "como:ver_mi_auto")):
         esperar(f"invitado, «{pregunta}»", responder(pregunta, invitado)["ficha"], ficha)
     esperar("y lo lleva a lo abierto",
             por_nombre[responder("llevame a la lista de whatsapp", invitado)["ir"]]["destino"],
@@ -488,7 +493,10 @@ def probar(L):
                             ("salir", "como:entrar"),
                             # El Modo Mecánico, desde que es para clientes con cuenta:
                             ("que auto es por la patente", "como:patente"),
-                            ("codigo de falla del escaner", "como:dtc")):
+                            ("codigo de falla del escaner", "como:dtc"),
+                            # En qué auto puso los repuestos, si quiere:
+                            ("como anoto en que auto puse los repuestos", "como:portal_auto"),
+                            ("que se le cambio al auto de mi cliente", "como:portal_auto")):
         esperar(f"taller, «{pregunta}»", responder(pregunta, taller_en_su_portal)["ficha"], ficha)
     esperar("al taller lo lleva al Modo Mecánico",
             responder("llevame al modo mecanico", taller_en_su_portal)["ir"],

@@ -129,6 +129,7 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO — LECTOR DE VIN
         · MODO MECÁNICO — CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS (NHTSA)
         · MODO MECÁNICO — VISOR DE ESQUEMAS
+        · EL TALLER ANOTA EN QUÉ AUTO LO PUSO
         · CUENTA CORRIENTE DE LOS TALLERES
         · PASAR EL LÍMITE CON PERMISO
         · INTERÉS POR MORA (con la tasa del BCRA)

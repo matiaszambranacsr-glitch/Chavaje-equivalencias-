@@ -842,6 +842,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Abajo de todo, en «📁 Mis presupuestos anteriores», están los que guardaste, con sus "
      "repuestos y la mano de obra. Solo ves los tuyos.",
      None, "taller"),
+    ("portal_auto", "Anotar en qué auto puse los repuestos (y ver lo que ya se le cambió)",
+     "patente auto anotar puse puesto instale instalado cambie cambiado historial vehiculo "
+     "coche km kilometraje ficha dueño cliente ver",
+     "En «📋 Presupuesto actual» poné la patente y el km (no hace falta: es opcional). Con la "
+     "patente ves lo que ya se le cambió a ese auto. Cuando lo hiciste, marcá «✅ Ya se lo "
+     "puse» antes de guardar, o después, en «📁 Mis presupuestos anteriores». El dueño del "
+     "auto lo ve con su patente; tu cliente no sale en ningún lado.",
+     None, "taller"),
     ("portal_contrasena", "Cambiar la contraseña de mi portal",
      "contrasena clave password cambiar olvide olvido nueva",
      "La contraseña del portal te la cambia el negocio: pedila en el mostrador. Yo no la "
@@ -854,6 +862,16 @@ COMO_HAGO_DEL_ASISTENTE = (
      "venta o la manda a la caja; en la caja, F10 cobra y F11 pone a cuenta. En la "
      "computadora, el click derecho sobre un producto abre sus botones.",
      None, "empleado"),
+    # Sin «patente» ni «vehículo» en el título ni en las claves, a propósito: «¿qué auto es
+    # por la patente?» es identificar un auto, que es del Modo Mecánico (al invitado se le dice
+    # que es para clientes), y con esas palabras esta le ganaba.
+    ("ver_mi_auto", "Ver qué se le cambió a tu auto",
+     "auto mi coche cambiaron cambio cambiado cambie pusieron puesto historial service "
+     "mantenimiento ver revisar cuanto falta",
+     "En «🔑 Ingresar», arriba, está «🚗 ¿Querés ver qué se le cambió a tu auto?»: poné la "
+     "patente y «🔎 Ver mi auto». Sale lo que se le puso, cuándo y cuánto le falta a cada cosa. "
+     "No hace falta cuenta.",
+     None, ""),
     ("teclas_de_todos", "Las teclas: F1 y F2",
      "teclas atajos teclado f1 f2 rapido",
      "F1 me abre y me minimiza, y F2 va a la caja de búsqueda de la pantalla.",

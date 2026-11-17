@@ -794,6 +794,105 @@ LARGO_DE_LA_CLAVE = 10
 NO_SE_PUDO_ABRIR_LA_FICHA = ("No encontramos un auto con esos datos. Revisá la patente y los "
                              "números, o pedile el link al negocio.")
 
+# CON LA PATENTE SOLA. El dueño lo pidió: «que los clientes puedan ingresar poniendo la patente a
+# ver qué cosas se le fueron cambiando al auto». Arriba está por qué se pedían además los 4
+# números (la patente se lee en la calle); la decisión es del dueño, y viene como él la pidió.
+# Lo que se ve con la patente sola es lo mismo que con el link: el auto, el km y las piezas,
+# nunca el nombre, el teléfono ni las notas. Y con los 4 números, el auto anotado sin teléfono
+# —en el mostrador es opcional, y el taller no lo tiene— solo se abría con el link.
+# La patente que no encuentra nada cuenta como intento fallido, con los mismos topes (por
+# patente y en total): frena al que prueba patentes para ver qué autos pasaron por el negocio.
+# Se vuelve a pedir los 4 números en 🗂️ Administrar → 👥 Usuarios («🚗 Cómo ve su auto el
+# cliente»).
+CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA = "auto_con_la_patente_sola"
+COMO_SE_VE_EL_AUTO = ("🚗 Con la patente sola",
+                      "🔢 Con la patente y los últimos 4 números de su teléfono (o con el link)")
+NO_HAY_AUTO_CON_ESA_PATENTE = ("No tenemos anotado ningún auto con esa patente. Revisá cómo la "
+                               "escribiste; si es la primera vez que pasa por el negocio, todavía "
+                               "no hay nada anotado.")
+
+
+def se_ve_el_auto_con_la_patente_sola():
+    """¿El dueño del auto entra con la patente sola? Si la base no contesta, no: del lado
+    seguro, se piden los 4 números como antes."""
+    try:
+        return obtener_config(CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA, "si") != "no"
+    except sqlite3.Error as _err:
+        anotar_error("se_ve_el_auto_con_la_patente_sola", _err)
+        return False
+
+
+def cambiar_como_se_ve_el_auto(con_la_patente_sola):
+    """Es del administrador (también acá adentro, ver exigir_nivel()), y queda en el registro de
+    cambios quién lo cambió y de qué a qué."""
+    exigir_nivel("admin", "cambiar cómo ve su auto el cliente")
+    _antes = se_ve_el_auto_con_la_patente_sola()
+    anotar_cambio("cambió cómo ve su auto el cliente", "configuración",
+                  CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA,
+                  antes=COMO_SE_VE_EL_AUTO[0 if _antes else 1],
+                  despues=COMO_SE_VE_EL_AUTO[0 if con_la_patente_sola else 1])
+    guardar_config(CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA, "si" if con_la_patente_sola else "no")
+
+
+def mostrar_como_se_ve_el_auto():
+    """La opción, en 🗂️ Administrar → 👥 Usuarios, debajo de «Qué se ve sin contraseña». Con su
+    botón para guardar, como aquella."""
+    st.markdown("**🚗 Cómo ve su auto el cliente**")
+    _sola = se_ve_el_auto_con_la_patente_sola()
+    _elegido = st.radio(
+        "El dueño de un auto ve lo que se le cambió:", COMO_SE_VE_EL_AUTO,
+        index=0 if _sola else 1, key="como_se_ve_el_auto", label_visibility="collapsed",
+        help="En «🔑 Ingresar» está «🚗 ¿Querés ver qué se le cambió a tu auto?». Con la patente "
+             "sola es lo más cómodo, pero lo ve cualquiera que la sepa: el auto, el km y las "
+             "piezas (nunca el nombre, el teléfono ni las notas). Con los 4 números, solo entra "
+             "el auto que tiene el teléfono anotado, o con el link que le mandás.")
+    _quiere_sola = _elegido == COMO_SE_VE_EL_AUTO[0]
+    if _quiere_sola == _sola:
+        st.caption("Hoy entra con la patente sola: el auto, el km y lo que se le cambió, sin "
+                   "su nombre ni su teléfono." if _sola else
+                   "Hoy entra con la patente y los últimos 4 números de su teléfono, o con el "
+                   "link que le mandás.")
+        return
+    st.info("Al guardar, " + ("cualquiera que escriba la patente ve el auto, el km y lo que se "
+                              "le cambió." if _quiere_sola else
+                              "para ver su auto va a hacer falta además los últimos 4 números "
+                              "del teléfono anotado en la ficha (o el link que le mandás)."))
+    if st.button("💾 Guardar", key="guardar_como_se_ve_el_auto", type="primary"):
+        try:
+            cambiar_como_se_ve_el_auto(_quiere_sola)
+        except PermissionError as _err:
+            st.error(el_error_en_castellano(_err))
+            return
+        avisar("success", "🚗 Listo: " + ("con la patente sola." if _quiere_sola
+                                         else "con la patente y los 4 números."))
+        st.rerun()
+
+
+def _la_ficha_de_la_patente(fichas):
+    """De las fichas de una misma patente escrita distinto («AB 123 CD» y «AB123CD»), la que
+    tiene más anotado; si empatan, la última."""
+    if len(fichas) == 1:
+        return fichas[0]
+    c.execute(f"""SELECT vehiculo_id, COUNT(*) FROM historial_piezas
+                  WHERE vehiculo_id IN ({",".join("?" * len(fichas))}) GROUP BY vehiculo_id""",
+              [f["id"] for f in fichas])
+    piezas = dict(c.fetchall())
+    return max(fichas, key=lambda f: (piezas.get(f["id"], 0), f["id"]))
+
+
+def lo_ultimo_que_se_le_cambio(patente, cuantos=5):
+    """Las últimas piezas anotadas en el auto de esa patente: [{Fecha, Pieza, Marca, Km}]. Para
+    el taller, mientras arma el presupuesto de ese auto. Sin nombre, teléfono ni notas."""
+    fichas = _vehiculos_por_patente_sin_espacios(patente)
+    if not fichas:
+        return []
+    c.execute(f"""SELECT fecha_instalacion, descripcion_pieza, marca_pieza, km_instalacion
+                  FROM historial_piezas WHERE vehiculo_id IN ({",".join("?" * len(fichas))})
+                  ORDER BY fecha_instalacion DESC, id DESC LIMIT ?""",
+              [f["id"] for f in fichas] + [int(cuantos)])
+    return [{"Fecha": _dia_mes_anio(h[0]), "Pieza": h[1] or "", "Marca": h[2] or "",
+             "Km": miles(h[3]) if h[3] is not None else ""} for h in c.fetchall()]
+
 
 def problema_del_whatsapp_del_negocio(numero):
     """'' si está bien o vacío; si no, qué tiene. wa.me lo quiere con el 54 del país y el 9 de
@@ -864,18 +963,35 @@ def _anotar_intento_fallido(patente):
         conn.commit()
 
 
-def abrir_ficha_publica(patente, clave="", ultimos_del_telefono="", km_de_hoy=None):
+def abrir_ficha_publica(patente, clave="", ultimos_del_telefono="", km_de_hoy=None,
+                        solo_patente=False):
     """(resumen, motivo): el resumen de resumen_publico_del_auto() si los datos coinciden, o
     None y qué decirle al cliente. Ver «LO QUE VE EL CLIENTE DE SU AUTO».
 
     Con la clave del link, o con los últimos 4 números del teléfono de la ficha. La respuesta es
     la misma si la patente no existe o si los números no coinciden: así no sirve para averiguar
-    qué autos pasaron por el negocio. km_de_hoy: ver resumen_publico_del_auto()."""
+    qué autos pasaron por el negocio. km_de_hoy: ver resumen_publico_del_auto().
+
+    Con `solo_patente`, la patente sola, si el dueño lo deja (ver «CON LA PATENTE SOLA»)."""
     pat = patente_sin_espacios(patente)
     clave = str(clave or "").strip().upper()
     ultimos = re.sub(r"\D", "", str(ultimos_del_telefono or ""))
     if len(pat) < 5:
         return None, "Escribí la patente completa."
+    if solo_patente and not clave and not ultimos:
+        if not se_ve_el_auto_con_la_patente_sola():
+            return None, "Escribí los últimos 4 números del teléfono que dejaste en el negocio."
+        if _demasiados_intentos(pat):
+            return None, ("Hubo demasiados intentos con patentes que no tenemos. Probá más "
+                          "tarde, o pedile el link al negocio.")
+        fichas = _vehiculos_por_patente_sin_espacios(pat)
+        if not fichas:
+            try:
+                _anotar_intento_fallido(pat)
+            except sqlite3.Error as _err:
+                anotar_error("abrir_ficha_publica", _err)
+            return None, NO_HAY_AUTO_CON_ESA_PATENTE
+        return resumen_publico_del_auto(_la_ficha_de_la_patente(fichas), km_de_hoy), ""
     if not clave and len(ultimos) != 4:
         return None, "Escribí los últimos 4 números del teléfono que dejaste en el negocio."
     if not clave and _demasiados_intentos(pat):

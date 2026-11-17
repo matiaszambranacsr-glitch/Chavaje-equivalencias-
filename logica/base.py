@@ -2215,3 +2215,21 @@ def mostrar_login_inicial(solo_con_cuenta=False):
     if seguir:
         st.session_state.usuario_nombre = nombre_usuario.strip() or "Invitado"
         st.rerun()
+
+    # EL DUEÑO DE UN AUTO, CON SU PATENTE: lo pidió el dueño, «que los clientes puedan ingresar
+    # poniendo la patente a ver qué cosas se le fueron cambiando al auto». Abre la consulta del
+    # auto («?auto=…», ver mostrar_consulta_publica_del_auto()): con la patente sola si el dueño
+    # lo deja (ver «CON LA PATENTE SOLA» en logica/vehiculos.py), o pidiendo además los 4
+    # números del teléfono. Está también con la página cerrada: no hace falta cuenta.
+    st.markdown("**🚗 ¿Querés ver qué se le cambió a tu auto?**")
+    with st.form("entrar_con_la_patente"):
+        _patente_ingreso = st.text_input("Patente:", key="ingreso_patente",
+                                         placeholder="AB123CD", max_chars=10)
+        _ver_auto = st.form_submit_button("🔎 Ver mi auto", width="stretch")
+    if _ver_auto:
+        _pat_ingreso = patente_sin_espacios(_patente_ingreso)
+        if len(_pat_ingreso) < 5:
+            st.warning("Escribí la patente completa.")
+        else:
+            st.query_params["auto"] = _pat_ingreso
+            st.rerun()

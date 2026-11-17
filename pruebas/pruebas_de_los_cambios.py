@@ -996,6 +996,44 @@ def probar(L):
     _todos_bloqueados, _ = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8901")
     esperar("con teléfono corto solo entra con el link; con 60 intentos en la hora, nadie",
             (_tel_corto, _todos_bloqueados), (None, None))
+    # CON LA PATENTE SOLA (lo pidió el dueño; ver «CON LA PATENTE SOLA» en logica/vehiculos.py).
+    # Viene prendido. Lo mismo que con el link, sin nombre, teléfono ni notas; de las dos fichas
+    # de la misma patente escrita distinto, la que tiene lo anotado; la que no está cuenta como
+    # intento fallido, con los mismos topes; y apagado vuelve a pedir los 4 números.
+    c.execute("DELETE FROM intentos_consulta_publica")
+    _sola, _motivo_sola = ns["abrir_ficha_publica"]("ab-123-cd", solo_patente=True)
+    _todo_sola = json.dumps(_sola, ensure_ascii=False, default=str)
+    esperar("con la patente sola: el auto y lo anotado, sin nombre, teléfono ni notas",
+            (ns["se_ve_el_auto_con_la_patente_sola"](), _motivo_sola,
+             _sola and _sola["auto"], _sola and _sola["historial"] == _con_link["historial"],
+             "Juan" in _todo_sola, "4567" in _todo_sola, "8901" in _todo_sola,
+             "debe plata" in _todo_sola),
+            (True, "", "VW Gol 2012", True, False, False, False, False))
+    _no_esta, _motivo_no_esta = ns["abrir_ficha_publica"]("ZZ999ZZ", solo_patente=True)
+    esperar("la patente que no está: lo dice, y cuenta como intento fallido",
+            (_no_esta, _motivo_no_esta == ns["NO_HAY_AUTO_CON_ESA_PATENTE"],
+             c.execute("SELECT COUNT(*) FROM intentos_consulta_publica WHERE "
+                       "patente = 'ZZ999ZZ'").fetchone()[0]), (None, True, 1))
+    esperar("sin pedirla sola, sigue pidiendo los 4 números",
+            "4 números" in ns["abrir_ficha_publica"]("AB123CD")[1], True)
+    c.executemany("INSERT INTO intentos_consulta_publica (patente) VALUES (?)",
+                  [(f"XX{i:03d}XX",) for i in range(ns["INTENTOS_FALLIDOS_EN_TOTAL_POR_HORA"])])
+    _frenada, _motivo_frenada = ns["abrir_ficha_publica"]("AB123CD", solo_patente=True)
+    esperar("con 60 patentes que no están en la hora, nadie (frena al que prueba patentes)",
+            (_frenada, "demasiados intentos" in _motivo_frenada), (None, True))
+    c.execute("DELETE FROM intentos_consulta_publica")
+    ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "no")
+    _apagada, _motivo_apagada = ns["abrir_ficha_publica"]("AB123CD", solo_patente=True)
+    esperar("apagado, la patente sola no alcanza: pide los 4 números",
+            (ns["se_ve_el_auto_con_la_patente_sola"](), _apagada, "4 números" in _motivo_apagada),
+            (False, None, True))
+    ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "")
+    _ultimo = ns["lo_ultimo_que_se_le_cambio"]("AB 123 CD", cuantos=3)
+    esperar("lo último que se le cambió (para el taller): las últimas, sin notas",
+            (len(_ultimo), sorted(_ultimo[0]) if _ultimo else None,
+             "debe plata" in json.dumps(_ultimo, ensure_ascii=False),
+             ns["lo_ultimo_que_se_le_cambio"]("ZZ999ZZ")),
+            (3, ["Fecha", "Km", "Marca", "Pieza"], False, []))
     # Con las alertas de estado_de_cada_pieza(): la misma cuenta que el link del cliente.
     _pdf_ficha = ns["generar_pdf_ficha_vehiculo"](_v, {}, [p for p in _estado if p["_toca"]],
                                                   [], _nuevo)

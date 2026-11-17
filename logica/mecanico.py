@@ -1250,14 +1250,18 @@ def eliminar_punto_esquema(punto_id):
         conn.commit()
 
 
-def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
+def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra, patente="",
+                                 km=None):
     """Guarda el presupuesto y devuelve el total. El MISMO presupuesto guardado hace menos de dos
     minutos no se guarda otra vez: un doble toque en «Guardar» (o un toque mientras la pantalla
     todavía se estaba dibujando, que Streamlit vuelve a correr) dejaba dos iguales (lo señaló
-    una revisión con ChatGPT)."""
+    una revisión con ChatGPT). La patente y el km son opcionales: ver «EL TALLER ANOTA EN QUÉ
+    AUTO LO PUSO»."""
     exigir_que_sea_su_cuenta(mecanico_id, "guardar un presupuesto", "empleado")
     total = sum(it["precio"] * it["cantidad"] for it in items) + mano_obra
     items_json = json.dumps(items, ensure_ascii=False)
+    patente = patente_sin_espacios(patente)
+    km = int(km) if km not in (None, "") else None
     # Con transaccion() (BEGIN IMMEDIATE) y no solo con db_lock, que es de ESTE proceso: si
     # otro proceso guarda el mismo presupuesto, este espera a que termine y lo ve, en vez de
     # mirar, no encontrar nada y guardar otro (lo señaló una revisión de código con ChatGPT;
@@ -1270,9 +1274,9 @@ def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
         if c.fetchone():
             return total
         c.execute(
-            "INSERT INTO presupuestos_mecanico (mecanico_id, cliente_nombre, items_json, mano_obra, total) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (mecanico_id, cliente_nombre.strip(), items_json, mano_obra, total)
+            "INSERT INTO presupuestos_mecanico (mecanico_id, cliente_nombre, items_json, mano_obra, "
+            "total, patente, km) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (mecanico_id, cliente_nombre.strip(), items_json, mano_obra, total, patente or None, km)
         )
     return total
 
@@ -1280,9 +1284,93 @@ def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
 def listar_presupuestos_mecanico(mecanico_id):
     exigir_que_sea_su_cuenta(mecanico_id, "ver los presupuestos", None)
     c.execute("""SELECT id AS "ID", cliente_nombre AS "Cliente", items_json, mano_obra AS "Mano de obra",
-                 total AS "Total", creado_en AS "Fecha" FROM presupuestos_mecanico
+                 total AS "Total", creado_en AS "Fecha", patente AS "Patente", km AS "Km",
+                 anotado_en AS "Anotado" FROM presupuestos_mecanico
                  WHERE mecanico_id = ? ORDER BY id DESC""", (mecanico_id,))
     return filas_a_listas(c)
+
+
+# ============================================================================================
+# EL TALLER ANOTA EN QUÉ AUTO LO PUSO
+# ============================================================================================
+# El pedido del dueño: «que los clientes puedan ingresar poniendo la patente a ver qué cosas se
+# le fueron cambiando al auto (opcional), ya que muchos mecánicos no van a querer anotar todas
+# las patentes de los autos que entran». Hasta acá el historial de un auto lo llenaba solo el
+# mostrador, al terminar una venta. El taller con cuenta puede ponerle al presupuesto la patente
+# y el km —si quiere: nada lo pide— y, hecho el trabajo, «✅ Ya se lo puse» suma esas piezas al
+# historial del auto. Ahí las ve el dueño del auto con su patente (ver «CON LA PATENTE SOLA» en
+# logica/vehiculos.py), el taller la próxima vez, y el mostrador.
+#  · La ficha del auto no se lleva el nombre del cliente del taller: es del taller, no del
+#    negocio. Solo la patente y el km.
+#  · Cada pieza dice en su nota qué taller la anotó y de qué presupuesto: el mostrador la ve; el
+#    dueño del auto no (las notas no salen en su consulta).
+#  · Un presupuesto se anota una sola vez, y solo lo anota su taller.
+#  · El km para atrás se frena, como en la venta: casi siempre es un número mal tipeado.
+def anotar_presupuesto_en_el_auto(mecanico_id, presupuesto_id, patente=None, km=None):
+    """(ok, texto). Con `patente`/`km` se completan o corrigen los del presupuesto antes."""
+    exigir_que_sea_su_cuenta(mecanico_id, "anotar un presupuesto en un auto", "empleado")
+    c.execute("""SELECT p.id, p.items_json, p.patente, p.km, p.anotado_en, m.nombre
+                 FROM presupuestos_mecanico p JOIN mecanicos m ON m.id = p.mecanico_id
+                 WHERE p.id = ? AND p.mecanico_id = ?""", (presupuesto_id, mecanico_id))
+    fila = c.fetchone()
+    if not fila:
+        return False, "Ese presupuesto no es de tu cuenta."
+    if fila["anotado_en"]:
+        return False, "Ese presupuesto ya está anotado en el auto."
+    pat = patente_sin_espacios(patente if patente is not None else fila["patente"])
+    if len(pat) < 5:
+        return False, "Escribí la patente completa del auto."
+    if km in (None, ""):
+        km = fila["km"] if patente is None else None
+    try:
+        km = int(km) if km not in (None, "") else None
+    except (TypeError, ValueError):
+        return False, "Los km tienen que ser un número."
+    if km is not None and not 0 <= km <= 2_000_000:
+        return False, "Los km van de 0 a 2.000.000."
+    previo = buscar_vehiculo(pat)
+    if previo and km is not None and previo.get("km_actual") is not None \
+            and km < previo["km_actual"]:
+        return False, (f"Son menos km que los anotados la última vez en ese auto "
+                       f"({miles(previo['km_actual'])}). Revisá el número, o dejalo vacío.")
+    items = json.loads(fila["items_json"] or "[]")
+    if not items:
+        return False, "El presupuesto no tiene repuestos."
+    with db_lock, transaccion():
+        c.execute("UPDATE presupuestos_mecanico SET anotado_en = datetime('now'), patente = ?, "
+                  "km = ? WHERE id = ? AND anotado_en IS NULL", (pat, km, presupuesto_id))
+        if c.rowcount != 1:
+            return False, "Ese presupuesto ya está anotado en el auto."
+        if previo:
+            vehiculo_id = previo["id"]
+            if km is not None:
+                c.execute("""UPDATE vehiculos SET km_actual = ?, km_registro = COALESCE(km_registro, ?),
+                                    km_actualizado_fecha = datetime('now') WHERE id = ?""",
+                          (km, km, vehiculo_id))
+        else:
+            c.execute("""INSERT INTO vehiculos (patente, km_registro, km_actual, km_actualizado_fecha)
+                         VALUES (?, ?, ?, CASE WHEN ? IS NOT NULL THEN datetime('now') END)""",
+                      (pat, km, km, km))
+            vehiculo_id = c.lastrowid
+        nota = f"Lo anotó el taller {fila['nombre']} (presupuesto #{presupuesto_id})"
+        for it in items:
+            nombre = (nombre_de_la_pieza(it.get("descripcion") or "") or it.get("codigo")
+                      or "Pieza")
+            producto_id, _marca = producto_del_codigo_anotado(it.get("codigo") or "",
+                                                              it.get("marca") or "")
+            c.execute("""INSERT INTO historial_piezas (vehiculo_id, producto_id, descripcion_pieza,
+                                                      marca_pieza, codigo_pieza, km_instalacion,
+                                                      vida_util_km, vida_util_meses, nota)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (vehiculo_id, producto_id, nombre, it.get("marca") or "",
+                       it.get("codigo") or "", km,
+                       vida_util_de_las_otras_veces(nombre, vehiculo_id),
+                       vida_util_de_las_otras_veces(nombre, vehiculo_id, "vida_util_meses"),
+                       nota))
+        anotar_cambio("anotó un presupuesto en un auto", "vehiculo", vehiculo_id,
+                      detalle=nota, usuario=fila["nombre"])
+    return True, f"Anotado en el auto {pat}: {len(items)} pieza(s)" + (
+        f" a los {miles(km)} km." if km is not None else ".")
 
 
 def generar_pdf_presupuesto_mecanico(nombre_mecanico, cliente_nombre, items, mano_obra, total):
@@ -2310,15 +2398,50 @@ def mostrar_portal_mecanico():
                           on_click=quitar_item_lista_sesion, args=("presupuesto_mecanico_items", i))
 
         cliente_nombre_mec = st.text_input("Nombre del cliente (opcional):", key="mec_cliente")
+        # EN QUÉ AUTO, SI QUERÉS (ver «EL TALLER ANOTA EN QUÉ AUTO LO PUSO»).
+        _cpa1, _cpa2 = cols([2, 1], apilar_en_celular=False)
+        patente_mec = _cpa1.text_input(
+            "Patente del auto (opcional):", key="mec_patente", placeholder="AB123CD",
+            max_chars=10,
+            help="Si la ponés, ves lo que ya se le cambió y, cuando lo hagas, lo podés anotar en "
+                 "el auto: el dueño lo ve con su patente. No hace falta.")
+        km_mec = _cpa2.number_input("Km (opcional):", min_value=0, max_value=2_000_000, step=500,
+                                    value=None, key="mec_km", placeholder="87500")
+        if len(patente_sin_espacios(patente_mec)) >= 5:
+            _ya_cambiado = lo_ultimo_que_se_le_cambio(patente_mec)
+            if _ya_cambiado:
+                st.caption(f"🔧 A **{patente_sin_espacios(patente_mec)}** ya se le cambió:  \n"
+                           + "  \n".join(f"{x['Fecha']} · {texto_para_markdown(x['Pieza'])}"
+                                          + (f" ({texto_para_markdown(x['Marca'])})"
+                                             if x["Marca"] else "")
+                                          + (f" · {x['Km']} km" if x["Km"] else "")
+                                          for x in _ya_cambiado))
+            else:
+                st.caption(f"Todavía no hay nada anotado en {patente_sin_espacios(patente_mec)}.")
+        ya_puesto_mec = st.checkbox(
+            "✅ Ya se lo puse: anotalo en el auto", key="mec_ya_puesto",
+            disabled=len(patente_sin_espacios(patente_mec)) < 5,
+            help="Suma estos repuestos a lo que se le cambió a ese auto. Si todavía no lo "
+                 "hiciste, dejalo sin marcar: lo anotás después desde «Mis presupuestos».")
         mano_obra_mec = st.number_input("Mano de obra ($):", min_value=0.0, step=500.0, key="mec_mano_obra")
         total_mec = subtotal_repuestos + mano_obra_mec
         st.metric("Total", f"${miles(total_mec, 0)}")
 
         colb1, colb2, colb3 = st.columns(3)
         if colb1.button("💾 Guardar presupuesto", type="primary"):
-            guardar_presupuesto_mecanico(mecanico_id, cliente_nombre_mec, items_actuales, mano_obra_mec)
-            st.success("Presupuesto guardado.")
+            guardar_presupuesto_mecanico(mecanico_id, cliente_nombre_mec, items_actuales,
+                                         mano_obra_mec, patente=patente_mec, km=km_mec)
+            _aviso_guardado = "Presupuesto guardado."
+            if ya_puesto_mec and len(patente_sin_espacios(patente_mec)) >= 5:
+                _recien_guardado = c.execute(
+                    "SELECT MAX(id) FROM presupuestos_mecanico WHERE mecanico_id = ?",
+                    (mecanico_id,)).fetchone()[0]
+                _ok_auto, _texto_auto = anotar_presupuesto_en_el_auto(mecanico_id, _recien_guardado)
+                _aviso_guardado += " " + _texto_auto
+            avisar("success", _aviso_guardado)
             st.session_state["presupuesto_mecanico_items"] = []
+            for _campo in ("mec_patente", "mec_km", "mec_ya_puesto"):
+                st.session_state.pop(_campo, None)
             st.rerun()
 
         pdf_bytes_mec = pdf_con_cache(
@@ -2366,11 +2489,35 @@ def mostrar_portal_mecanico():
     anteriores = listar_presupuestos_mecanico(mecanico_id)
     if anteriores:
         for p in anteriores[:20]:
-            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'} — ${miles(p['Total'], 0)}", key=f"exp_presupuesto_{p['ID']}"):
+            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'}"
+                             + (f" — 🚗 {p['Patente']}" if p["Patente"] else "")
+                             + f" — ${miles(p['Total'], 0)}", key=f"exp_presupuesto_{p['ID']}"):
                 items_p = json.loads(p["items_json"])
                 for it in items_p:
                     st.write(f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${miles(it['precio']*it['cantidad'], 0)}")
                 st.write(f"Mano de obra: ${miles(p['Mano de obra'], 0)}")
+                # Anotarlo en el auto, si todavía no (ver «EL TALLER ANOTA EN QUÉ AUTO LO PUSO»).
+                if p["Anotado"]:
+                    st.caption(f"✅ Anotado en el auto {p['Patente']} el "
+                               f"{fecha_legible(p['Anotado'])}.")
+                else:
+                    _ap1, _ap2 = cols([2, 1], apilar_en_celular=False)
+                    _pat_ant = _ap1.text_input("Patente:", value=p["Patente"] or "",
+                                               key=f"presu_patente_{p['ID']}", max_chars=10,
+                                               placeholder="AB123CD")
+                    _km_ant = _ap2.number_input("Km:", min_value=0, max_value=2_000_000,
+                                                step=500, value=p["Km"],
+                                                key=f"presu_km_{p['ID']}", placeholder="opcional")
+                    if st.button("✅ Ya se lo puse: anotarlo en el auto",
+                                 key=f"presu_anotar_{p['ID']}",
+                                 disabled=len(patente_sin_espacios(_pat_ant)) < 5):
+                        _ok_ant, _texto_ant = anotar_presupuesto_en_el_auto(
+                            mecanico_id, p["ID"], patente=_pat_ant, km=_km_ant)
+                        if _ok_ant:
+                            avisar("success", _texto_ant)
+                            st.rerun()
+                        else:
+                            st.warning(_texto_ant)
     else:
         st.caption("Todavía no guardaste ningún presupuesto.")
 
@@ -2384,37 +2531,54 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
     nada más del negocio: app.py corta después de esto. Ver «LO QUE VE EL CLIENTE DE SU AUTO»
     en logica/vehiculos.py."""
     st.markdown("### 🚗 Tu auto en El Chavo")
-    st.caption("Lo que le pusimos a tu auto y cuánto le falta a cada cosa.")
+    st.caption("Lo que se le cambió a tu auto y cuánto le falta a cada cosa.")
     # El km que escribe el cliente se lee antes de dibujar su campo: la cuenta de abajo lo usa.
     # Ver resumen_publico_del_auto().
     _km_cliente = st.session_state.get("km_del_cliente")
-    # Con los 4 números, lo que ya entró queda en la sesión: cada toque vuelve a correr la
-    # página, y sin esto el cliente volvía al formulario apenas escribía su km.
+    # Lo que ya entró queda en la sesión: cada toque vuelve a correr la página, y sin esto el
+    # cliente volvía al formulario apenas escribía su km.
     _entro = st.session_state.get("_consulta_publica")
+    # CON LA PATENTE SOLA, si el dueño lo deja (ver «CON LA PATENTE SOLA» en logica/vehiculos.py):
+    # «?auto=AB123CD» —lo que deja «🚗 Ver mi auto» del ingreso— abre directo. Se prueba una vez
+    # por patente: si no estaba, cada toque de la página no tiene que contar otro intento.
+    _sola = se_ve_el_auto_con_la_patente_sola()
     resumen, motivo = None, ""
     if patente and clave:
         resumen, motivo = abrir_ficha_publica(patente, clave=clave, km_de_hoy=_km_cliente)
-    elif _entro:
+    elif _entro and (not patente or patente_sin_espacios(patente) == _entro["patente"]):
         resumen, motivo = abrir_ficha_publica(_entro["patente"],
                                               ultimos_del_telefono=_entro["ultimos"],
-                                              km_de_hoy=_km_cliente)
+                                              km_de_hoy=_km_cliente,
+                                              solo_patente=not _entro["ultimos"])
+    elif (patente and _sola
+          and st.session_state.get("_consulta_publica_probada") != patente_sin_espacios(patente)):
+        st.session_state["_consulta_publica_probada"] = patente_sin_espacios(patente)
+        resumen, motivo = abrir_ficha_publica(patente, solo_patente=True, km_de_hoy=_km_cliente)
+        if resumen is not None:
+            st.session_state["_consulta_publica"] = {"patente": patente_sin_espacios(patente),
+                                                     "ultimos": ""}
     if resumen is None:
         if motivo:
             st.warning(motivo)
         with st.form("form_consulta_publica"):
             _pat = st.text_input("Patente:", value=patente_sin_espacios(patente),
                                  placeholder="AB123CD", max_chars=10)
-            _ultimos = st.text_input("Últimos 4 números del teléfono que dejaste en el negocio:",
-                                     max_chars=4, placeholder="1234")
+            _ultimos = "" if _sola else st.text_input(
+                "Últimos 4 números del teléfono que dejaste en el negocio:", max_chars=4,
+                placeholder="1234")
             _ver = st.form_submit_button("🔎 Ver mi auto", type="primary")
         if _ver:
-            resumen, motivo = abrir_ficha_publica(_pat, ultimos_del_telefono=_ultimos)
+            resumen, motivo = abrir_ficha_publica(_pat, ultimos_del_telefono=_ultimos,
+                                                  solo_patente=_sola)
             if resumen is None:
                 st.warning(motivo)
             else:
-                st.session_state["_consulta_publica"] = {"patente": _pat, "ultimos": _ultimos}
+                st.session_state["_consulta_publica"] = {"patente": patente_sin_espacios(_pat),
+                                                         "ultimos": _ultimos}
         if resumen is None:
-            st.caption("Si tenés el link que te mandó el negocio, con eso entrás directo.")
+            if not _sola:
+                st.caption("Si tenés el link que te mandó el negocio, con eso entrás directo.")
+            _boton_para_volver_de_la_consulta()
             return
 
     st.markdown(f"**{resumen['patente']}**" + (f" — {resumen['auto']}" if resumen["auto"] else ""))
@@ -2460,7 +2624,7 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
     else:
         st.caption("Todavía no hay piezas anotadas para tu auto.")
 
-    st.markdown("**📋 Todo lo que le pusimos**")
+    st.markdown("**📋 Todo lo que se le cambió**")
     if resumen["historial"]:
         st.dataframe(resumen["historial"], width="stretch", hide_index=True)
     else:
@@ -2474,3 +2638,14 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
         st.link_button("📲 Escribinos por WhatsApp",
                        f"https://wa.me/{_wa_negocio}?text=" + quote(_texto_wa),
                        type="primary", width="stretch")
+    _boton_para_volver_de_la_consulta()
+
+
+def _boton_para_volver_de_la_consulta():
+    """«↩️ Volver a la página»: la consulta del auto es una página aparte («?auto=…») y no tenía
+    salida; el que entró desde «🚗 Ver mi auto» del ingreso quedaba atrapado ahí, sin la barra."""
+    if st.button("↩️ Volver a la página", key="volver_de_la_consulta"):
+        st.query_params.clear()
+        for _clave in ("_consulta_publica", "_consulta_publica_probada", "km_del_cliente"):
+            st.session_state.pop(_clave, None)
+        st.rerun()

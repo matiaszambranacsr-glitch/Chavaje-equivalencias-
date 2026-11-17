@@ -7235,6 +7235,57 @@ grande, las doce en uno; en el celular, un renglón que se desliza, como siempre
 entre las mitades (`rayitas_de_la_barra()`). Medido en el navegador a 800, 900, 980, 1.100,
 1.300, 1.366 y 1.520 px, y en un teléfono simulado.
 
+## 🚗 El auto por la patente: lo que se le fue cambiando
+
+El pedido del dueño: «que los clientes puedan ingresar poniendo la patente a ver qué cosas se le
+fueron cambiando al auto (opcional), ya que muchos mecánicos no van a querer anotar todas las
+patentes de los autos que entran». Había dos cosas a medias: el dueño del auto entraba con la
+patente **y** los últimos 4 números de su teléfono (o con el link que le manda el negocio), y el
+historial lo llenaba solo el mostrador, al terminar una venta.
+
+**El dueño del auto entra con la patente sola.** En «🔑 Ingresar» —también con la página
+cerrada, porque no hace falta cuenta— está «🚗 ¿Querés ver qué se le cambió a tu auto?»: la
+patente y «🔎 Ver mi auto» abren la consulta del auto (`mostrar_consulta_publica_del_auto()`),
+con lo que se le puso, cuándo y cuánto le falta a cada cosa, y «↩️ Volver a la página» (antes
+no tenía salida).
+
+- Lo que se ve es lo mismo que con el link: el auto, el km y las piezas. **Nunca** el nombre, el
+  teléfono ni las notas internas (ni qué taller anotó cada pieza).
+- La patente que no está cuenta como intento fallido, con los mismos topes de antes (5 por
+  patente por día, 60 en total por hora): frena al que prueba patentes para ver qué autos pasaron
+  por el negocio.
+- De dos fichas de la misma patente escrita distinto («AB 123 CD» y «AB123CD»), abre la que tiene
+  lo anotado (`_la_ficha_de_la_patente()`).
+- **Es opcional, y lo decide el dueño**: 🗂️ Administrar → 👥 Usuarios → «🚗 Cómo ve su auto el
+  cliente» (`mostrar_como_se_ve_el_auto()`). Viene con la patente sola, como se pidió; la otra
+  opción vuelve a pedir los 4 números. Con la patente sola es lo más cómodo, pero lo ve cualquiera
+  que la sepa. Solo el administrador la cambia, con su botón, y queda en el registro de cambios.
+- Si la base no contesta, del lado seguro: pide los 4 números.
+
+**El taller anota, si quiere, en qué auto lo puso** («EL TALLER ANOTA EN QUÉ AUTO LO PUSO» en
+`logica/mecanico.py`). En «📋 Presupuesto actual» de su portal hay «Patente del auto
+(opcional)» y «Km (opcional)». Con la patente, ve lo último que ya se le cambió a ese auto
+(`lo_ultimo_que_se_le_cambio()`). Hecho el trabajo, «✅ Ya se lo puse» —al guardar, o después
+desde «📁 Mis presupuestos anteriores»— suma esos repuestos al historial del auto
+(`anotar_presupuesto_en_el_auto()`). Si no pone la patente, no pasa nada: el presupuesto se
+guarda igual.
+
+- La ficha del auto **no** se lleva el nombre del cliente del taller: es del taller, no del
+  negocio. Solo la patente y el km.
+- Cada pieza dice en su nota qué taller la anotó y de qué presupuesto: el mostrador la ve; el
+  dueño del auto no.
+- Un presupuesto se anota una sola vez (dos controles: uno antes y otro adentro de la
+  transacción), y solo lo anota su taller.
+- El km para atrás se frena, como en la venta: casi siempre es un número mal tipeado. Sin km, se
+  anota igual.
+
+**El asistente** le explica al dueño del auto cómo verlo («¿qué le pusieron a mi coche?») y al
+taller cómo anotarlo. «¿Qué auto es por la patente?» sigue siendo del Modo Mecánico: la
+explicación nueva no lleva «patente» en el título, a propósito, porque le ganaba.
+
+**En la base real** (copia del 8/11) todavía no hay ninguna ficha de auto ni ventas anotadas:
+el historial empieza a llenarse con esto y con la patente que se anota al terminar una venta.
+
 ## 🌐 Las fuentes de afuera, abiertas de verdad
 
 Todo lo que la app trae de internet se había armado y probado con servidores de mentira: el

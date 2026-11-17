@@ -11,6 +11,7 @@ Ver cerrar_sesion() y nivel_vigente_de_la_sesion() en logica/base.py.
 
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
+import json
 import os
 import re
 import shutil
@@ -896,6 +897,168 @@ def probar():
     esperar("eligiendo otra cuenta, la contraseña de la anterior no se ve más",
             ([x.value for x in _adm.code], "_acceso_recien_dado" in _adm.session_state),
             ([], False))
+
+    # 4g. EL AUTO POR LA PATENTE. Lo pidió el dueño: «que los clientes puedan ingresar poniendo
+    # la patente a ver qué cosas se le fueron cambiando al auto (opcional), ya que muchos
+    # mecánicos no van a querer anotar todas las patentes». El taller le pone al presupuesto la
+    # patente y el km si quiere, y «✅ Ya se lo puse» lo suma a lo que se le cambió al auto; el
+    # dueño del auto lo ve con la patente sola desde «🔑 Ingresar» (también con la página
+    # cerrada). Ver «EL TALLER ANOTA EN QUÉ AUTO LO PUSO» y «CON LA PATENTE SOLA».
+    _items_g = [{"codigo": "W712/94", "marca": "MANN", "descripcion": "FILTRO DE ACEITE VW GOL",
+                 "precio": 1500.0, "cantidad": 1},
+                {"codigo": "BKR6E", "marca": "NGK", "descripcion": "BUJIA NGK", "precio": 900.0,
+                 "cantidad": 4}]
+    _portal = _visitante(nivel_usuario="mecanico", admin_nombre="Taller Sesión",
+                         mecanico_id=taller, pagina_actual=ns["PAGINA_DEL_PORTAL"],
+                         presupuesto_mecanico_items=[dict(x) for x in _items_g])
+    esperar("en el presupuesto, la patente y el km son opcionales: sin ellas se guarda igual",
+            ([w.key for w in _portal.text_input if w.key == "mec_patente"],
+             _portal.checkbox(key="mec_ya_puesto").disabled, [e.value for e in _portal.exception]),
+            (["mec_patente"], True, []))
+    _portal.text_input(key="mec_cliente").set_value("Juan Pérez del Taller")
+    _portal.text_input(key="mec_patente").set_value("ag-777-kl")
+    _portal.number_input(key="mec_km").set_value(80000).run()
+    esperar("con la patente de un auto sin nada, lo dice",
+            any("Todavía no hay nada anotado en AG777KL" in x.value for x in _portal.caption), True)
+    _portal.checkbox(key="mec_ya_puesto").check()
+    [b for b in _portal.button if "Guardar presupuesto" in b.label][0].click().run()
+    _auto_g = ns["c"].execute("SELECT id, cliente_nombre, km_actual FROM vehiculos WHERE "
+                              "patente = 'AG777KL'").fetchone()
+    _piezas_g = ns["c"].execute("SELECT descripcion_pieza, marca_pieza, km_instalacion, nota "
+                                "FROM historial_piezas WHERE vehiculo_id = ? ORDER BY id",
+                                (_auto_g[0] if _auto_g else -1,)).fetchall()
+    esperar("«Ya se lo puse»: las piezas en el auto, con el km y qué taller las anotó",
+            (len(_piezas_g), [p[1] for p in _piezas_g], {p[2] for p in _piezas_g},
+             all("Lo anotó el taller Taller Sesión" in p[3] for p in _piezas_g),
+             _auto_g[2] if _auto_g else None, [e.value for e in _portal.exception]),
+            (2, ["MANN", "NGK"], {80000}, True, 80000, []))
+    esperar("la ficha del auto no se lleva el nombre del cliente del taller",
+            (_auto_g[1] or "") if _auto_g else None, "")
+    _presu_g = ns["c"].execute("SELECT id, patente, km, anotado_en FROM presupuestos_mecanico "
+                               "WHERE mecanico_id = ? ORDER BY id DESC LIMIT 1",
+                               (taller,)).fetchone()
+    esperar("el presupuesto queda con su patente y anotado una sola vez",
+            (_presu_g[1], _presu_g[2], bool(_presu_g[3]),
+             ns["anotar_presupuesto_en_el_auto"](taller, _presu_g[0])[0]),
+            ("AG777KL", 80000, True, False))
+    # Otro presupuesto, sin marcar «Ya se lo puse»: lo anota después, desde «Mis presupuestos».
+    _portal.session_state["presupuesto_mecanico_items"] = [dict(_items_g[0])]
+    _portal.run()
+    _portal.text_input(key="mec_patente").set_value("AG777KL").run()
+    esperar("con la patente, el taller ve lo que ya se le cambió a ese auto",
+            any("ya se le cambió" in x.value and "MANN" in x.value for x in _portal.caption), True)
+    [b for b in _portal.button if "Guardar presupuesto" in b.label][0].click().run()
+    _id_g2 = ns["c"].execute("SELECT MAX(id) FROM presupuestos_mecanico WHERE mecanico_id = ?",
+                             (taller,)).fetchone()[0]
+    _portal.number_input(key=f"presu_km_{_id_g2}").set_value(70000)
+    _portal.button(key=f"presu_anotar_{_id_g2}").click().run()
+    esperar("después, con menos km que los anotados: lo frena y lo dice",
+            (any("menos km" in w.value for w in _portal.warning),
+             ns["c"].execute("SELECT anotado_en FROM presupuestos_mecanico WHERE id = ?",
+                             (_id_g2,)).fetchone()[0]), (True, None))
+    _portal.number_input(key=f"presu_km_{_id_g2}").set_value(None)
+    _portal.button(key=f"presu_anotar_{_id_g2}").click().run()
+    esperar("sin el km, se anota igual",
+            (bool(ns["c"].execute("SELECT anotado_en FROM presupuestos_mecanico WHERE id = ?",
+                                  (_id_g2,)).fetchone()[0]),
+             ns["c"].execute("SELECT COUNT(*) FROM historial_piezas WHERE vehiculo_id = ?",
+                             (_auto_g[0],)).fetchone()[0], [e.value for e in _portal.exception]),
+            (True, 3, []))
+    # Solo su taller lo anota: con otra cuenta adentro, ni llamando a la función.
+    _otro_taller = ns["crear_mecanico"]("Otro Taller De La Patente", "clave-otro-taller-1")
+    _presu_g3 = ns["guardar_presupuesto_mecanico"](taller, "", [dict(_items_g[1])], 0,
+                                                   patente="AG777KL")
+    _id_g3 = ns["c"].execute("SELECT MAX(id) FROM presupuestos_mecanico WHERE mecanico_id = ?",
+                             (taller,)).fetchone()[0]
+    esperar("con el número de otra cuenta, no es suyo",
+            ns["anotar_presupuesto_en_el_auto"](_otro_taller, _id_g3)[0], False)
+    _g_cuenta = ns["exigir_que_sea_su_cuenta"].__globals__
+    _adentro_real = _g_cuenta["_nivel_de_quien_esta_adentro"]
+    _estado_g = dict(st.session_state)
+    try:
+        _g_cuenta["_nivel_de_quien_esta_adentro"] = lambda: "mecanico"
+        st.session_state["mecanico_id"] = _otro_taller
+        try:
+            ns["anotar_presupuesto_en_el_auto"](taller, _id_g3)
+            _pudo_otro = True
+        except PermissionError:
+            _pudo_otro = False
+        esperar("otro taller adentro no puede anotar el presupuesto de este", _pudo_otro, False)
+    finally:
+        _g_cuenta["_nivel_de_quien_esta_adentro"] = _adentro_real
+        st.session_state.clear()
+        st.session_state.update(_estado_g)
+    # Lo que ve el dueño del auto: lo del taller, sin el nombre de su cliente ni las notas.
+    _publico_g, _ = ns["abrir_ficha_publica"]("AG777KL", solo_patente=True)
+    _json_g = json.dumps(_publico_g, ensure_ascii=False, default=str)
+    esperar("el dueño del auto ve lo que le cambió el taller, sin nombres ni notas",
+            (len(_publico_g["historial"]) if _publico_g else None, "Juan" in _json_g,
+             "Lo anotó" in _json_g, "Taller Sesión" in _json_g), (3, False, False, False))
+    # «🚗 Ver mi auto» en «🔑 Ingresar»: abre su auto con la patente sola, y vuelve.
+    for _cerrada_g in ("", "si"):
+        ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], _cerrada_g)
+        ns["conn"].commit()
+        _dueno = _visitante()
+        _dueno.text_input(key="ingreso_patente").set_value("ag 777 kl")
+        [b for b in _dueno.button if b.label == "🔎 Ver mi auto"][0].click().run()
+        _como = "cerrada" if _cerrada_g else "abierta"
+        esperar(f"con la página {_como}, «Ver mi auto» con la patente sola abre su auto",
+                (any("Tu auto en El Chavo" in m.value for m in _dueno.markdown),
+                 any("Todo lo que se le cambió" in m.value for m in _dueno.markdown),
+                 len(_dueno.dataframe) >= 1, [e.value for e in _dueno.exception]),
+                (True, True, True, []))
+        _dueno.button(key="volver_de_la_consulta").click().run()
+        esperar(f"con la página {_como}, «Volver a la página» sale de su auto",
+                (any("Tu auto en El Chavo" in m.value for m in _dueno.markdown),
+                 "busqueda_input" in [w.key for w in _dueno.text_input],
+                 "login_inicial_nombre" in [w.key for w in _dueno.text_input]),
+                (False, not _cerrada_g, True))
+    ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], "")
+    # La opción la cambia solo el administrador: ni el operador, ni el taller, ni el que no
+    # entró, aunque llamen a la función.
+    _g_auto = ns["cambiar_como_se_ve_el_auto"].__globals__
+    _adentro_auto = _g_auto["_nivel_de_quien_esta_adentro"]
+    try:
+        for _nivel_g in ("operador", "mecanico", ""):
+            _g_auto["_nivel_de_quien_esta_adentro"] = lambda _n=_nivel_g: _n
+            try:
+                ns["cambiar_como_se_ve_el_auto"](False)
+                _pudo_g = True
+            except PermissionError:
+                _pudo_g = False
+            esperar(f"un «{_nivel_g or 'sin entrar'}» no puede cambiar cómo se ve el auto",
+                    (_pudo_g, ns["se_ve_el_auto_con_la_patente_sola"]()), (False, True))
+    finally:
+        _g_auto["_nivel_de_quien_esta_adentro"] = _adentro_auto
+    # Con la opción apagada, la patente sola no abre: pide además los 4 números.
+    ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "no")
+    ns["conn"].commit()
+    try:
+        _apagado = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+        _apagado.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+        _apagado.query_params["auto"] = "AG777KL"
+        _apagado.run()
+        esperar("apagada la patente sola, pide además los 4 números y no muestra el auto",
+                (len(_apagado.text_input), len(_apagado.dataframe),
+                 [e.value for e in _apagado.exception]), (2, 0, []))
+        # La opción, en 👥 Usuarios: solo el administrador, con su botón.
+        _adm_g = _visitante(nivel_usuario="admin", admin_nombre="duenio",
+                            pagina_actual="🗂️ Administrar", sub_admin=ns["SUB_ADMIN"][5])
+        _adm_g.radio(key="como_se_ve_el_auto").set_value(ns["COMO_SE_VE_EL_AUTO"][0]).run()
+        esperar("elegir la opción no la cambia: ofrece guardar",
+                (ns["se_ve_el_auto_con_la_patente_sola"](),
+                 [b.key for b in _adm_g.button if b.key == "guardar_como_se_ve_el_auto"]),
+                (False, ["guardar_como_se_ve_el_auto"]))
+        _adm_g.button(key="guardar_como_se_ve_el_auto").click().run()
+        esperar("con «Guardar», vuelve la patente sola (y queda anotado quién)",
+                (ns["se_ve_el_auto_con_la_patente_sola"](),
+                 ns["c"].execute("SELECT usuario FROM registro_de_cambios WHERE entidad_id = ? "
+                                 "ORDER BY id DESC LIMIT 1",
+                                 (ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"],)).fetchone()[0],
+                 [e.value for e in _adm_g.exception]), (True, "duenio", []))
+    finally:
+        ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "")
+        ns["conn"].commit()
 
     # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
     # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el

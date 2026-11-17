@@ -1168,6 +1168,7 @@ if pagina == PAGINAS[3]:
             # Quién entra sin cuenta, antes que las cuentas: ver «LA PÁGINA, SOLO CON CUENTA»
             # en logica/base.py.
             mostrar_la_llave_de_solo_con_cuenta()
+            mostrar_como_se_ve_el_auto()
             st.markdown("---")
             st.markdown("**👤 Empleados (admin / operador)**")
             explicar(

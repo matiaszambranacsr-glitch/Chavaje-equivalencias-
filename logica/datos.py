@@ -1679,6 +1679,17 @@ def _esquema_gestion(c):
         creado_en TEXT DEFAULT (datetime('now'))
     )""")
 
+    # EN QUÉ AUTO, SI EL TALLER QUIERE: la patente y el km del presupuesto, y cuándo lo anotó
+    # en el historial del auto («✅ Ya se lo puse»). Ver «EL TALLER ANOTA EN QUÉ AUTO LO PUSO»
+    # en logica/mecanico.py.
+    _cols_presupuestos = [f[1] for f in c.execute("PRAGMA table_info(presupuestos_mecanico)")]
+    if "patente" not in _cols_presupuestos:
+        c.execute("ALTER TABLE presupuestos_mecanico ADD COLUMN patente TEXT")
+    if "km" not in _cols_presupuestos:
+        c.execute("ALTER TABLE presupuestos_mecanico ADD COLUMN km INTEGER")
+    if "anotado_en" not in _cols_presupuestos:
+        c.execute("ALTER TABLE presupuestos_mecanico ADD COLUMN anotado_en TEXT")
+
     # La CUENTA CORRIENTE de cada taller: lo que se lleva fiado y lo que paga. Ver la sección
     # «CUENTA CORRIENTE DE LOS TALLERES» en logica/mecanico.py.
     # Sin clave foránea a propósito: borrar un mecánico no puede borrar lo que debe.

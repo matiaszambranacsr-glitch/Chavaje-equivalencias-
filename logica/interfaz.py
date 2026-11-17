@@ -580,8 +580,13 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-17c"
+VERSION_DE_LO_NUEVO = "2026-11-17d"
 LO_NUEVO = (
+    ("🚗 El dueño de un auto ve lo que se le fue cambiando con la patente sola, desde «🔑 "
+     "Ingresar» (no hace falta cuenta). Y el taller, si quiere, pone la patente en su "
+     "presupuesto y «✅ Ya se lo puse» lo anota en el auto. Si preferís que además pida los 4 "
+     "números del teléfono, cambialo en «🚗 Cómo ve su auto el cliente».",
+     "🗂️ Administrar → 👥 Usuarios"),
     ("📲 Darle la cuenta a un cliente es un toque: elegilo, «🎲 Inventarle una contraseña» (una "
      "que se dicta sin errores) y «📲 Mandarle cómo entrar»: le llega por WhatsApp la dirección "
      "con su usuario. La contraseña pasásela aparte.",
