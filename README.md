@@ -7150,6 +7150,23 @@ lista de WhatsApp y esto). Ahora es un servicio para los clientes del negocio:
   estas tablas. Ahora, para quien no es del negocio, salen «precio a confirmar»
   (`filas_con_el_precio_para_el_cliente()`): en la lista, en la tabla del chasis, en su Excel y
   en los repuestos de un código de falla. El personal sigue viendo el número.
+- **Y en el Buscador, que lo ve cualquiera.** Tapándolo tabla por tabla había quedado sin
+  tapar lo primero que ve el que entra sin contraseña: con la base real un repuesto de TARANTO
+  salía a $6.940 (con el coeficiente ronda los $106.000), y buscando «junta tapa valvulas»
+  eran 56 renglones así en una sola tabla. Ahora la regla está en `quitar_id()`, que es por
+  donde casi todas las tablas salen a la pantalla y al Excel: no depende de acordarse en cada
+  una. Las tarjetas del celular muestran el precio como viene escrito, y la columna pasa a ser
+  de texto (`config_de_las_columnas()`; con la de números Streamlit dibuja un triángulo de
+  error en cada celda). Tres tablas se armaban a mano y no pasaban por ahí —los kits que traen
+  la pieza, lo que trae el kit y «sirven para los mismos autos»—: ahora sí (las de los kits,
+  de paso, dejaron de mostrar la columna «ID», el número interno del producto). La prueba arma
+  una lista de verdad fuera de escala (32 comparaciones contra dos proveedores) y mira todo lo
+  que ven el taller y el invitado: el número crudo no aparece en ninguna tabla ni texto, y el
+  administrador lo sigue viendo, con su aviso.
+- **El título del resultado, sin el análisis del negocio.** Al que mira sin contraseña le
+  decía «2 equivalencias (2 a revisar)» arriba de una tabla que no trae la columna
+  «Veredicto» (`COLUMNAS_DEL_NEGOCIO`): no sabe qué hay que revisar ni quién. Ahora ve
+  cuántas son; el desglose («1 🟢 · 2 a revisar») sigue para el personal.
 - **Lo que hace falta del lado del negocio:** que los clientes tengan cuenta. En la base real
   todavía no hay ninguna: se crean en 🗂️ Administrar → 👥 Usuarios («🔧 Mecánicos externos:
   talleres, mayoristas y clientes con cuenta»), de a una o pegando muchas de Excel.

@@ -536,6 +536,23 @@ def probar():
                     ["$1.500", "precio a confirmar"])
             esperar("si no hay ninguna de esas listas, la tabla va tal cual",
                     ns["filas_con_el_precio_para_el_cliente"]([_f_ok])[0]["Precio"], 1500.0)
+            # Lo hace quitar_id(), que es por donde salen casi todas las tablas (el Buscador
+            # sin contraseña mostraba el número crudo). Y dos veces da lo mismo: una pantalla
+            # puede llamarla y después pasar la tabla por quitar_id().
+            esperar("quitar_id() ya lo trae como a un cliente",
+                    [f["Precio"] for f in ns["quitar_id"](_tabla)],
+                    ["$1.500", "precio a confirmar"])
+            esperar("dos veces da lo mismo",
+                    [f["Precio"] for f in ns["quitar_id"](
+                        ns["filas_con_el_precio_para_el_cliente"](_tabla))],
+                    ["$1.500", "precio a confirmar"])
+            # Con el precio escrito, la columna es de texto: con la de números Streamlit
+            # dibuja un triángulo de error en cada celda.
+            esperar("la columna del precio escrito es de texto",
+                    (ns["config_de_las_columnas"](ns["quitar_id"](_tabla))["Precio"]
+                     ["type_config"]["type"],
+                     ns["config_de_las_columnas"]([_f_ok])["Precio"]["type_config"]["type"]),
+                    ("text", "number"))
             st.session_state["nivel_usuario"] = "operador"
             esperar("al personal, el número",
                     [f["Precio"] for f in ns["filas_con_el_precio_para_el_cliente"](_tabla)],

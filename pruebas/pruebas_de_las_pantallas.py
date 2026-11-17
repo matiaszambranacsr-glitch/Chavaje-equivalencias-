@@ -736,6 +736,135 @@ def probar():
         elif _se_puede_v and "Presupuesto actual (1 ítem(s))" not in " ".join(
                 m.value for m in at.markdown):
             fallas.append("taller, en su portal no está lo que sumó desde el auto")
+    # EL PRECIO DE LA LISTA EN OTRA ESCALA, AL QUE NO ES DEL NEGOCIO, NO SE LE MUESTRA. El dueño
+    # lo decidió para el portal y la cotización, y quedó sin tapar el Buscador, que es lo que
+    # ve cualquiera sin contraseña: con la base real un repuesto de TARANTO salía a $6.940 (con
+    # el coeficiente ronda los $106.000) y «junta tapa valvulas» eran 56 renglones así. Acá se
+    # arma una lista de verdad fuera de escala —32 comparaciones contra dos proveedores, a
+    # $137 contra $1.500 y $1.600— y se mira todo lo que ve el taller y el invitado: el
+    # número crudo no aparece en ninguna tabla ni en ningún texto; el administrador sí lo ve.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('OTRA ESCALA', 'PROVEEDOR')")
+    _m_fuera = c.lastrowid
+    _ids_fuera = []
+    for _n in range(16):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                  "precio) VALUES (?, ?, ?, ?, 137)",
+                  (f"ZZESC{_n:02d}", f"ZZESC{_n:02d}", f"JUNTA ZZESCALA DE PRUEBA {_n}", _m_fuera))
+        _ids_fuera.append(c.lastrowid)
+    for _marca_e, _precio_e in (("ESCALA UNO", 1500), ("ESCALA DOS", 1600)):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (_marca_e,))
+        _m_e = c.lastrowid
+        for _n, _id_f in enumerate(_ids_fuera):
+            c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                      "precio) VALUES (?, ?, ?, ?, ?)",
+                      (f"ZZ{_marca_e[-3:]}{_n:02d}", f"ZZ{_marca_e[-3:]}{_n:02d}",
+                       f"JUNTA ZZESCALA DE PRUEBA {_n}", _m_e, _precio_e))
+            c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)",
+                      (_id_f, c.lastrowid))
+    # Y un kit de esa lista que trae adentro el que se va a buscar: la tabla «📦 También viene
+    # en kit» se armaba a mano, sin pasar por quitar_id(), y mostraba el precio crudo (y la
+    # columna «ID», el número interno del producto).
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+              "VALUES ('ZZESCKIT', 'ZZESCKIT', 'KIT DE JUNTAS CON ZZESC03 Y ZZUNO03', ?, 137)",
+              (_m_fuera,))
+    conn.commit()
+    ns["olvidar_la_escala_de_precios"]()
+    if "OTRA ESCALA" not in ns["marcas_con_precios_fuera_de_escala"]():
+        fallas.append("la lista de la prueba no quedó fuera de escala: "
+                      f"{ns['escala_de_precios_por_marca']().get('OTRA ESCALA')}")
+
+    def _el_precio_crudo(donde):
+        """Dónde se ve el $137 de la lista fuera de escala: en una tabla (el número, o escrito)
+        o en un texto. Y si en lo que se mira está «precio a confirmar»."""
+        _visto, _a_confirmar = [], False
+        for _d in at.dataframe:
+            try:
+                _df = _d.value
+            except Exception:
+                continue
+            for _col in _df.columns:
+                for _x in _df[_col]:
+                    if _x == 137 or (isinstance(_x, str) and re.search(r"\$ ?137\b", _x)):
+                        _visto.append(f"{donde}: tabla, columna «{_col}»: {_x!r}")
+                    _a_confirmar = _a_confirmar or _x == "precio a confirmar"
+        _textos = [str(getattr(_x, "value", "")) for _clase in
+                   ("markdown", "caption", "info", "warning", "success", "text", "text_area",
+                    "code") for _x in getattr(at, _clase)]
+        _textos += [_b.label for _b in at.button] + [_e.label for _e in at.expander]
+        for _tx in _textos:
+            if re.search(r"\$ ?137\b", _tx.replace("\\", "")):
+                _visto.append(f"{donde}: texto: {_tx[:90]!r}")
+            _a_confirmar = _a_confirmar or "precio a confirmar" in _tx
+        for _e in at.exception:
+            _visto.append(f"{donde}: {_e.value[:160]}")
+        return _visto, _a_confirmar
+
+    def _controlar_que_no_se_ve(quien, donde, tiene_que_decirlo=True):
+        _visto, _a_confirmar = _el_precio_crudo(f"{quien}, {donde}")
+        fallas.extend(f"el precio de la lista fuera de escala, a la vista: {_v}" for _v in _visto)
+        if tiene_que_decirlo and not _a_confirmar:
+            fallas.append(f"{quien}, {donde}: no dice «precio a confirmar» (¿se buscó?)")
+
+    # El taller (sigue con su cuenta): en su portal y en lo que suma al presupuesto.
+    at.session_state["pagina_actual"] = ns["PAGINA_DEL_PORTAL"]
+    at.run()
+    at.text_input(key="mec_busqueda").set_value("ZZESC03").run()
+    _controlar_que_no_se_ve("taller", "su portal, por código")
+    at.text_input(key="mec_busqueda").set_value("junta zzescala").run()
+    _controlar_que_no_se_ve("taller", "su portal, por palabras")
+    # El invitado: el Buscador (las tarjetas del celular y la tabla), por palabras, y la lista
+    # para WhatsApp.
+    [b for b in at.button if b.label == "Salir"][0].click().run()
+    at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    at.session_state["modo_busqueda"] = "Código"
+    at.run()
+    at.text_input(key="busqueda_input").set_value("ZZESC03")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    _controlar_que_no_se_ve("sin contraseña", "Buscador por código, tarjetas")
+    for _tg in at.toggle:
+        if "Ver como tabla" in _tg.label:
+            _tg.set_value(True)
+    at.run()
+    _controlar_que_no_se_ve("sin contraseña", "Buscador por código, tabla")
+    if not any("Precio" in _d.value.columns and "$1.500" in list(_d.value["Precio"])
+               for _d in at.dataframe):
+        fallas.append("sin contraseña, Buscador por código: la tabla no trae el precio de las "
+                      "listas que sí están en escala, escrito «$1.500»")
+    # El título del resultado, sin el desglose del negocio («2 a revisar», «1 🟢»): es el
+    # análisis que el que mira sin contraseña no ve en la tabla.
+    _titulos = [_e.label for _e in at.expander if _e.label.startswith("🔎 ZZESC03")]
+    if not _titulos or any(_x in _t for _t in _titulos for _x in ("revisar", "🟢", "🟡", "(")):
+        fallas.append(f"sin contraseña, el título del resultado trae el desglose: {_titulos}")
+    _del_kit = [_d.value for _d in at.dataframe if "ZZESCKIT" in str(_d.value)]
+    if not _del_kit or any("ID" in _df.columns for _df in _del_kit):
+        fallas.append("sin contraseña, Buscador por código: la tabla del kit no aparece, o trae "
+                      f"la columna «ID» ({[list(_df.columns) for _df in _del_kit]})")
+    at.text_input(key="busqueda_input").set_value("junta zzescala de prueba")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    _controlar_que_no_se_ve("sin contraseña", "Buscador por palabras")
+    at.session_state["pagina_actual"] = ns["PAGINAS"][5]
+    at.run()
+    at.text_area[0].set_value("ZZESC03\nZZUNO03")
+    [b for b in at.button if "Agregar todos" in b.label][0].click().run()
+    _controlar_que_no_se_ve("sin contraseña", "Lista WhatsApp", tiene_que_decirlo=False)
+    # Y el del negocio lo sigue viendo, con su aviso: si no, lo de arriba no probaría nada.
+    entrar("duenio", "clave-duenio-1")
+    # (buscar palabras deja el Buscador en «Descripción»: se vuelve a «Código»)
+    at.session_state["pagina_actual"], at.session_state["modo_busqueda"] = ns["PAGINAS"][0], "Código"
+    at.run()
+    at.text_input(key="busqueda_input").set_value("ZZESC03")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    for _tg in at.toggle:
+        if "Ver como tabla" in _tg.label:
+            _tg.set_value(True)
+    at.run()
+    if not _el_precio_crudo("administrador")[0]:
+        fallas.append("el administrador no ve el precio de la lista fuera de escala")
+    if not any("otra escala" in _w.value for _w in at.warning):
+        fallas.append("el administrador no tiene el aviso de la lista en otra escala")
+    if not any(_e.label.startswith("🔎 ZZESC03") and "(" in _e.label for _e in at.expander):
+        fallas.append("el administrador no tiene el desglose en el título del resultado: "
+                      f"{[_e.label for _e in at.expander if 'ZZESC03' in _e.label]}")
     tiempos.sort(reverse=True)
     if len(abiertos) < 5:
         fallas.append(f"se abrieron pocos desplegables perezosos: {sorted(abiertos)}")

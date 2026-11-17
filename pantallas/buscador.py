@@ -1005,16 +1005,20 @@ if pagina == PAGINAS[0]:
                     # Cuántas de cada clase: «12 equivalencias» contaba igual lo confirmado que lo
                     # que hay que revisar o la ficha da en rojo (en 1.500 búsquedas al azar de la
                     # copia de la base, la mayoría de lo que sale no está confirmado).
+                    # Al que mira sin ser del negocio, solo cuántas: el desglose es el análisis
+                    # del negocio, como la columna «Veredicto», que él no ve (ver
+                    # COLUMNAS_DEL_NEGOCIO). Le salía «2 equivalencias (2 a revisar)» arriba de
+                    # una tabla que no dice qué hay que revisar ni quién.
                     _clases = collections.Counter(
                         veredicto_de_la_equivalencia(f)[:1] for f in alternativas)
-                    _desglose = " · ".join(x for x in (
+                    _desglose = "" if solo_mirar() else " · ".join(x for x in (
                         f"{_clases['🟢']} 🟢" if _clases["🟢"] else "",
                         f"{_clases['🟡']} 🟡" if _clases["🟡"] else "",
                         (f"{len(alternativas) - _clases['🟢'] - _clases['🟡']} a revisar"
                          if len(alternativas) > _clases["🟢"] + _clases["🟡"] else "")) if x)
                     etiqueta_resultado = (f"🔎 {codigo_individual} — {len(alternativas)} "
                                           f"equivalencia" + ("s" if len(alternativas) != 1 else "")
-                                          + f" ({_desglose})")
+                                          + (f" ({_desglose})" if _desglose else ""))
                 else:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin equivalencias todavía"
                 # Cuántos vínculos de lo buscado esperan en la cola: el que atiende los puede
@@ -1276,7 +1280,7 @@ if pagina == PAGINAS[0]:
                                 st.dataframe(
                                     con_stock_legible(mostrar), width="stretch", hide_index=True,
                                     column_order=columnas_que_dicen_algo(mostrar),
-                                    column_config=CONFIG_COLUMNAS_RESULTADO,
+                                    column_config=config_de_las_columnas(mostrar),
                                 )
                             # Debajo de los precios, que es donde se mira antes de cotizar.
                             _fuera_aca = sorted({f.get("Marca") for f in res
@@ -1630,15 +1634,16 @@ if pagina == PAGINAS[0]:
                                 "otra plata—. Se muestran porque suele ser la venta más grande y "
                                 "le ahorra al cliente volver por la otra pieza."
                             )
-                            st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
-                                          for f in _kits], width="stretch", hide_index=True)
+                            # Por quitar_id(), como las demás tablas: salía la columna «ID» —el
+                            # número interno del producto— y, al que mira sin contraseña, el
+                            # precio crudo de la lista que está en otra escala.
+                            st.dataframe(quitar_id(_kits), width="stretch", hide_index=True)
                         if _contenido:
                             st.markdown("**🧩 Lo que trae el kit por separado — tampoco es lo mismo**",
                                         help="Si el cliente no quiere el kit entero, estas son las "
                                              "piezas sueltas que nombra la descripción. Cada una es "
                                              "**una parte** del kit, no un reemplazo del kit.")
-                            st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
-                                          for f in _contenido], width="stretch", hide_index=True)
+                            st.dataframe(quitar_id(_contenido), width="stretch", hide_index=True)
 
                         # Anotar la venta, reponer, pedir al depósito, editar precio y stock:
                         # es del mostrador. Sin sesión no se ve (antes se veía apagado, con un
@@ -1978,7 +1983,10 @@ if pagina == PAGINAS[0]:
                                     f"✅ **Tenés {len(reemplazos)} repuesto(s) que sirven para los "
                                     "mismos autos**, según el catálogo de sus propios fabricantes:"
                                 )
-                                st.dataframe(reemplazos, width="stretch", hide_index=True)
+                                # Por quitar_id(): al que mira sin contraseña, el precio como
+                                # a un cliente (ver filas_con_el_precio_para_el_cliente()).
+                                st.dataframe(quitar_id(reemplazos), width="stretch",
+                                             hide_index=True)
                                 st.caption(
                                     "Los que tienen stock van primero. Confirmá con el cliente "
                                     "el modelo y el año antes de cerrar: el catálogo dice a qué "
@@ -2184,7 +2192,7 @@ if pagina == PAGINAS[0]:
                         st.dataframe(con_stock_legible(_tabla_ap), width="stretch",
                                      hide_index=True,
                                      column_order=columnas_que_dicen_algo(_tabla_ap),
-                                     column_config=CONFIG_COLUMNAS_RESULTADO,
+                                     column_config=config_de_las_columnas(_tabla_ap),
                                      key="tabla_resultados_texto_aparte",
                                      selection_mode="single-row",
                                      on_select=functools.partial(
@@ -2256,7 +2264,7 @@ if pagina == PAGINAS[0]:
                 _tabla_txt = para_mostrar(quitar_id(_res_vista))
                 st.dataframe(con_stock_legible(_tabla_txt), width="stretch", hide_index=True,
                              column_order=columnas_que_dicen_algo(_tabla_txt),
-                             column_config=CONFIG_COLUMNAS_RESULTADO,
+                             column_config=config_de_las_columnas(_tabla_txt),
                              key="tabla_resultados_texto", selection_mode="single-row",
                              on_select=functools.partial(
                                  abrir_la_fila_elegida, "tabla_resultados_texto", _res_vista))
@@ -2295,7 +2303,7 @@ if pagina == PAGINAS[0]:
                                 _tabla_eq = para_mostrar(quitar_id(equivalentes))
                                 st.dataframe(con_stock_legible(_tabla_eq), width="stretch", hide_index=True,
                                              column_order=columnas_que_dicen_algo(_tabla_eq),
-                                             column_config=CONFIG_COLUMNAS_RESULTADO)
+                                             column_config=config_de_las_columnas(_tabla_eq))
                             else:
                                 st.caption("Este producto todavía no tiene equivalencias cargadas.")
 

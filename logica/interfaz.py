@@ -580,8 +580,13 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-16b"
+VERSION_DE_LO_NUEVO = "2026-11-17"
 LO_NUEVO = (
+    ("💲 El que mira el Buscador sin contraseña ya no ve el precio de la lista que está en otra "
+     "escala: le sale «precio a confirmar», en la tabla, en las tarjetas del celular y en el "
+     "Excel (TARANTO se veía quince veces más barato). Vos y tu personal lo siguen viendo, con "
+     "el aviso. Se corrige de raíz cargando el coeficiente de esa lista (📏).",
+     "🗂️ Administrar → 🏷️ Marcas"),
     ("🚙 El taller que entra con su cuenta arma el presupuesto desde el auto: en el Modo "
      "Mecánico → Repuestos por vehículo cada repuesto tiene su «➕», y el código lo lleva a su "
      "portal. Ahí ve el precio como un cliente: la lista en otra escala sale «a confirmar» "
@@ -2622,7 +2627,10 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
     _alguno_con_stock = alguno_trae_stock(filas)
     for f in filas[:tope]:
         _semaforo = semaforo_del_stock(f) if _alguno_con_stock else ""
-        _precio = formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio"
+        # Al que no es del negocio el precio le puede venir ya escrito («precio a confirmar»,
+        # ver filas_con_el_precio_para_el_cliente()): va como viene.
+        _precio = (f["Precio"] if isinstance(f.get("Precio"), str) and f["Precio"]
+                   else formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio")
         # Sin sesión, sin el análisis ni dónde está en el depósito: igual que en la tabla (ver
         # COLUMNAS_DEL_NEGOCIO).
         _del_negocio = not solo_mirar()

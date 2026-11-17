@@ -549,8 +549,8 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
                              in (None, _elegida)]
         st.caption(f"Mostrando {len(filas)} de {len(r['del_catalogo'])}.")
         # Al que no es del negocio, el precio como se le dice a un cliente (la lista en otra
-        # escala, «a confirmar»): en la tabla y en el Excel.
-        _a_la_vista = quitar_id(filas_con_el_precio_para_el_cliente(filas))
+        # escala, «a confirmar»): en la tabla y en el Excel. Lo hace quitar_id().
+        _a_la_vista = quitar_id(filas)
         st.dataframe(_a_la_vista, width="stretch", hide_index=True)
         # El taller, de acá a su presupuesto (ver «DEL AUTO AL PRESUPUESTO» en mecanico.py).
         if st.session_state.get("nivel_usuario") == "mecanico":

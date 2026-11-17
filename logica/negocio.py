@@ -2888,9 +2888,14 @@ def con_veredicto(res, clean_code):
 def quitar_id(filas):
     """Quita la clave ID —y las internas, las que empiezan con «_»— de cada diccionario, para
     mostrar en pantalla o bajar a Excel. Las internas se veían como columnas: «_mediana»,
-    «_prop», «_total» en «A quién conviene comprarle»."""
+    «_prop», «_total» en «A quién conviene comprarle».
+
+    Es la puerta por la que casi todas las tablas salen a la pantalla, y por eso acá también
+    se le acomoda el precio al que no es del negocio (ver
+    filas_con_el_precio_para_el_cliente()): tapándolo tabla por tabla quedó sin tapar el
+    Buscador, que es lo primero que ve el que entra sin contraseña."""
     return [{k: v for k, v in f.items() if k != "ID" and not str(k).startswith("_")}
-            for f in filas]
+            for f in filas_con_el_precio_para_el_cliente(filas)]
 
 
 def to_excel_bytes(filas, columnas=None):
@@ -3190,15 +3195,34 @@ def filas_con_el_precio_para_el_cliente(filas):
     «🚙 Repuestos por vehículo» mostraba el número crudo: con la base real, para el Gol, 16
     repuestos de TARANTO a $745 —la lista que cuesta 0,07 veces lo que sus equivalentes—, a la
     vista del taller que después viene a buscarlo a ese precio. El dueño ya había decidido que
-    al cliente ese número no se le muestra; faltaba esta tabla."""
+    al cliente ese número no se le muestra; faltaba esta tabla.
+
+    Y faltaba el Buscador, que lo ve cualquiera sin contraseña: en la base real un repuesto de
+    TARANTO salía a $6.940 (con el coeficiente ronda los $106.000), y buscando «junta tapa
+    valvulas» eran 56 renglones así en una sola tabla. Por eso ahora lo llama quitar_id(), que
+    es por donde pasan casi todas las tablas, y no cada pantalla por su cuenta.
+
+    Se puede llamar dos veces sobre las mismas filas: el precio que ya es texto queda como
+    está (pasa cuando una pantalla la llama y después la tabla pasa por quitar_id())."""
     if not solo_mirar():
         return filas
     fuera = marcas_con_precios_fuera_de_escala()
     if not any(f.get("Precio") and f.get("Marca") in fuera for f in filas):
         return filas
     # Toda la columna pasa a texto: mezclar números y «precio a confirmar» rompe la tabla.
-    return [{**f, "Precio": precio_para_el_cliente(f, fuera)} if "Precio" in f else f
+    return [{**f, "Precio": precio_para_el_cliente(f, fuera)}
+            if "Precio" in f and not isinstance(f["Precio"], str) else f
             for f in filas]
+
+
+def config_de_las_columnas(filas):
+    """CONFIG_COLUMNAS_RESULTADO para ESAS filas. Si el precio va como texto (ver
+    filas_con_el_precio_para_el_cliente()), la columna tiene que ser de texto: con la de
+    números, Streamlit pone un triángulo rojo de error en cada celda —«no se puede leer como
+    número»—, también en las que dicen «$1.234»."""
+    if any(isinstance(f.get("Precio"), str) for f in filas):
+        return {**CONFIG_COLUMNAS_RESULTADO, "Precio": st.column_config.TextColumn("Precio")}
+    return CONFIG_COLUMNAS_RESULTADO
 
 
 def texto_para_pagar(alias):
