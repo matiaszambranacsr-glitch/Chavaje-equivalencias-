@@ -871,6 +871,25 @@ def probar():
             ([x.value for x in _adm.code], "_acceso_recien_dado" in _adm.session_state,
              len([b for b in _adm.get("link_button") if "Mandarle cómo entrar" in b.label])),
             ([], False, 1))
+    # La dirección del mensaje deja puesto su usuario, también con la página cerrada: es lo
+    # que le llega al cliente, y si llegara vacío no sabría qué poner.
+    for _cerrada in ("", "si"):
+        ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], _cerrada)
+        ns["conn"].commit()
+        _con_link = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+        _con_link.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+        _con_link.query_params["cuenta"] = str(_cuenta_acceso)
+        _con_link.run()
+        esperar(f"el link del mensaje trae puesto su usuario (página {'cerrada' if _cerrada else 'abierta'})",
+                ([w.value for w in _con_link.text_input if w.key == "login_inicial_nombre"],
+                 [e.value for e in _con_link.exception]), ([str(_cuenta_acceso)], []))
+        if _cerrada:
+            _entrar(_con_link, str(_cuenta_acceso), _clave_inventada)
+            esperar("y con la contraseña inventada entra a su portal",
+                    (_con_link.radio(key="pagina_actual").options,
+                     [e.value for e in _con_link.exception]), (ns["PAGINAS_DEL_TALLER"], []))
+    ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], "")
+    ns["conn"].commit()
     # Y si se elige otra cuenta antes de tocarlo, tampoco: no se le muestra la de otro.
     _adm.button(key="mecanico_inventar_clave").click().run()
     _adm.selectbox(key="cuenta_sel_gestionar").set_value(taller).run()
