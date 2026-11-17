@@ -69,6 +69,10 @@ def paginas_a_la_vista(del_deposito):
     if del_deposito:
         return list(PAGINAS_DEL_DEPOSITO)
     if solo_mirar():
+        # Con la página cerrada, quien no entró no tiene ninguna (ver «LA PÁGINA, SOLO CON
+        # CUENTA» en logica/base.py): app.py le muestra el ingreso y corta.
+        if se_entra_solo_con_cuenta():
+            return []
         return [p for p in ORDEN_DE_LAS_PAGINAS if p in PAGINAS_ABIERTAS]
     return list(ORDEN_DE_LAS_PAGINAS)
 
@@ -599,6 +603,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "En «🔧 Mecánicos externos: talleres, mayoristas y clientes con cuenta» poné el nombre y "
      "«➕ Crear la cuenta». La contraseña es opcional: solo si va a entrar a su portal. Para "
      "muchas juntas, «📋 Cargar muchas cuentas de una vez (pegadas de Excel)».",
+     "👥 Usuarios", "admin"),
+    ("solo_con_cuenta", "Que la página se vea solo con cuenta (cerrarla a quien no es cliente)",
+     "cerrar cerrada pagina sin contraseña cualquiera entra entre publico publica abierta "
+     "solo clientes cuenta invitado buscador privado privada bloquear candado afuera",
+     "Arriba de todo está «🔒 Qué se ve sin contraseña». Elegí «Nada: solo entran tu personal "
+     "y los clientes con cuenta» y «💾 Guardar»: el que no entró ve solo el ingreso. Antes "
+     "dales la cuenta a tus clientes, más abajo en esa pantalla. Se vuelve a abrir igual.",
      "👥 Usuarios", "admin"),
     ("cuenta_corriente", "Ver cuánto debe un cliente o registrar que pagó",
      "deuda saldo cuenta corriente pago pagar registrar cobrar taller movimientos "

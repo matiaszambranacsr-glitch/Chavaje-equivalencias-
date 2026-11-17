@@ -508,7 +508,9 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
    (ver «ENCABEZADO» en app.py). Antes eran dos: la tarjeta y otro con la sesión, la vista y
    «Salir», que en el celular ocupaba todo el ancho. */
 .st-key-barra_superior {
-  padding: 8px 10px 8px 12px !important; margin-bottom: 6px;
+  /* El alto, propio: se lo daba el botón de la derecha («🔑 Ingresar» o quién está adentro),
+     y en el ingreso de la página cerrada —que no lleva ninguno— la marca salía cortada. */
+  padding: 8px 10px 8px 12px !important; margin-bottom: 6px; min-height: 3.5rem;
   background: linear-gradient(180deg, var(--bg-panel-2) 0%, var(--bg-panel) 100%);
   border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow);
 }
@@ -1936,6 +1938,123 @@ def puede_ver_el_modo_mecanico():
     return es_empleado_o_abierto() or st.session_state.get("nivel_usuario") == "mecanico"
 
 
+# ============================================================================================
+# LA PÁGINA, SOLO CON CUENTA
+# ============================================================================================
+# El dueño pidió el Modo Mecánico solo para clientes «ya que si no cualquiera se va a meter en
+# la página y lo va a usar sin ser clientes nuestros». Con el Buscador pasa lo mismo —ahí están
+# las equivalencias, que es lo que el negocio sabe—, pero cerrarlo de prepo dejaba afuera a
+# todos los que hoy lo usan sin cuenta: en la base real no había todavía ninguna cuenta de
+# cliente. Por eso es una llave que da vuelta él, cuando ya las repartió: 🗂️ Administrar →
+# 👥 Usuarios → «🔒 Qué se ve sin contraseña». Viene abierta, como estaba.
+# Cerrada, el que no entró ve solo el ingreso: ni la barra, ni el Buscador, ni el asistente
+# (app.py corta ahí, antes de dibujar nada más). El personal y el taller o cliente con cuenta
+# entran como siempre, y el link que se le manda a un cliente para ver su auto («?auto=…»)
+# sigue andando: se atiende antes. Sin ninguna contraseña configurada la llave no hace nada:
+# no habría con qué entrar.
+CLAVE_DE_SOLO_CON_CUENTA = "solo_con_cuenta"
+SIN_CONTRASENA_SE_VE = ("🔍 El Buscador y la 📋 Lista WhatsApp, como hasta ahora",
+                        "🔒 Nada: solo entran tu personal y los clientes con cuenta")
+
+
+def se_entra_solo_con_cuenta():
+    """¿El dueño cerró la página a quien no tiene cuenta? Si la base no contesta se da por
+    cerrada: es una llave de seguridad, y sin la base el Buscador tampoco tiene qué mostrar."""
+    try:
+        return obtener_config(CLAVE_DE_SOLO_CON_CUENTA, "") == "si"
+    except sqlite3.Error as _err:
+        anotar_error("se_entra_solo_con_cuenta", _err)
+        return True
+
+
+def cambiar_solo_con_cuenta(cerrada):
+    """Da vuelta la llave. Es del administrador (también acá adentro, no solo en la pantalla:
+    ver exigir_nivel()), y queda en el registro de cambios quién la cambió y cuándo."""
+    exigir_nivel("admin", "cambiar qué se ve sin contraseña")
+    _antes = se_entra_solo_con_cuenta()
+    # Primero el registro: guardar_config() es el que confirma, y así van juntos.
+    anotar_cambio("cambió qué se ve sin contraseña", "configuración", CLAVE_DE_SOLO_CON_CUENTA,
+                  antes=SIN_CONTRASENA_SE_VE[int(_antes)],
+                  despues=SIN_CONTRASENA_SE_VE[int(bool(cerrada))])
+    guardar_config(CLAVE_DE_SOLO_CON_CUENTA, "si" if cerrada else "")
+
+
+def la_pagina_pide_cuenta():
+    """True para quien mira sin haber entrado cuando la página está cerrada: ve solo el ingreso.
+    El taller o cliente que entró con su cuenta, no (solo_mirar() también vale para él: en el
+    Modo Mecánico mira y no toca)."""
+    return (solo_mirar() and st.session_state.get("nivel_usuario") != "mecanico"
+            and se_entra_solo_con_cuenta())
+
+
+def mostrar_la_entrada_con_cuenta():
+    """Lo único que ve quien no entró cuando la página está cerrada: el ingreso a la vista —no
+    adentro de «🔑 Ingresar»— y cómo pedir una cuenta."""
+    # Angosto: a todo el ancho de un monitor, dos casilleros de 1.300 px para un nombre y una
+    # contraseña. En el celular ocupa lo que hay.
+    with st.container(key="entrada_con_cuenta", width=520):
+        st.subheader("🔒 Para entrar hace falta una cuenta")
+        st.write("Esta página es para el personal y los clientes del negocio. Entrá con tu "
+                 "usuario —un taller o cliente, con su número de cuenta— y tu contraseña.")
+        mostrar_login_inicial(solo_con_cuenta=True)
+        _numero = obtener_config("whatsapp_del_negocio", "")
+        if _numero and not problema_del_whatsapp_del_negocio(_numero):
+            st.link_button("📲 Pedir una cuenta por WhatsApp",
+                           f"https://wa.me/{_numero}?text="
+                           + quote("Hola! Quiero una cuenta para entrar a la página."),
+                           key="pedir_cuenta_wa")
+        else:
+            st.caption("¿No tenés cuenta? Pedila en el mostrador.")
+
+
+def mostrar_la_llave_de_solo_con_cuenta():
+    """La llave, en 🗂️ Administrar → 👥 Usuarios: qué ve quien no entró. Con un botón aparte
+    para guardar: cerrarla saca de la página a todos los que la usan sin cuenta, y eso no puede
+    pasar por tocar sin querer."""
+    st.markdown("**🔒 Qué se ve sin contraseña**")
+    _cerrada = se_entra_solo_con_cuenta()
+    _elegido = st.radio(
+        "Sin contraseña se ve:", SIN_CONTRASENA_SE_VE, index=int(_cerrada),
+        key="llave_solo_con_cuenta", label_visibility="collapsed",
+        help="Abierta, cualquiera que tenga la dirección de la página busca equivalencias y arma "
+             "una lista para WhatsApp (mira, no toca). Cerrada, el que no tiene cuenta ve solo "
+             "el ingreso: entran tu personal y los talleres y clientes a los que les diste "
+             "cuenta, más abajo en esta pantalla. El link que le mandás a un cliente para que "
+             "vea su auto sigue andando en los dos casos.")
+    _quiere_cerrada = _elegido == SIN_CONTRASENA_SE_VE[1]
+    if _quiere_cerrada == _cerrada:
+        st.caption("🔒 Hoy la página está cerrada: sin cuenta se ve solo el ingreso."
+                   if _cerrada else
+                   "🔓 Hoy cualquiera que tenga la dirección ve el Buscador y la Lista WhatsApp.")
+        return
+    if _quiere_cerrada:
+        if not hay_claves_configuradas():
+            st.warning("Todavía no hay ninguna contraseña: creá primero tu usuario, acá abajo. "
+                       "Sin contraseñas la página queda abierta entera.")
+            return
+        c.execute("SELECT COUNT(*) FROM mecanicos WHERE activo = 1")
+        _cuentas = c.fetchone()[0]
+        st.warning(
+            "Al guardar, el que entre sin cuenta va a ver solo el ingreso. "
+            + (f"Tenés **{miles(_cuentas)}** cuenta(s) de talleres y clientes activas: esos "
+               "entran con su número de cuenta y su contraseña."
+               if _cuentas else
+               "**Todavía no le diste cuenta a ningún taller ni cliente**: va a entrar solo tu "
+               "personal. Las cuentas se crean más abajo, en «🔧 Mecánicos externos»."))
+    else:
+        st.info("Al guardar, cualquiera que tenga la dirección vuelve a ver el Buscador y la "
+                "Lista WhatsApp (mira, no toca).")
+    if st.button("💾 Guardar", key="guardar_solo_con_cuenta", type="primary"):
+        try:
+            cambiar_solo_con_cuenta(_quiere_cerrada)
+        except PermissionError as _err:
+            st.error(el_error_en_castellano(_err))
+            return
+        avisar("success", "🔒 Listo: sin cuenta se ve solo el ingreso." if _quiere_cerrada
+               else "🔓 Listo: el Buscador y la Lista WhatsApp se ven sin contraseña.")
+        st.rerun()
+
+
 def seccion_permitida(nivel, motivo=""):
     """El candado de una SECCIÓN entera: 'empleado' (operador o administrador) o 'admin'.
 
@@ -1988,21 +2107,26 @@ def pedir_password_admin(motivo=""):
     return False
 
 
-def mostrar_login_inicial():
+def mostrar_login_inicial(solo_con_cuenta=False):
     """El nombre y la contraseña, adentro de «🔑 Ingresar». Sin contraseña se sigue igual,
     como Invitado o con el nombre que se ponga. Las acciones destructivas van a seguir pidiendo la
-    contraseña de administrador completo aparte, esto es solo la pantalla de entrada."""
+    contraseña de administrador completo aparte, esto es solo la pantalla de entrada.
+
+    Con `solo_con_cuenta` es el ingreso de la página cerrada (ver «LA PÁGINA, SOLO CON
+    CUENTA»): va a la vista, sin «Continuar sin contraseña» y sin lo que explica cómo seguir
+    sin entrar."""
     # Va adentro de «🔑 Ingresar», arriba de todo (ver app.py): ya no es una pantalla que hay
     # que pasar para llegar al buscador.
-    st.caption(
-        "Con contraseña: poné tu usuario y tu contraseña. Sin contraseña podés seguir igual: "
-        "el nombre es opcional (separa tus búsquedas de las de tus compañeros) y sin nombre "
-        "figurás como «Invitado»."
-    )
-    # Desde que el Modo Mecánico es solo para clientes con cuenta, el que lo usaba sin entrar
-    # tiene que saber dónde quedó y cómo se llega: si no, para él simplemente desapareció.
-    st.caption("🔧 **¿Sos taller o cliente?** Con tu número de cuenta y tu contraseña tenés tu "
-               "portal y el 🛠️ Modo Mecánico. Si no tenés cuenta, pedila en el mostrador.")
+    if not solo_con_cuenta:
+        st.caption(
+            "Con contraseña: poné tu usuario y tu contraseña. Sin contraseña podés seguir "
+            "igual: el nombre es opcional (separa tus búsquedas de las de tus compañeros) y "
+            "sin nombre figurás como «Invitado»."
+        )
+        # Desde que el Modo Mecánico es solo para clientes con cuenta, el que lo usaba sin
+        # entrar tiene que saber dónde quedó y cómo se llega: si no, para él desapareció.
+        st.caption("🔧 **¿Sos taller o cliente?** Con tu número de cuenta y tu contraseña tenés "
+                   "tu portal y el 🛠️ Modo Mecánico. Si no tenés cuenta, pedila en el mostrador.")
     # EL LINK DE UN TALLER (…/?cuenta=123) trae su número de cuenta puesto como usuario.
     _cuenta_del_link = str(st.query_params.get("cuenta", "") or "").strip()
     if _cuenta_del_link.isdigit() and "login_inicial_nombre" not in st.session_state:
@@ -2014,10 +2138,17 @@ def mostrar_login_inicial():
             help="El empleado, su nombre de usuario (como lo cargó el administrador; no importan "
                  "las mayúsculas ni los acentos). El taller o cliente con cuenta, su número de "
                  "cuenta o el nombre de su cuenta.")
-        clave = st.text_input("Contraseña (opcional):", type="password", key="login_inicial_clave")
-        col_a, col_b = st.columns(2)
-        entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary", width="stretch")
-        seguir = col_b.form_submit_button("👤 Continuar sin contraseña", width="stretch")
+        clave = st.text_input("Contraseña:" if solo_con_cuenta else "Contraseña (opcional):",
+                              type="password", key="login_inicial_clave")
+        if solo_con_cuenta:
+            entrar = st.form_submit_button("🔓 Ingresar con contraseña", type="primary",
+                                           width="stretch")
+            seguir = False
+        else:
+            col_a, col_b = st.columns(2)
+            entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary",
+                                              width="stretch")
+            seguir = col_b.form_submit_button("👤 Continuar sin contraseña", width="stretch")
 
     if entrar:
         if not nombre_usuario.strip():

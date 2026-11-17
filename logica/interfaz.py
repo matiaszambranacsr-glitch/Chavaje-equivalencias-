@@ -580,8 +580,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-17"
+VERSION_DE_LO_NUEVO = "2026-11-17b"
 LO_NUEVO = (
+    ("🔒 Si querés, la página se ve solo con cuenta: el que no entró ve el ingreso y nada más "
+     "(ni el Buscador). Viene abierta como siempre; cerrala cuando les hayas dado la cuenta a "
+     "tus clientes. Tu personal y los clientes con cuenta entran igual, y el link del auto de "
+     "un cliente sigue andando.", "🗂️ Administrar → 👥 Usuarios"),
     ("💲 El que mira el Buscador sin contraseña ya no ve el precio de la lista que está en otra "
      "escala: le sale «precio a confirmar», en la tabla, en las tarjetas del celular y en el "
      "Excel (TARANTO se veía quince veces más barato). Vos y tu personal lo siguen viendo, con "

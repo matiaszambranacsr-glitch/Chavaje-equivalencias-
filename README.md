@@ -7171,6 +7171,41 @@ lista de WhatsApp y esto). Ahora es un servicio para los clientes del negocio:
   todavía no hay ninguna: se crean en 🗂️ Administrar → 👥 Usuarios («🔧 Mecánicos externos:
   talleres, mayoristas y clientes con cuenta»), de a una o pegando muchas de Excel.
 
+**La página, solo con cuenta: una llave del dueño.** El pedido fue «si no ponés la contraseña
+en la parte de los mecánicos no se vea, ya que si no cualquiera se va a meter en la página y lo
+va a usar sin ser clientes nuestros». Con el Buscador pasa lo mismo —ahí están las
+equivalencias, que es lo que el negocio sabe—, pero cerrarlo de prepo dejaba afuera a todos los
+que hoy lo usan sin cuenta, y en la base real todavía no hay ninguna cuenta de cliente. Por eso
+es una llave que da vuelta el dueño cuando ya las repartió: 🗂️ Administrar → 👥 Usuarios →
+«🔒 Qué se ve sin contraseña» (`mostrar_la_llave_de_solo_con_cuenta()`). Viene abierta.
+
+- **Cerrada**, el que no entró ve solo el ingreso, a la vista y angosto (`mostrar_la_entrada_con_cuenta()`):
+  ni la barra, ni el Buscador, ni el asistente, ni «Continuar sin contraseña». `app.py` corta
+  ahí, antes de dibujar nada más, y `paginas_a_la_vista()` —la cuenta que usan la barra y el
+  asistente— le da ninguna; ponerse a mano una pantalla en la sesión tampoco sirve. Si el
+  WhatsApp del negocio está cargado, «📲 Pedir una cuenta por WhatsApp»; si no, «pedila en el
+  mostrador».
+- **Entran como siempre** el personal y el taller o cliente con su cuenta. El link que se le
+  manda a un cliente para ver su auto («?auto=…») sigue andando: se atiende antes.
+- **Solo el administrador la da vuelta** (`cambiar_solo_con_cuenta()` lo vuelve a mirar
+  adentro con `exigir_nivel()`), con su botón «💾 Guardar» y no al tocar la opción —cerrarla
+  saca a todos los que la usan sin cuenta—, y antes de guardar dice cuántas cuentas de clientes
+  activas hay («todavía no le diste cuenta a ningún taller ni cliente: va a entrar solo tu
+  personal»). Queda en el registro de cambios quién la cambió y de qué a qué.
+- **Del lado seguro:** si la base no contesta se da por cerrada; sin ninguna contraseña
+  configurada no cierra nada (no habría con qué entrar).
+- **El asistente** le explica al personal cómo se cierra («¿cómo hago para que no entre
+  cualquiera?») y dice que lo hace un administrador. «Que no se vea el buscador sin contraseña»
+  no la encuentra: «sin … contraseña» es lo que frena `_ASIS_PIDE_SALTEAR`, a propósito, y
+  aflojarlo le abriría la puerta a «¿cómo veo Caja sin contraseña?».
+- **De paso, en el encabezado:** el alto se lo daba el botón de la derecha, y en el ingreso de
+  la página cerrada —que no lleva ninguno— la marca salía cortada.
+- **Y la prueba de tiempos del ingreso** («el usuario que no existe no contesta más rápido que el
+  que existe») falló en main con el mismo código que en la rama había pasado: medía una sola
+  vuelta, y en GitHub corren cuatro pruebas a la vez. Ahora compara la mejor de cinco de cada
+  uno, intercaladas; sin el relleno de `_gastar_lo_que_una_prueba()` sigue fallando (20 ms
+  contra 0,1 ms), y con la máquina cargada a propósito pasó 12 de 12.
+
 **La barra.** Eran doce pastillas en fila, sin nada que dijera cuáles iban juntas, y las de la
 trastienda estaban mezcladas. Ahora son tres grupos de cuatro (`GRUPOS_DE_LA_BARRA`), con una
 rayita entre uno y otro:

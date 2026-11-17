@@ -1165,6 +1165,10 @@ if pagina == PAGINAS[3]:
         if not seccion_permitida("admin", "gestionar usuarios"):
             pass
         else:
+            # Quién entra sin cuenta, antes que las cuentas: ver «LA PÁGINA, SOLO CON CUENTA»
+            # en logica/base.py.
+            mostrar_la_llave_de_solo_con_cuenta()
+            st.markdown("---")
             st.markdown("**👤 Empleados (admin / operador)**")
             explicar(
                 "Cuentas creadas desde acá, sin necesidad de tocar la configuración de Streamlit Cloud.",

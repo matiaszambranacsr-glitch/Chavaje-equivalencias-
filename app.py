@@ -23,6 +23,7 @@ específico, y las pantallas quedan todas al final:
         · MODO DE VISTA (celular / computadora)
         · PERMISOS ADENTRO DE LAS FUNCIONES Y REGISTRO DE CAMBIOS
         · CON MILES DE CUENTAS
+        · LA PÁGINA, SOLO CON CUENTA
     logica/datos.py
         · CONEXIÓN Y ESQUEMA
         · TODO O NADA: operaciones que son de varias sentencias
@@ -448,12 +449,20 @@ with _barra_superior:
             if st.button("Salir", width="stretch"):
                 cerrar_sesion()
                 st.rerun()
-    else:
+    elif not la_pagina_pide_cuenta():
         with st.popover("🔑 Ingresar", key="pop_ingresar"):
             st.caption(f"👤 Ahora: {obtener_usuario_actual()}")
             mostrar_login_inicial()
             if not _VISTA_AL_PIE:
                 selector_de_vista(st)
+
+# LA PÁGINA, SOLO CON CUENTA: si el dueño la cerró, quien no entró ve el ingreso —a la vista,
+# no adentro de «🔑 Ingresar»— y nada más: ni la barra, ni el Buscador, ni el asistente. Ver
+# la sección de ese nombre en logica/base.py.
+if la_pagina_pide_cuenta():
+    mostrar_la_entrada_con_cuenta()
+    _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()
+    st.stop()
 
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje

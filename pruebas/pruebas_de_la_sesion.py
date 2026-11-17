@@ -14,6 +14,7 @@ Corre en una carpeta temporal: nunca toca la base de trabajo.
 import os
 import re
 import shutil
+import sqlite3
 import sys
 import tempfile
 
@@ -683,6 +684,147 @@ def probar():
     at.run()
     esperar("ni en la pasada siguiente", ns["papel_del_comprobante"](), "Hoja A4")
     esperar("sin errores en la pantalla", [e.value for e in at.exception], [])
+
+    # 4e. LA PÁGINA, SOLO CON CUENTA. El dueño pidió el Modo Mecánico solo para clientes «ya que
+    # si no cualquiera se va a meter en la página y lo va a usar sin ser clientes nuestros»; con
+    # el Buscador pasa lo mismo, y ahora lo decide él con una llave (🗂️ Administrar → 👥
+    # Usuarios). Viene abierta. Cerrada, el que no entró ve SOLO el ingreso: ni la barra, ni el
+    # Buscador, ni el asistente, ni «Continuar sin contraseña» —y tampoco poniéndose a mano una
+    # pantalla en la sesión—. El personal y el taller con cuenta entran como siempre.
+    def _visitante(**sesion):
+        _v = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+        _v.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+        for _k, _valor in sesion.items():
+            _v.session_state[_k] = _valor
+        return _v.run()
+
+    def _lo_que_ve(_v):
+        return {"barra": [r.key for r in _v.radio if r.key == "pagina_actual"],
+                "buscador": [w.key for w in _v.text_input if w.key == "busqueda_input"],
+                "asistente": [b.key for b in _v.button if "asistente" in (b.key or "")],
+                "seguir sin contraseña": [b.label for b in _v.button
+                                          if "Continuar sin contraseña" in b.label],
+                "ingreso": sorted(w.key for w in _v.text_input
+                                  if (w.key or "").startswith("login_inicial")),
+                "errores": [e.value[:120] for e in _v.exception]}
+
+    _CERRADO = {"barra": [], "buscador": [], "asistente": [], "seguir sin contraseña": [],
+                "ingreso": ["login_inicial_clave", "login_inicial_nombre"], "errores": []}
+    esperar("la llave viene abierta",
+            (ns["se_entra_solo_con_cuenta"](), _lo_que_ve(_visitante())["barra"],
+             _lo_que_ve(_visitante())["buscador"]), (False, ["pagina_actual"], ["busqueda_input"]))
+    # Solo el administrador la da vuelta: ni el operador ni el taller (y queda en el registro).
+    # Acá no hay una sesión de Streamlit corriendo, y sin sesión exigir_nivel() deja pasar (es
+    # como llaman las tareas de fondo): se le dice a mano quién está adentro.
+    import streamlit as st
+    _estado = dict(st.session_state)
+    _g_nivel = ns["exigir_nivel"].__globals__
+    _adentro_de_verdad = _g_nivel["_nivel_de_quien_esta_adentro"]
+    try:
+        for _nivel in ("operador", "mecanico", ""):
+            _g_nivel["_nivel_de_quien_esta_adentro"] = lambda _n=_nivel: _n
+            try:
+                ns["cambiar_solo_con_cuenta"](True)
+                _pudo = True
+            except PermissionError:
+                _pudo = False
+            esperar(f"un «{_nivel or 'sin entrar'}» no puede cerrar la página",
+                    (_pudo, ns["se_entra_solo_con_cuenta"]()), (False, False))
+        _g_nivel["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+        st.session_state.clear()
+        st.session_state["nivel_usuario"], st.session_state["admin_nombre"] = "admin", "duenio"
+        ns["cambiar_solo_con_cuenta"](True)
+        ns["conn"].commit()
+    finally:
+        _g_nivel["_nivel_de_quien_esta_adentro"] = _adentro_de_verdad
+        st.session_state.clear()
+        st.session_state.update(_estado)
+    _anotado = ns["c"].execute("SELECT usuario, antes, despues FROM registro_de_cambios "
+                               "WHERE entidad_id = ? ORDER BY id DESC LIMIT 1",
+                               (ns["CLAVE_DE_SOLO_CON_CUENTA"],)).fetchone()
+    esperar("el administrador sí, y queda anotado quién y qué",
+            (ns["se_entra_solo_con_cuenta"](), tuple(_anotado) if _anotado else None),
+            (True, ("duenio",) + ns["SIN_CONTRASENA_SE_VE"]))
+    try:
+        _v = _visitante()
+        esperar("cerrada, el que no entró ve solo el ingreso", _lo_que_ve(_v), _CERRADO)
+        esperar("y le dice para quién es y cómo pedir la cuenta",
+                (any("hace falta una cuenta" in h.value for h in _v.subheader),
+                 any("Pedila en el mostrador" in x.value for x in _v.caption)), (True, True))
+        esperar("tampoco poniéndose a mano una pantalla en la sesión",
+                [_lo_que_ve(_visitante(pagina_actual=_p)) for _p in
+                 (ns["PAGINAS"][0], ns["PAGINAS"][5], ns["PAGINAS"][7], "🗂️ Administrar")],
+                [_CERRADO] * 4)
+        esperar("ni diciendo que ya eligió seguir sin contraseña",
+                _lo_que_ve(_visitante(usuario_nombre="Invitado")), _CERRADO)
+        esperar("la cuenta de páginas, que también usa el asistente, le da ninguna",
+                ns["paginas_a_la_vista"](False), [])
+        # Con la contraseña equivocada sigue afuera; con la buena, adentro y con toda la barra.
+        _entrar(_v, "duenio", "no-es-esta")
+        esperar("con la contraseña equivocada sigue viendo solo el ingreso",
+                (_lo_que_ve(_v), any("incorrectos" in e.value for e in _v.error)),
+                (_CERRADO, True))
+        _entrar(_v, "duenio", "clave-duenio-1")
+        esperar("el administrador entra, con toda la barra",
+                (_v.radio(key="pagina_actual").options, [e.value for e in _v.exception]),
+                (ns["ORDEN_DE_LAS_PAGINAS"], []))
+        [b for b in _v.button if b.label == "Salir"][0].click().run()
+        esperar("al salir, otra vez solo el ingreso", _lo_que_ve(_v), _CERRADO)
+        _entrar(_v, str(taller), "clave-taller-sesion-1")
+        esperar("el taller con cuenta entra, a su portal y su Modo Mecánico",
+                (_v.radio(key="pagina_actual").options, [e.value for e in _v.exception]),
+                (ns["PAGINAS_DEL_TALLER"], []))
+        # Con el WhatsApp del negocio cargado, la cuenta se pide de un toque.
+        _wa_antes = ns["obtener_config"]("whatsapp_del_negocio", "")
+        ns["guardar_config"]("whatsapp_del_negocio", "5491145678901")
+        try:
+            esperar("con el WhatsApp del negocio cargado, se pide la cuenta por ahí",
+                    [b.url[:28] for b in _visitante().get("link_button")
+                     if "Pedir una cuenta" in b.label], ["https://wa.me/5491145678901?"])
+        finally:
+            ns["guardar_config"]("whatsapp_del_negocio", _wa_antes)
+        # La pantalla del administrador: la llave está en 👥 Usuarios, marcada como está hoy, y
+        # se abre con su botón (no al tocar la opción: cerrarla saca a todos los sin cuenta).
+        _adm = _visitante(nivel_usuario="admin", admin_nombre="duenio",
+                          pagina_actual="🗂️ Administrar", sub_admin=ns["SUB_ADMIN"][5])
+        _llave = _adm.radio(key="llave_solo_con_cuenta")
+        esperar("la llave, en 👥 Usuarios, marcada cerrada y sin nada para guardar",
+                (_llave.value, [b.key for b in _adm.button if b.key == "guardar_solo_con_cuenta"],
+                 [e.value for e in _adm.exception]), (ns["SIN_CONTRASENA_SE_VE"][1], [], []))
+        _llave.set_value(ns["SIN_CONTRASENA_SE_VE"][0]).run()
+        esperar("elegir la otra opción no la cambia: ofrece guardar",
+                (ns["se_entra_solo_con_cuenta"](),
+                 [b.key for b in _adm.button if b.key == "guardar_solo_con_cuenta"]),
+                (True, ["guardar_solo_con_cuenta"]))
+        _adm.button(key="guardar_solo_con_cuenta").click().run()
+        esperar("con «Guardar» se abre, y el que no entró vuelve a ver el Buscador",
+                (ns["se_entra_solo_con_cuenta"](), _lo_que_ve(_visitante())["buscador"],
+                 [e.value for e in _adm.exception]), (False, ["busqueda_input"], []))
+        # Sin ninguna contraseña la llave no hace nada: no habría con qué entrar.
+        ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], "si")
+        _g = ns["la_pagina_pide_cuenta"].__globals__
+        _hay_de_verdad = _g["hay_claves_configuradas"]
+        _g["hay_claves_configuradas"] = lambda: False
+        try:
+            esperar("sin ninguna contraseña configurada, la llave no cierra nada",
+                    ns["la_pagina_pide_cuenta"](), False)
+        finally:
+            _g["hay_claves_configuradas"] = _hay_de_verdad
+        # Si la base no contesta, se da por cerrada: es una llave de seguridad.
+        ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], "")
+        _config_de_verdad = _g["obtener_config"]
+
+        def _no_contesta(*_a, **_k):
+            raise sqlite3.OperationalError("database is locked")
+        _g["obtener_config"] = _no_contesta
+        try:
+            esperar("si la base no contesta, la página se da por cerrada",
+                    ns["se_entra_solo_con_cuenta"](), True)
+        finally:
+            _g["obtener_config"] = _config_de_verdad
+    finally:
+        ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], "")
+        ns["conn"].commit()
 
     # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
     # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el

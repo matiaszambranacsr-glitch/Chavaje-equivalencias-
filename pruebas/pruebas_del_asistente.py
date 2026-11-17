@@ -54,6 +54,12 @@ ENTIENDE = (
     ("que bujia le va", "como:bujia"),
     ("decir que dos codigos son lo mismo", "como:vincular"),
     ("como creo una cuenta para un taller", "como:crear_cuenta"),
+    ("como hago para que no entre cualquiera a la pagina", "como:solo_con_cuenta"),
+    ("quiero cerrar la pagina para que la vean solo mis clientes", "como:solo_con_cuenta"),
+    # («que no se vea el buscador sin contraseña» no: «sin … contraseña» es lo que frena
+    # _ASIS_PIDE_SALTEAR, a propósito. Aflojarlo para esto le abriría la puerta a «¿cómo veo
+    # Caja sin contraseña?». El dueño lo encuentra con cualquiera de estas.)
+    ("que solo mis clientes puedan ver el buscador", "como:solo_con_cuenta"),
     ("cuanto me debe un cliente", "como:cuenta_corriente"),
     ("el taller de juan vino a pagar lo que debe", "como:cuenta_corriente"),
     ("cambiar el limite de credito", "como:limite"),
