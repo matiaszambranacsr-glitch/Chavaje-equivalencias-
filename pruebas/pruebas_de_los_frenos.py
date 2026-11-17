@@ -316,18 +316,26 @@ def probar(L):
                                     usuario=f"#{homonimo}")[1]),
             (("zoe", "operador"), ("Zoe", "mecanico"), "mecanico"))
     # Que no se note si el usuario existe: el que no existe tarda lo mismo que el que sí.
+    # LA MEJOR DE CINCO de cada uno, intercaladas, y no una sola medición: en GitHub corren
+    # cuatro pruebas a la vez, y una vuelta suelta del que existe tardó más del doble (falló en
+    # main con el mismo código que en la rama había pasado). El mínimo es lo que tarda de
+    # verdad; lo demás es la máquina ocupada. Acá dan 20 ms y 20 ms; sin el relleno de
+    # _gastar_lo_que_una_prueba(), 20 ms y 0,1 ms.
     import time as _time
-    ns["guardar_config"]("login_fallidos", "0")
-    _t0 = _time.time()
-    ns["validar_password"]("cualquiera", con_mecanicos=True, usuario="zoe")
-    _existe = _time.time() - _t0
-    ns["guardar_config"]("login_fallidos", "0")
-    _t0 = _time.time()
-    ns["validar_password"]("cualquiera", con_mecanicos=True, usuario="nadie con ese nombre")
-    _no_existe = _time.time() - _t0
+
+    def _tarda_en_rechazar(_usuario):
+        ns["guardar_config"]("login_fallidos", "0")
+        _t0 = _time.perf_counter()
+        ns["validar_password"]("cualquiera", con_mecanicos=True, usuario=_usuario)
+        return _time.perf_counter() - _t0
+
+    _existe, _no_existe = [], []
+    for _ in range(5):
+        _existe.append(_tarda_en_rechazar("zoe"))
+        _no_existe.append(_tarda_en_rechazar("nadie con ese nombre"))
     ns["guardar_config"]("login_fallidos", "0")
     esperar("el usuario que no existe no contesta más rápido que el que existe",
-            _no_existe > _existe * 0.5, True)
+            min(_no_existe) > min(_existe) * 0.5, True)
 
     # 13. Completar medidas no pisa lo que alguien cargó a mano mientras se revisaba.
     pid = c.execute("SELECT MAX(id) FROM productos").fetchone()[0]
