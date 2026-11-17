@@ -629,6 +629,55 @@ def _sumar_meses(fecha, meses):
 # Del más urgente al que no se sabe: así se ordenan las piezas del auto.
 _ORDEN_DEL_ESTADO = {"🔴": 0, "🟡": 1, "🟢": 2, "⚪": 3}
 
+# LA VIDA ÚTIL DE REFERENCIA, para cuando nadie la anotó. Desde que el dueño del auto lo ve con
+# su patente y el taller anota lo que le puso, casi todo entra sin vida útil: el taller no la
+# escribe, y «la de otras veces» (vida_util_de_las_otras_veces()) no tiene de dónde salir con
+# la base real sin ningún auto anotado todavía. Se vio en el teléfono: el filtro de aceite
+# recién anotado decía «⚪ Sin datos — falta la vida útil», o sea nada.
+# Son valores generales y del lado prudente (lo que llegue primero, km o meses); cada auto y
+# cada fabricante tienen los suyos, y por eso salen marcados «referencia general». Se usan solo
+# si esa pieza no tiene vida útil anotada en ese auto, y no se guardan: si se guardaran,
+# pasarían a ser «la de otras veces» y se confundirían con lo que anotó una persona.
+# Lo que no se cambia por km ni por tiempo —juntas, retenes, sensores, el embrague, las
+# escobillas— no tiene: sigue diciendo «Sin datos».
+# (km, meses), por el nombre de la pieza sin acentos; el primero que calza.
+VIDA_UTIL_DE_REFERENCIA = (
+    (r"\bFILTRO\b.*\bACEITE\b|\bACEITE\b.*\bFILTRO\b", 10_000, 12),
+    (r"\bFILTRO\b.*\b(AIRE)\b", 20_000, 24),
+    (r"\bFILTRO\b.*\b(HABITACULO|POLEN|CABINA)\b", 15_000, 12),
+    (r"\bFILTRO\b.*\b(COMBUSTIBLE|NAFTA|GASOIL|GAS OIL|DIESEL)\b", 30_000, 24),
+    (r"^ACEITE\b", 10_000, 12),
+    (r"\bBUJIAS?\b", 30_000, None),
+    (r"\bKIT\b.*\bDISTRIB|\bTENSOR\b.*\bDISTRIB", 60_000, 48),
+    (r"\bCORREA\b", 60_000, 48),
+    (r"\bPASTILLAS?\b", 30_000, None),
+    (r"\bDISCOS?\b.*\bFRENO\b", 60_000, None),
+    (r"\bAMORTIGUADOR(ES)?\b", 60_000, None),
+    (r"\bLIQUIDO\b.*\bFRENO", None, 24),
+    (r"\bREFRIGERANTE\b|\bANTICONGELANTE\b", None, 24),
+    (r"\bBATERIA\b", None, 36),
+)
+_VIDA_UTIL_DE_REFERENCIA = [(re.compile(patron), km, meses)
+                            for patron, km, meses in VIDA_UTIL_DE_REFERENCIA]
+# Lo que nombra una de esas piezas sin serla: el retén o la cadena de la distribución, la junta
+# del filtro, el sensor de las pastillas. No tienen vida útil por km.
+_NO_ES_DE_MANTENIMIENTO = re.compile(r"\b(JUNTAS?|JTAS?|RETEN(ES)?|SENSOR(ES)?|CADENA|O ?RING|"
+                                     r"TORNILLOS?|TORN|BULON(ES)?|PI[NÑ]ON|SOPORTE|TAPA)\b")
+TEXTO_DE_REFERENCIA = "(referencia general)"
+
+
+def vida_util_de_referencia(pieza):
+    """(km, meses) de referencia para esa pieza, o (None, None). Ver VIDA_UTIL_DE_REFERENCIA."""
+    nombre = unicodedata.normalize("NFKD", str(pieza or "").upper()).encode(
+        "ascii", "ignore").decode()
+    nombre = " ".join(re.sub(r"[^A-Z0-9 ]", " ", nombre).split())
+    if _NO_ES_DE_MANTENIMIENTO.search(nombre):
+        return None, None
+    for patron, km, meses in _VIDA_UTIL_DE_REFERENCIA:
+        if patron.search(nombre):
+            return km, meses
+    return None, None
+
 
 def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
     """Cuánto le falta a cada pieza del auto, una fila por pieza. [dict], lo más urgente primero.
@@ -674,6 +723,11 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
         vida = next((f["vida_util_km"] for f in orden if (f["vida_util_km"] or 0) > 0), None)
         meses = next((f["vida_util_meses"] for f in orden if (f["vida_util_meses"] or 0) > 0),
                      None)
+        # Sin nada anotado, la de referencia (ver VIDA_UTIL_DE_REFERENCIA), marcada.
+        de_referencia = False
+        if not vida and not meses:
+            vida, meses = vida_util_de_referencia(p["descripcion_pieza"])
+            de_referencia = bool(vida or meses)
         km_inst = p["km_instalacion"]
         cambiada = _fecha_de(p["fecha_instalacion"])
         fila = {"Pieza": p["descripcion_pieza"], "Marca": p["marca_pieza"] or "",
@@ -714,6 +768,8 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
         fila["Estado"] = ("🔴 Ya le toca" if paso else "🟡 Le toca pronto" if cerca else "🟢 Bien")
         # Lo que vence primero, adelante.
         fila["Le falta"] = " · ".join(t for _, t in sorted(textos, key=lambda x: x[0]))
+        if de_referencia:
+            fila["Le falta"] += f" {TEXTO_DE_REFERENCIA}"
         salida.append(fila)
     salida.sort(key=lambda x: (_ORDEN_DEL_ESTADO[x["Estado"][:1]],
                                min([d for d in (x["_dias"], x["_dias_fecha"]) if d is not None],

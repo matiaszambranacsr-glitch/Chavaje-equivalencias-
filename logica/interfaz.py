@@ -580,8 +580,11 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-17d"
+VERSION_DE_LO_NUEVO = "2026-11-17e"
 LO_NUEVO = (
+    ("🔧 Lo que se anota en un auto sin vida útil (filtros, bujías, correas, pastillas…) ya "
+     "dice cuánto le falta, con una referencia general prudente y marcada así. Si anotás la "
+     "vida útil, manda la tuya.", "🚗 Vehículos"),
     ("🚗 El dueño de un auto ve lo que se le fue cambiando con la patente sola, desde «🔑 "
      "Ingresar» (no hace falta cuenta). Y el taller, si quiere, pone la patente en su "
      "presupuesto y «✅ Ya se lo puse» lo anota en el auto. Si preferís que además pida los 4 "

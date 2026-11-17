@@ -7279,6 +7279,32 @@ guarda igual.
 - El km para atrás se frena, como en la venta: casi siempre es un número mal tipeado. Sin km, se
   anota igual.
 
+**La vida útil de referencia** (`VIDA_UTIL_DE_REFERENCIA` en `logica/vehiculos.py`). El taller
+no escribe la vida útil, y «la de otras veces» no tiene de dónde salir con la base sin autos
+anotados: mirándolo en el teléfono, el filtro de aceite recién anotado decía «⚪ Sin datos —
+falta la vida útil». Ahora, si esa pieza no tiene vida útil anotada en ese auto, se usa una de
+referencia, del lado prudente (lo que llegue primero, km o meses), y sale marcada «(referencia
+general)»:
+
+| Pieza | Km | Meses |
+|---|---|---|
+| Filtro de aceite / aceite | 10.000 | 12 |
+| Filtro de aire | 20.000 | 24 |
+| Filtro de habitáculo | 15.000 | 12 |
+| Filtro de combustible | 30.000 | 24 |
+| Bujías | 30.000 | — |
+| Correa / kit o tensor de distribución | 60.000 | 48 |
+| Pastillas de freno | 30.000 | — |
+| Discos de freno, amortiguadores | 60.000 | — |
+| Líquido de frenos, refrigerante | — | 24 |
+| Batería | — | 36 |
+
+No se guarda en la base: si se guardara, pasaría a ser «la de otras veces» y se confundiría con
+lo que anotó una persona. La vida útil anotada manda siempre. Lo que no se cambia por km ni por
+tiempo —juntas, retenes, sensores, la cadena de distribución, el embrague, las escobillas— sigue
+diciendo «Sin datos» (y «Retén distribución» no se confunde con la correa). Es la misma cuenta
+para «A quién avisar» y para la consulta del dueño del auto.
+
 **El asistente** le explica al dueño del auto cómo verlo («¿qué le pusieron a mi coche?») y al
 taller cómo anotarlo. «¿Qué auto es por la patente?» sigue siendo del Modo Mecánico: la
 explicación nueva no lleva «patente» en el título, a propósito, porque le ganaba.

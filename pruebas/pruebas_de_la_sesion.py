@@ -964,6 +964,42 @@ def probar():
              ns["c"].execute("SELECT COUNT(*) FROM historial_piezas WHERE vehiculo_id = ?",
                              (_auto_g[0],)).fetchone()[0], [e.value for e in _portal.exception]),
             (True, 3, []))
+    # LA VIDA ÚTIL DE REFERENCIA (ver VIDA_UTIL_DE_REFERENCIA): el taller no la escribe, y el
+    # dueño del auto veía «⚪ Sin datos». Ahora el filtro de aceite y las bujías dicen cuánto
+    # les falta, marcado «referencia general»; no se guarda en la base (si no, pasaría a ser
+    # «la de otras veces»), y lo que no se cambia por km sigue «Sin datos».
+    _auto_dict_g = ns["buscar_vehiculo"]("AG777KL")
+    _piezas_estado_g = {e["Pieza"]: e for e in ns["estado_de_cada_pieza"](_auto_dict_g)}
+    _filtro_g = next((e for n, e in _piezas_estado_g.items() if "aceite" in n.lower()), None)
+    _bujia_g = next((e for n, e in _piezas_estado_g.items() if "buj" in n.lower()), None)
+    esperar("con la vida útil de referencia, marcada, y sin guardarla en la base",
+            (_filtro_g and (_filtro_g["Vida útil (km)"], _filtro_g["Cada (meses)"],
+                            _filtro_g["Estado"][:1],
+                            _filtro_g["Le falta"].endswith(ns["TEXTO_DE_REFERENCIA"])),
+             _bujia_g and (_bujia_g["Vida útil (km)"], _bujia_g["Cada (meses)"]),
+             ns["c"].execute("SELECT COUNT(*) FROM historial_piezas WHERE vehiculo_id = ? AND "
+                             "(vida_util_km > 0 OR vida_util_meses > 0)",
+                             (_auto_g[0],)).fetchone()[0]),
+            ((10000, 12, "🟢", True), (30000, None), 0))
+    # Con la vida útil anotada por una persona, manda esa, y sin la marca.
+    ns["c"].execute("UPDATE historial_piezas SET vida_util_km = 15000 WHERE vehiculo_id = ? AND "
+                    "descripcion_pieza = ?", (_auto_g[0], _filtro_g["Pieza"]))
+    _anotada_g = next(e for e in ns["estado_de_cada_pieza"](_auto_dict_g)
+                      if e["Pieza"] == _filtro_g["Pieza"])
+    esperar("con la vida útil anotada, esa, sin «referencia»",
+            (_anotada_g["Vida útil (km)"], ns["TEXTO_DE_REFERENCIA"] in _anotada_g["Le falta"]),
+            (15000, False))
+    ns["c"].execute("UPDATE historial_piezas SET vida_util_km = NULL WHERE vehiculo_id = ?",
+                    (_auto_g[0],))
+    ns["c"].execute("INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, km_instalacion) "
+                    "VALUES (?, 'Sensor de pastillas', 80000)", (_auto_g[0],))
+    _reten_g = next(e for e in ns["estado_de_cada_pieza"](_auto_dict_g)
+                    if e["Pieza"] == "Sensor de pastillas")
+    esperar("lo que no se cambia por km (el sensor de las pastillas) sigue sin datos",
+            (_reten_g["Estado"], _reten_g["Le falta"]), ("⚪ Sin datos", "falta la vida útil"))
+    ns["c"].execute("DELETE FROM historial_piezas WHERE vehiculo_id = ? AND "
+                    "descripcion_pieza = 'Sensor de pastillas'", (_auto_g[0],))
+    ns["conn"].commit()
     # Solo su taller lo anota: con otra cuenta adentro, ni llamando a la función.
     _otro_taller = ns["crear_mecanico"]("Otro Taller De La Patente", "clave-otro-taller-1")
     _presu_g3 = ns["guardar_presupuesto_mecanico"](taller, "", [dict(_items_g[1])], 0,
