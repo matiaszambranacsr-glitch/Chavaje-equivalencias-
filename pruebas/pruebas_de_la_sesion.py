@@ -17,6 +17,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from urllib.parse import quote
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -825,6 +826,57 @@ def probar():
     finally:
         ns["guardar_config"](ns["CLAVE_DE_SOLO_CON_CUENTA"], "")
         ns["conn"].commit()
+
+    # 4f. EL ACCESO DE UN CLIENTE, LISTO PARA MANDAR. «🎲 Inventarle una contraseña» le da una
+    # que se dicta sin errores y la muestra hasta «Ya se la pasé»; «📲 Mandarle cómo entrar» arma
+    # el WhatsApp con la dirección y su usuario, SIN la contraseña (ver mensaje_de_acceso()).
+    _inventadas = {ns["contrasena_para_dictar"]() for _ in range(200)}
+    esperar("la contraseña inventada: «xxxx-xxxx», sin los signos que se confunden, y distinta "
+            "cada vez",
+            (len(_inventadas),
+             all(re.fullmatch(r"[a-km-np-z2-9]{4}-[a-km-np-z2-9]{4}", x) for x in _inventadas),
+             any(ch in x for x in _inventadas for ch in "0o1li")), (200, True, False))
+    _cuenta_acceso = ns["crear_mecanico"]("Lubricentro Del Acceso")
+    _msj = ns["mensaje_de_acceso"](_cuenta_acceso, "Lubricentro Del Acceso")
+    esperar("el mensaje trae la dirección con su cuenta y su usuario",
+            (f"?cuenta={_cuenta_acceso}" in _msj, f"*{_cuenta_acceso}*" in _msj,
+             "Lubricentro Del Acceso" in _msj), (True, True, True))
+    _adm = _visitante(nivel_usuario="admin", admin_nombre="duenio",
+                      pagina_actual="🗂️ Administrar", sub_admin=ns["SUB_ADMIN"][5],
+                      _mecanico_ultimo=_cuenta_acceso)
+    esperar("sin portal todavía, no ofrece mandar cómo entrar (no podría entrar)",
+            [b.label for b in _adm.get("link_button") if "Mandarle cómo entrar" in b.label], [])
+    _adm.button(key="mecanico_inventar_clave").click().run()
+    _mostrada = [x.value for x in _adm.code]
+    esperar("la inventa, la guarda y la muestra una vez para copiar",
+            (len(_mostrada), [e.value for e in _adm.exception]), (1, []))
+    _clave_inventada = _mostrada[0] if _mostrada else ""
+    esperar("con esa contraseña el cliente entra a lo suyo",
+            ns["validar_password"](_clave_inventada, con_mecanicos=True,
+                                   usuario=str(_cuenta_acceso))[1], "mecanico")
+    _links = [b.url for b in _adm.get("link_button") if "Mandarle cómo entrar" in b.label]
+    esperar("el WhatsApp lleva su cuenta, y la contraseña NO",
+            (len(_links), all(f"cuenta%3D{_cuenta_acceso}" in u for u in _links),
+             any(_clave_inventada and _clave_inventada in u for u in _links),
+             any(quote(_clave_inventada) in u for u in _links)), (1, True, False, False))
+    _ultimo = ns["c"].execute("SELECT accion, detalle, antes, despues FROM registro_de_cambios "
+                              "WHERE entidad = 'taller' AND entidad_id = ? ORDER BY id DESC "
+                              "LIMIT 1", (str(_cuenta_acceso),)).fetchone()
+    esperar("queda anotado que se cambió, sin la contraseña",
+            (_ultimo[0] if _ultimo else None,
+             any(_clave_inventada in str(x or "") for x in (_ultimo or ()))),
+            ("cambió la contraseña del portal", False))
+    _adm.button(key="mecanico_ya_se_la_pase").click().run()
+    esperar("con «Ya se la pasé» no se ve más, y el mensaje sigue a mano",
+            ([x.value for x in _adm.code], "_acceso_recien_dado" in _adm.session_state,
+             len([b for b in _adm.get("link_button") if "Mandarle cómo entrar" in b.label])),
+            ([], False, 1))
+    # Y si se elige otra cuenta antes de tocarlo, tampoco: no se le muestra la de otro.
+    _adm.button(key="mecanico_inventar_clave").click().run()
+    _adm.selectbox(key="cuenta_sel_gestionar").set_value(taller).run()
+    esperar("eligiendo otra cuenta, la contraseña de la anterior no se ve más",
+            ([x.value for x in _adm.code], "_acceso_recien_dado" in _adm.session_state),
+            ([], False))
 
     # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
     # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el

@@ -1518,6 +1518,42 @@ def cambiar_password_mecanico(mecanico_id, nueva_password):
         conn.commit()
 
 
+# EL ACCESO DE UN CLIENTE, LISTO PARA MANDAR. Desde que la página se puede ver solo con cuenta
+# (ver «LA PÁGINA, SOLO CON CUENTA»), el dueño le tiene que dar a cada cliente su usuario, su
+# contraseña y la dirección. La dirección con su número de cuenta estaba escondida en la ayuda
+# de un campo, y la contraseña había que inventarla: con cientos de clientes, lo más probable
+# era «1234» para todos. Ahora la app inventa una que se dicta sin errores y arma el WhatsApp.
+LETRAS_DE_LA_CONTRASENA_PARA_DICTAR = "abcdefghjkmnpqrstuvwxyz23456789"   # sin 0/o ni 1/l/i
+
+
+def contrasena_para_dictar():
+    """«kx7m-p2ra»: ocho de 31 signos (unas 850.000 millones de combinaciones, con el freno a
+    los intentos fallidos del ingreso), en minúscula —en el teclado del celular es lo que sale
+    primero— y sin los que se confunden al dictar o al leer. El guion es para leerla en dos
+    partes; también es parte de la contraseña."""
+    import secrets as _azar_seguro
+    letras = "".join(_azar_seguro.choice(LETRAS_DE_LA_CONTRASENA_PARA_DICTAR) for _ in range(8))
+    return f"{letras[:4]}-{letras[4:]}"
+
+
+def link_de_la_cuenta(mecanico_id):
+    """La dirección de la página con el número de cuenta ya puesto como usuario (ver «EL LINK
+    DE UN TALLER» en mostrar_login_inicial())."""
+    return f"{URL_DE_LA_APP}?cuenta={int(mecanico_id)}"
+
+
+def mensaje_de_acceso(mecanico_id, nombre):
+    """El WhatsApp para el cliente: la dirección y su usuario. SIN la contraseña, a propósito:
+    el link de WhatsApp queda en el historial del navegador, y el mensaje se reenvía y queda en
+    el chat para siempre. La contraseña se la pasa aparte (dictada o en otro mensaje)."""
+    return (f"Hola {nombre}! Ya tenés tu cuenta para entrar a nuestra página:\n"
+            f"{link_de_la_cuenta(mecanico_id)}\n\n"
+            f"Tu usuario es *{int(mecanico_id)}* (tu número de cuenta); la contraseña te la paso "
+            "aparte. Adentro tenés tu portal —buscar repuestos con tu precio, armar "
+            "presupuestos, tu cuenta corriente— y el Modo Mecánico, para buscar por patente o "
+            "por chasis.")
+
+
 def listar_mecanicos():
     """Las cuentas de taller, mayorista o cliente, para el administrador. «Última vez que entró»
     y «Veces» dicen cuáles usan su cuenta (ver anotar_ingreso_del_taller())."""

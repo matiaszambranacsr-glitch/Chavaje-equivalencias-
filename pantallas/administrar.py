@@ -1356,6 +1356,41 @@ if pagina == PAGINAS[3]:
                         st.rerun()
                     except ValueError as _err:
                         st.error(el_error_en_castellano(_err))
+                # EL ACCESO, LISTO PARA MANDAR (ver mensaje_de_acceso()). La contraseña inventada
+                # se ve hasta «Ya se la pasé» o hasta elegir otra cuenta: no queda en ningún lado
+                # más que en la sesión de quien la inventó, y «Salir» la borra con todo lo demás.
+                _recien = st.session_state.get("_acceso_recien_dado")
+                if _recien and _recien["id"] != mecanico_id_sel:
+                    st.session_state.pop("_acceso_recien_dado", None)
+                    _recien = None
+                if st.button("🎲 Inventarle una contraseña nueva" if _con_portal
+                             else "🎲 Inventarle una contraseña (y darle el portal)",
+                             key="mecanico_inventar_clave",
+                             help="Una que se dicta sin errores: «kx7m-p2ra». Reemplaza la que "
+                                  "tenía."):
+                    _inventada = contrasena_para_dictar()
+                    try:
+                        cambiar_password_mecanico(mecanico_id_sel, _inventada)
+                        st.session_state["_acceso_recien_dado"] = {"id": mecanico_id_sel,
+                                                                   "clave": _inventada}
+                        st.rerun()
+                    except (ValueError, PermissionError) as _err:
+                        st.error(el_error_en_castellano(_err))
+                if _recien:
+                    st.success(f"🔑 {mecanico_elegido} entra con el usuario **{mecanico_id_sel}** "
+                               "y esta contraseña. Pasásela ahora: no queda anotada en ningún "
+                               "lado, y cuando toques «Ya se la pasé» no se ve más.")
+                    st.code(_recien["clave"], language=None)
+                if _con_portal or _recien:
+                    st.link_button(
+                        "📲 Mandarle cómo entrar, por WhatsApp",
+                        "https://wa.me/?text=" + quote(mensaje_de_acceso(mecanico_id_sel,
+                                                                         mecanico_elegido)),
+                        help="Le llega la dirección —que ya trae su usuario— y qué tiene adentro. "
+                             "La contraseña no va en el mensaje: mandásela aparte o dictásela.")
+                if _recien and st.button("✔️ Ya se la pasé", key="mecanico_ya_se_la_pase"):
+                    st.session_state.pop("_acceso_recien_dado", None)
+                    st.rerun()
                 if _con_portal and st.button("🚪 Sacarle el portal (sigue la cuenta)",
                                              key="mecanico_sacar_portal"):
                     cambiar_password_mecanico(mecanico_id_sel, "")

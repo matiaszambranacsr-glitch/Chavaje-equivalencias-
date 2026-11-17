@@ -7198,6 +7198,17 @@ es una llave que da vuelta el dueño cuando ya las repartió: 🗂️ Administra
   cualquiera?») y dice que lo hace un administrador. «Que no se vea el buscador sin contraseña»
   no la encuentra: «sin … contraseña» es lo que frena `_ASIS_PIDE_SALTEAR`, a propósito, y
   aflojarlo le abriría la puerta a «¿cómo veo Caja sin contraseña?».
+- **El acceso de cada cliente, listo para mandar.** Para cerrarla, el dueño le tiene que dar a
+  cada cliente su usuario, su contraseña y la dirección: la dirección con su número de cuenta
+  estaba escondida en la ayuda de un campo, y la contraseña había que inventarla (con cientos de
+  clientes, lo más probable era «1234» para todos). En «Gestionar un mecánico existente»,
+  «🎲 Inventarle una contraseña» le da una que se dicta sin errores —«kx7m-p2ra»: minúsculas,
+  sin 0/o ni 1/l/i— (`contrasena_para_dictar()`), la muestra para copiar hasta «✔️ Ya se la
+  pasé» o hasta elegir otra cuenta, y no queda anotada en ningún lado («Salir» la borra con todo
+  lo demás). «📲 Mandarle cómo entrar, por WhatsApp» arma el mensaje con la dirección —que ya
+  trae su usuario— y qué tiene adentro (`mensaje_de_acceso()`), **sin la contraseña**: el link
+  de WhatsApp queda en el historial del navegador y el mensaje se reenvía; la contraseña va
+  aparte. Solo aparece si la cuenta tiene portal (sin contraseña no podría entrar).
 - **De paso, en el encabezado:** el alto se lo daba el botón de la derecha, y en el ingreso de
   la página cerrada —que no lleva ninguno— la marca salía cortada.
 - **Y la prueba de tiempos del ingreso** («el usuario que no existe no contesta más rápido que el
