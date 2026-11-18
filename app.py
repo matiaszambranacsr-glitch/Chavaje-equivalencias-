@@ -166,6 +166,7 @@ específico, y las pantallas quedan todas al final:
         · GUARDAR LO QUE LLEGA
         · LA BANDEJA
         · CONTESTAR
+        · DEL CHAT A LA COTIZACIÓN, Y DE VUELTA
     logica/asistente.py
         · EL ASISTENTE: QUÉ PUEDE Y QUÉ NO
         · LO QUE SABE EL ASISTENTE: EL MAPA DE LA APP, ARMADO SOLO

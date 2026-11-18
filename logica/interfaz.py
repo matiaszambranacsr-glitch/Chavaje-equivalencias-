@@ -585,8 +585,11 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-18b"
+VERSION_DE_LO_NUEVO = "2026-11-18c"
 LO_NUEVO = (
+    ("💬 Si un cliente pregunta por el chat, «📋 Cotizar estos códigos» arma la cotización, y en "
+     "📋 Lista WhatsApp (o en el presupuesto del Buscador) «💬 Mandárselo a …» se la manda a "
+     "ese chat, sin pasar por el teléfono.", "💬 Mensajes"),
     ("💬 Mensajes: los chats de WhatsApp, Facebook e Instagram en un solo lugar, los sin leer "
      "arriba, y se contestan desde la página. La pastilla dice cuántos hay sin leer y salta un "
      "cartel cuando llega uno. Para conectar los canales, los pasos y «🔌 Probar la conexión» "

@@ -166,6 +166,8 @@ if pagina == PAGINAS[0]:
             st.link_button("📲 Mandar el presupuesto por WhatsApp",
                            "https://wa.me/?text=" + quote(_texto), key="presupuesto_por_wa",
                            help="Abre WhatsApp con el presupuesto escrito: elegís a quién.")
+            # Si lo pidió alguien por 💬 Mensajes hace un rato: mandárselo a ese chat.
+            mostrar_boton_para_el_chat(_texto, "presupuesto_al_chat")
             st.caption("O para copiar:")
             st.code(_texto, language=None)
             # Pedir todo junto al depósito, para la cuenta elegida arriba (o Mostrador). Lo

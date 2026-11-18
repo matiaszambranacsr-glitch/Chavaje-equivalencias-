@@ -24,6 +24,8 @@ if pagina == PAGINAS[12]:
 
     def _msj_abrir(chat_id):
         st.session_state["msj_chat_abierto"] = chat_id
+        # Desde ahora, el chat está «en curso»: ver chat_para_mandar().
+        st.session_state["msj_chat_abierto_en"] = time.monotonic()
         try:
             marcar_leido(chat_id)
         except (PermissionError, sqlite3.Error) as _err:
@@ -31,6 +33,7 @@ if pagina == PAGINAS[12]:
 
     def _msj_cerrar():
         st.session_state.pop("msj_chat_abierto", None)
+        st.session_state.pop("msj_chat_abierto_en", None)
 
     def _msj_no_leido(chat_id):
         try:
@@ -156,11 +159,17 @@ if pagina == PAGINAS[12]:
                 if _cod.upper() not in (x.upper() for x in _codigos):
                     _codigos.append(_cod)
         if _codigos:
-            _cols = st.columns(min(len(_codigos), 3))
+            _cols = st.columns(min(len(_codigos), 3) + 1)
             for _n, _cod in enumerate(_codigos[:3]):
                 _cols[_n].button(f"🔍 Buscar {_cod}", key=f"msj_buscar_cod_{chat_id}_{_n}",
                                  on_click=buscar_el_codigo_del_mensaje, args=(_cod,), width="stretch",
                                  help="Lo busca en el 🔍 Buscador, con sus equivalencias.")
+            # Todos juntos a la cotización, y de ahí «💬 Mandárselo» de vuelta a este chat.
+            _cols[-1].button("📋 Cotizar estos códigos", key=f"msj_cotizar_{chat_id}",
+                             on_click=cotizar_los_codigos_del_chat, args=(_codigos[:3],),
+                             width="stretch",
+                             help="Los suma a 📋 Lista WhatsApp; desde ahí se le manda la "
+                                  "cotización a este chat con un toque.")
 
     # En la computadora, la lista a la izquierda y el chat a la derecha. En el celular, una
     # cosa por vez: la lista, y al tocar un chat, el chat con «← Volver».
@@ -216,7 +225,7 @@ if pagina == PAGINAS[12]:
                                          label_visibility="collapsed")
                     with st.form(key=f"form_{_clave_resp}", border=False):
                         st.text_area("Tu respuesta:", key=_clave_resp, height=90,
-                                     max_chars=LARGO_MAXIMO_DE_UNA_RESPUESTA,
+                                     max_chars=LARGO_MAXIMO_POR_CANAL.get(_chat_msj["canal"], 1000),
                                      placeholder="Escribí la respuesta y tocá 📤 Enviar")
                         st.form_submit_button("📤 Enviar", type="primary", width="stretch",
                                               on_click=_msj_enviar,

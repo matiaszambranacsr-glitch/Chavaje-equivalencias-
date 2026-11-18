@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -252,9 +253,13 @@ def probar():
                  meta.pedidos[-1]["json"]["recipient"]["id"]),
                 ((True, None), "https://graph.facebook.com/v26.0/PAG1/messages", "RESPONSE",
                  "PSID7"))
-        esperar("vacío o larguísimo no se manda",
+        esperar("vacío o larguísimo no se manda; el largo, el de cada canal",
                 (ns["contestar_chat"](_juan["id"], "   ")[0],
-                 ns["contestar_chat"](_juan["id"], "x" * 2001)[0]), (False, False))
+                 ns["contestar_chat"](_juan["id"], "x" * 4097)[0],
+                 ns["contestar_chat"](_maria, "x" * 2001)[0]), (False, False, False))
+        _antes = len(meta.pedidos)
+        esperar("por WhatsApp entra una cotización de 3.000 letras",
+                ns["contestar_chat"](_juan["id"], "x" * 3000), (True, None))
         # Pasadas las 24 horas: ni se intenta.
         c.execute("UPDATE chats SET ultimo_del_cliente_en = datetime('now', '-25 hours') "
                   "WHERE id = ?", (_maria,))
@@ -384,6 +389,71 @@ def probar():
                 [("https://graph.facebook.com/v26.0/NUM1/messages", "Lo tengo, ¿te lo separo?")])
         esperar("y la caja queda vacía para la próxima",
                 at.text_area(key=f"msj_respuesta_{_juan['id']}").value, "")
+        # DEL CHAT A LA COTIZACIÓN, Y DE VUELTA. «📋 Cotizar estos códigos» los suma a la lista
+        # de WhatsApp (el que no está, se avisa) y lleva ahí.
+        c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('MANN CHAT', 'PROVEEDOR')")
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+                  "SELECT 'W712/80', 'W71280', 'FILTRO ACEITE', id, 12345 FROM marcas "
+                  "WHERE nombre = 'MANN CHAT'")
+        ns["conn"].commit()
+        at.session_state["lista_whatsapp"] = []
+        at.run()
+        at.button(key=f"msj_cotizar_{_juan['id']}").click().run()
+        esperar("«📋 Cotizar estos códigos» lleva a la lista con lo que está cargado",
+                (at.session_state["pagina_actual"],
+                 [x["codigo_buscado"] for x in at.session_state["lista_whatsapp"]]),
+                (ns["PAGINAS"][5], ["W712/80"]))
+        cierto("y avisa el que no está cargado", any("PH5949" in w.value for w in at.warning),
+               [w.value for w in at.warning])
+        _al_chat = [b for b in at.button if b.key == "wa_mandar_al_chat"]
+        esperar("en la lista, el botón para mandársela a Juan",
+                [b.label for b in _al_chat], ["💬 Mandárselo a Juan Pérez por WhatsApp"])
+        meta.pedidos.clear()
+        if _al_chat:
+            _al_chat[0].click().run()
+        _mandado = [p for p in meta.pedidos if p["url"].endswith("/NUM1/messages")]
+        cierto("la cotización va al chat de Juan, con el código y el precio",
+               len(_mandado) == 1 and "W712/80" in _mandado[0]["json"]["text"]["body"]
+               and _mandado[0]["json"]["to"] == "5491155556666",
+               [p["json"] for p in _mandado])
+        esperar("y vuelve al chat para verla ahí", at.session_state["pagina_actual"],
+                ns["PAGINAS"][12])
+        # El presupuesto del Buscador, lo mismo.
+        _id_mann = c.execute("SELECT id FROM productos WHERE codigo_raw = 'W712/80'").fetchone()[0]
+        at.session_state["carrito"] = {_id_mann: {"codigo": "W712/80", "marca": "MANN CHAT",
+                                                  "descripcion": "FILTRO ACEITE", "precio": 12345,
+                                                  "cantidad": 2}}
+        at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+        at.run()
+        meta.pedidos.clear()
+        _al_chat = [b for b in at.button if b.key == "presupuesto_al_chat"]
+        cierto("el presupuesto del Buscador también ofrece mandárselo al chat", _al_chat)
+        if _al_chat:
+            _al_chat[0].click().run()
+        _mandado = [p for p in meta.pedidos if p["url"].endswith("/NUM1/messages")]
+        cierto("y va con el total",
+               len(_mandado) == 1 and "TOTAL: $24.690" in _mandado[0]["json"]["text"]["body"],
+               [p["json"] for p in _mandado])
+        # Media hora después, el chat ya no está «en curso»: no aparece en el presupuesto.
+        at.session_state["msj_chat_abierto_en"] = time.monotonic() - 31 * 60
+        at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+        at.run()
+        esperar("un chat de hace más de media hora no se ofrece",
+                [b.key for b in at.button if b.key == "presupuesto_al_chat"], [])
+        # Y pasadas las 24 horas de Meta, tampoco: no se le podría mandar.
+        _ultimo_juan = c.execute("SELECT ultimo_del_cliente_en FROM chats WHERE id = ?",
+                                 (_juan["id"],)).fetchone()[0]
+        c.execute("UPDATE chats SET ultimo_del_cliente_en = datetime('now', '-25 hours') "
+                  "WHERE id = ?", (_juan["id"],))
+        at.session_state["msj_chat_abierto_en"] = time.monotonic()
+        at.run()
+        esperar("un chat pasadas las 24 horas no se ofrece",
+                [b.key for b in at.button if b.key == "presupuesto_al_chat"], [])
+        c.execute("UPDATE chats SET ultimo_del_cliente_en = ? WHERE id = ?",
+                  (_ultimo_juan, _juan["id"]))
+        at.session_state["msj_chat_abierto_en"] = time.monotonic()
+        at.session_state["pagina_actual"] = ns["PAGINAS"][12]
+        at.run()
         # Buscar el código lleva al Buscador con eso buscado.
         _b = [b for b in at.button if b.label == "🔍 Buscar W712/80"][0]
         _b.click().run()

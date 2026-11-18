@@ -883,6 +883,15 @@ COMO_HAGO_DEL_ASISTENTE = (
      "abajo (o tocá una respuesta rápida) y «📤 Enviar». Meta deja contestar hasta 24 horas "
      "después del último mensaje del cliente; después, desde el teléfono.",
      "💬 Mensajes", "empleado"),
+    # Sin «mandar», «whatsapp» ni «lista» en las claves, a propósito: «mandar cotización por
+    # wasap» es 📋 Lista WhatsApp, y con esas palabras esta le ganaba.
+    ("cotizar_por_chat", "Contestarle con la cotización al que preguntó por el chat",
+     "cotizar presupuesto chat chats cliente pregunto pidio preguntaron codigos responder "
+     "devolver contestar mensajes",
+     "En el chat, si mandó códigos, tocá «📋 Cotizar estos códigos»: van a 📋 Lista WhatsApp. Ahí "
+     "(o en el presupuesto del Buscador) está «💬 Mandárselo a …»: se lo manda a ese chat y "
+     "vuelve ahí. Sale durante media hora después de abrir el chat.",
+     "💬 Mensajes", "empleado"),
     ("conectar_canales", "Conectar WhatsApp, Facebook e Instagram a la app",
      "conectar vincular configurar enlazar whatsapp facebook instagram messenger meta canales "
      "mensajes token webhook relevo",

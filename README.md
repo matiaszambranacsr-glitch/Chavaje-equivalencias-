@@ -7628,6 +7628,17 @@ barra; no la ven el invitado, el taller ni los del depósito):
   esperando, se dice arriba del chat (se compara por los últimos 8 números).
 - En el celular, una cosa por vez: la lista, y al tocar un chat, el chat con «← Volver».
 
+**Del chat a la cotización, y de vuelta.** El cliente pregunta por el chat «¿tenés el W712/80 y
+el PH5949?». Antes: copiar los códigos, buscarlos, armar la cotización, abrir WhatsApp en el
+teléfono, buscar al cliente y pegarla. Ahora el chat ofrece **«📋 Cotizar estos códigos»** (los
+suma a 📋 Lista WhatsApp y avisa los que no están cargados), y la lista y el presupuesto del
+Buscador ofrecen **«💬 Mandárselo a Juan por WhatsApp»**: va a ese chat y la app vuelve ahí para
+verlo. Sale solo durante media hora después de abrir el chat (si no, un chat de la mañana aparecía
+en el presupuesto de otro cliente a la tarde), dentro de las 24 horas de Meta y con el canal
+conectado. Cada canal tiene su largo: WhatsApp acepta 4.096 letras, Facebook 2.000 e Instagram
+1.000 (era una sola regla de 2.000 y una cotización larga por WhatsApp no salía); si no entra, el
+botón lo dice.
+
 **Cómo llega cada uno** (`logica/mensajes.py`). Facebook e Instagram: la app le pregunta a Meta por
 las conversaciones de la página, como mucho una vez por minuto y solo mientras alguien tiene la
 app abierta. WhatsApp no deja preguntar: avisa cada mensaje a una dirección fija que tiene que

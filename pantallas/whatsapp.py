@@ -28,19 +28,9 @@ if pagina == PAGINAS[5]:
             height=110)
         _sumar = st.form_submit_button("➕ Agregar todos a la lista", type="primary")
     if _sumar and _pedido.strip():
-        _no_estan = []
-        for _cod in [x.strip() for x in re.split(r"[,;\n]+", _pedido) if x.strip()]:
-            _clean = codigo_para_buscar(_cod)
-            _res = []
-            if _clean:
-                _res, _ = buscar_con_variantes_del_cero(_clean, "Todas", 3)
-            if not _res:
-                _no_estan.append(_cod)
-                if _clean:
-                    registrar_busqueda_sin_resultado(_cod)
-                continue
-            marcar_lo_que_no_es_lo_mismo(_res)
-            lista.append({"codigo_buscado": _cod, "resultados": _res})
+        # La misma cuenta que «📋 Cotizar estos códigos» en 💬 Mensajes: ver sumar_codigos_a_la_lista().
+        _no_estan = sumar_codigos_a_la_lista(
+            lista, [x.strip() for x in re.split(r"[,;\n]+", _pedido) if x.strip()])
         if _no_estan:
             st.warning("No están cargados: " + ", ".join(_no_estan[:15])
                        + ("…" if len(_no_estan) > 15 else "")
@@ -128,6 +118,8 @@ if pagina == PAGINAS[5]:
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
         col_wa, col_pdf = st.columns(2)
         col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", width="stretch")
+        # Si la pidió alguien por 💬 Mensajes hace un rato: mandársela a ese chat, sin el teléfono.
+        mostrar_boton_para_el_chat(mensaje, "wa_mandar_al_chat")
         pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista_cotizar, incluir_precio,
                                    incluir_stock, alias_elegido, qr_real_para_pdf,
                                    marcar_a_confirmar)

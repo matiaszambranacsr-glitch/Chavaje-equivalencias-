@@ -44,8 +44,13 @@ CADA_CUANTO_SE_MIRAN_LOS_MENSAJES = 60
 # tres canales). Después, en WhatsApp hace falta una plantilla aprobada, y en Facebook e
 # Instagram, un permiso especial: la app no lo intenta y lo dice antes.
 VENTANA_PARA_CONTESTAR = timedelta(hours=24)
-# Messenger corta en 2.000 letras (WhatsApp, en 4.096): una sola regla para los tres.
-LARGO_MAXIMO_DE_UNA_RESPUESTA = 2000
+# Lo más largo que deja mandar Meta en un mensaje de texto, en cada canal. Era una sola regla
+# de 2.000 para los tres, y una cotización larga por WhatsApp (que acepta 4.096) no salía.
+LARGO_MAXIMO_POR_CANAL = {"whatsapp": 4096, "messenger": 2000, "instagram": 1000}
+# El chat abierto en «💬 Mensajes» queda «en curso» este rato: mientras tanto, la cotización y
+# el presupuesto ofrecen mandárselo (ver chat_para_mandar()). Más, y un chat de la mañana
+# aparecía en el presupuesto de otro cliente a la tarde.
+MINUTOS_QUE_QUEDA_EN_CURSO_UN_CHAT = 30
 TEXTO_FUERA_DE_LA_VENTANA = (
     "Pasaron más de 24 horas desde su último mensaje: Meta no deja contestar desde acá (es una "
     "regla de Meta, no de la app). Escribile desde el teléfono, o esperá a que vuelva a escribir.")
@@ -695,12 +700,13 @@ def contestar_chat(chat_id, texto):
     texto = str(texto or "").strip()
     if not texto:
         return False, "Escribí algo para mandar."
-    if len(texto) > LARGO_MAXIMO_DE_UNA_RESPUESTA:
-        return False, (f"Es muy largo: hasta {miles(LARGO_MAXIMO_DE_UNA_RESPUESTA)} letras "
-                       f"(tiene {miles(len(texto))}). Partilo en dos.")
     chat = el_chat(chat_id)
     if not chat:
         return False, "Ese chat ya no está."
+    largo = LARGO_MAXIMO_POR_CANAL.get(chat["canal"], 1000)
+    if len(texto) > largo:
+        return False, (f"Es muy largo para {CANALES_DE_MENSAJES[chat['canal']]['nombre']}: hasta "
+                       f"{miles(largo)} letras (tiene {miles(len(texto))}). Partilo en dos.")
     if fuera_de_la_ventana(chat):
         return False, TEXTO_FUERA_DE_LA_VENTANA
     cfg = config_de_los_mensajes()
@@ -769,3 +775,96 @@ def probar_los_canales():
                        error or f"Anda: tiene {miles(int((datos or {}).get('cuantos') or 0))} "
                                 "aviso(s) esperando."))
     return salida
+
+
+# ============================================================================================
+# DEL CHAT A LA COTIZACIÓN, Y DE VUELTA
+# ============================================================================================
+# El cliente pregunta por el chat «¿tenés el W712/80 y el PH5949?». Antes: copiar los códigos,
+# buscarlos, armar la cotización en 📋 Lista WhatsApp, abrir WhatsApp en el teléfono, buscar al
+# cliente y pegarla. Ahora el chat ofrece «📋 Cotizar estos códigos» (los suma a la lista), y la
+# lista y el presupuesto del Buscador ofrecen «💬 Mandárselo a …» al chat que está en curso.
+def sumar_codigos_a_la_lista(lista, codigos):
+    """Suma a la lista de WhatsApp lo que se encuentre de cada código (como «➕ Agregar todos a
+    la lista»). Devuelve los que no están cargados, que quedan anotados como búsqueda sin
+    resultado."""
+    no_estan = []
+    for codigo in [str(x).strip() for x in codigos if str(x).strip()]:
+        limpio = codigo_para_buscar(codigo)
+        resultados = []
+        if limpio:
+            resultados, _variantes = buscar_con_variantes_del_cero(limpio, "Todas", 3)
+        if not resultados:
+            no_estan.append(codigo)
+            if limpio:
+                registrar_busqueda_sin_resultado(codigo)
+            continue
+        marcar_lo_que_no_es_lo_mismo(resultados)
+        lista.append({"codigo_buscado": codigo, "resultados": resultados})
+    return no_estan
+
+
+def cotizar_los_codigos_del_chat(codigos):
+    """«📋 Cotizar estos códigos» (va como on_click): los suma a la lista de WhatsApp y lleva
+    ahí. El chat sigue en curso, para mandarle la cotización de vuelta."""
+    lista = st.session_state.setdefault("lista_whatsapp", [])
+    ya = {str(item.get("codigo_buscado") or "").upper() for item in lista}
+    no_estan = sumar_codigos_a_la_lista(lista, [x for x in codigos if str(x).upper() not in ya])
+    if no_estan:
+        avisar("warning", "No están cargados: " + ", ".join(no_estan[:10])
+               + ". Quedaron en 📊 Estadísticas → 🔎 Búsquedas sin resultado.")
+    st.session_state["pagina_actual"] = PAGINAS[5]
+
+
+def chat_para_mandar():
+    """El chat abierto en «💬 Mensajes», si ahora se le puede mandar algo: abierto hace menos
+    de MINUTOS_QUE_QUEDA_EN_CURSO_UN_CHAT, dentro de las 24 horas de Meta y con su canal
+    conectado para contestar. Si no, None."""
+    chat_id = st.session_state.get("msj_chat_abierto")
+    desde = st.session_state.get("msj_chat_abierto_en")
+    if not chat_id or desde is None or not es_operador_o_admin():
+        return None
+    if time.monotonic() - desde > MINUTOS_QUE_QUEDA_EN_CURSO_UN_CHAT * 60:
+        return None
+    try:
+        chat = el_chat(chat_id)
+    except sqlite3.Error as _err:
+        anotar_error("chat_para_mandar", _err)
+        return None
+    if not chat or fuera_de_la_ventana(chat):
+        return None
+    conectados = canales_conectados()
+    return chat if conectados.get(chat["canal"]) else None
+
+
+def mandar_al_chat(chat_id, texto):
+    """«💬 Mandárselo a …» (va como on_click): lo manda y, si salió, vuelve al chat para verlo
+    ahí; si no, dice por qué y se queda donde estaba."""
+    try:
+        ok, error = contestar_chat(chat_id, texto)
+    except PermissionError as _err:
+        ok, error = False, el_error_en_castellano(_err)
+    if ok:
+        avisar("success", "💬 Enviado: quedó en el chat.")
+        st.session_state["msj_chat_abierto_en"] = time.monotonic()
+        st.session_state["pagina_actual"] = PAGINAS[12]
+    else:
+        avisar("error", f"No se mandó: {error}")
+
+
+def mostrar_boton_para_el_chat(texto, clave):
+    """Si hay un chat en curso (ver chat_para_mandar()), el botón para mandarle `texto`."""
+    chat = chat_para_mandar()
+    if not chat:
+        return
+    canal = CANALES_DE_MENSAJES[chat["canal"]]["nombre"]
+    largo = LARGO_MAXIMO_POR_CANAL.get(chat["canal"], 1000)
+    nombre = nombre_del_chat(chat)
+    nombre = nombre[:30] + ("…" if len(nombre) > 30 else "")
+    demasiado = len(str(texto or "")) > largo
+    st.button(f"💬 Mandárselo a {texto_de_chat_para_markdown(nombre)} por {canal}", key=clave,
+              type="primary", width="stretch", disabled=demasiado,
+              on_click=mandar_al_chat, args=(chat["id"], str(texto or "")),
+              help=(f"Es muy largo para {canal}: tiene {miles(len(str(texto or '')))} letras y "
+                    f"entran {miles(largo)}. Sacá algo, o mandá el PDF desde el teléfono."
+                    if demasiado else "Lo manda al chat que abriste en 💬 Mensajes, y vuelve ahí."))
