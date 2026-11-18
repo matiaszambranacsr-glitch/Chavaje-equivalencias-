@@ -1673,7 +1673,7 @@ def _serie_del_dolar_bcra(dias=100):
         try:
             for d in r.get("detalle") or []:
                 if str(d.get("codigoMoneda", "")).upper() == "USD" and float(d["tipoCotizacion"]) > 0:
-                    serie.append((str(r["fecha"])[:10], float(d["tipoCotizacion"])))
+                    serie.append((str(r["fecha"])[:10], float(d["tipoCotizacion"])))  # fecha de afuera
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return sorted(serie)
@@ -1690,7 +1690,7 @@ def _dolar_oficial():
     serie = []
     for x in (datos if isinstance(datos, list) else []):
         try:
-            serie.append((str(x["fecha"])[:10], float(x["venta"])))
+            serie.append((str(x["fecha"])[:10], float(x["venta"])))  # fecha de afuera
         except (KeyError, TypeError, ValueError):
             continue
     serie = sorted(s for s in serie if s[1] > 0)
@@ -2104,7 +2104,7 @@ def _tasas_del_listado(resultados):
         for clave, nombre, palabras in TASAS_DE_REFERENCIA:
             if clave not in salida and all(p in texto for p in palabras):
                 salida[clave] = {"nombre": nombre, "tna": valor, "descripcion": descripcion,
-                                 "fecha": str(r.get("ultFechaInformada") or r.get("fecha") or "")[:10],
+                                 "fecha": str(r.get("ultFechaInformada") or r.get("fecha") or "")[:10],  # fecha de afuera
                                  "id": r.get("idVariable")}
     return salida
 
@@ -2318,7 +2318,7 @@ def cheques_rechazados_en_el_bcra(cuit):
         for entidad in causal.get("entidades") or []:
             for d in (entidad or {}).get("detalle") or []:
                 try:
-                    cheques.append((str(d.get("fechaRechazo") or "")[:10],
+                    cheques.append((str(d.get("fechaRechazo") or "")[:10],  # fecha de afuera
                                     str(causal.get("causal") or "").strip().capitalize(),
                                     str(int(float(d.get("nroCheque") or 0))),
                                     float(d.get("monto") or 0), bool(d.get("fechaPago"))))

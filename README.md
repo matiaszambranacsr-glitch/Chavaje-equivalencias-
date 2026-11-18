@@ -7754,6 +7754,14 @@ Ahora pasan por `datetime(col, '-3 hours')` (o `fecha_legible()`), y **el audito
 entrar** un `substr(fecha, 1, 16)` sin convertir: encontró uno más que la revisión a mano no había
 visto. Probado con lo cargado a las 22:30 de acá: dice 22:30 de ese día, no 01:30 del siguiente.
 
+**Y cortadas a mano en Python** (`(fila["fecha"] or "")[:16]`), otras cinco: el **estado de cuenta
+de los talleres** (el de su portal y el de Administrar), la fecha en que se cambió cada pieza de un
+auto —que ve también el dueño en la página de su auto—, la de una equivalencia revisada (dos
+lugares) y la del mapeo de columnas recordado. Ahora pasan por `fecha_legible()` o por
+`dia_de_aca()` (`logica/base.py`), y el auditor marca una fecha guardada cortada a mano que no pase
+por ellas; las que vienen de afuera (el BCRA, los cheques rechazados) se marcan en el renglón con
+«# fecha de afuera».
+
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 
 Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar más de 2000 cuentas, sería una locura scrollear para encontrar cada una». Una cuenta (un taller, un mayorista, un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para diez. Se cargaron 2.000 en una copia de la base real y se miró qué se rompía.

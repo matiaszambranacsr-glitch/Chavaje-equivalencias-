@@ -2628,6 +2628,27 @@ for _n in ast.walk(ARBOL):
             if _m.group(1) != "-3":
                 reportar("REVISAR", _n.lineno, f"«'{_m.group(1)} hours'»: la hora de acá es "
                                                "'-3 hours' (A_LA_HORA_DE_ACA)")
+    # (las funciones de abajo ya la pasan a la de acá, o leen la fecha como es)
+    _YA_EN_LA_HORA_DE_ACA = ("fecha_legible", "a_la_hora_de_aca", "hora_corta_aca", "strptime",
+                             "_fecha_de", "dia_de_aca")
+    # Lo mismo cortado a mano en Python: (fila["fecha"] or "")[:16] mostraba el estado de cuenta
+    # de los talleres con la hora del servidor. Una fecha guardada cortada a 10, 16 o 19 letras
+    # tiene que pasar por fecha_legible(), a_la_hora_de_aca(), hora_corta_aca() o strptime.
+    if (isinstance(_n, ast.Subscript) and isinstance(_n.slice, ast.Slice)
+            and _n.slice.lower is None and isinstance(_n.slice.upper, ast.Constant)
+            and _n.slice.upper.value in (10, 16, 19)
+            and any(isinstance(_k, ast.Constant) and isinstance(_k.value, str)
+                    and re.fullmatch(r"fecha\w*|\w+_en|cuando|momento", _k.value)
+                    for _k in ast.walk(_n.value))
+            and not any(isinstance(_a, ast.Call)
+                        and (getattr(_a.func, "id", None) or getattr(_a.func, "attr", None))
+                        in _YA_EN_LA_HORA_DE_ACA
+                        for _a in [_n.value, *_ancestros(_n)])
+            # Una fecha que viene de afuera (el BCRA, los cheques rechazados) ya es un día: se
+            # marca en el renglón con «# fecha de afuera».
+            and "fecha de afuera" not in SRC.splitlines()[_n.lineno - 1]):
+        reportar("REVISAR", _n.lineno, "una fecha guardada cortada a mano: si es para mostrar, "
+                                       "fecha_legible(); si es para decidir el día, la de acá")
     if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) == "today"
             and getattr(_n.func.value, "id", None) == "date"):
         reportar("ERROR", _n.lineno, "date.today() es el día UTC: usar hoy_aca()")

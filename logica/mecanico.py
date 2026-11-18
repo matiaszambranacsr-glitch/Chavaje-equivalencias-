@@ -1558,7 +1558,9 @@ def movimientos_de_cuenta(mecanico_id, limite=None):
         if not f["anulado"]:
             saldo += f["importe"]
         filas.append({
-            "ID": f["id"], "Fecha": (f["fecha"] or "")[:16],
+            # En la hora de acá: se guarda en UTC, y el estado de cuenta (el del taller en su
+            # portal y el de Administrar) mostraba la hora del servidor, tres horas adelantada.
+            "ID": f["id"], "Fecha": fecha_legible((f["fecha"] or "")[:16]),
             "Concepto": (f["concepto"] or "") + (" (ANULADO)" if f["anulado"] else ""),
             "Debe": f["importe"] if f["importe"] > 0 else None,
             "Haber": -f["importe"] if f["importe"] < 0 else None,

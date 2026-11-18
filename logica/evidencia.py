@@ -1028,9 +1028,12 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
         paso["_fecha_revision"] = paso["_fecha_revision_completa"] = ""
         paso["_por_que"] = (fila["por_que"] or "") if fila else ""
         if fila and fila["decision"] == "ok":
-            paso["Revisión"] = (f"aprobado por {fila['revisado_por'] or 'alguien'}"
-                                f" el {(fila['fecha'] or '')[:10]}")
-            paso["_fecha_revision"] = (fila["fecha"] or "")[:10]
+            # El día, el de acá: se guarda en UTC, y lo aprobado después de las 21 decía el día
+            # siguiente (y se comparaba con las comprobaciones en la mano, que son días de acá).
+            # La fecha con hora queda en UTC: se compara con los cambios de medidas, en UTC.
+            _dia = dia_de_aca(fila["fecha"])
+            paso["Revisión"] = f"aprobado por {fila['revisado_por'] or 'alguien'} el {_dia}"
+            paso["_fecha_revision"] = _dia
             paso["_fecha_revision_completa"] = fila["fecha"] or ""
     evaluadas = [(_evaluar_la_cadena(pasos), pasos) for pasos in cadenas]
     evaluadas.sort(key=lambda x: _ORDEN_DE_LOS_ESTADOS.index(x[0][0]))
@@ -1306,8 +1309,16 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     # La fecha con hora de la revisión; si no hay, la de la comprobación en la mano, que tiene
     # solo el día y vale hasta el final de ese día.
     _con_hora = [p["_fecha_revision_completa"] for p in pasos if p.get("_fecha_revision_completa")]
-    _desde = max(_con_hora) if _con_hora else (f"{ficha['ultima_revision']} 23:59:59"
-                                               if ficha["ultima_revision"] else "")
+    # La comprobación en la mano vale hasta el final de ESE día de acá, pasado a UTC para
+    # compararlo con los cambios (guardados en UTC).
+    _desde = max(_con_hora) if _con_hora else ""
+    if not _desde and ficha["ultima_revision"]:
+        try:
+            _desde = utc_de_la_hora_de_aca(datetime.strptime(ficha["ultima_revision"], "%Y-%m-%d")
+                                           + timedelta(hours=23, minutes=59, seconds=59)
+                                           ).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            _desde = f"{ficha['ultima_revision']} 23:59:59"
     ficha["cambios_despues"] = medidas_cambiadas_desde([id_a, id_b], _desde)
     if ficha["cambios_despues"] and estado.startswith("✅"):
         falta.append("volver a mirarla: después de la última revisión cambió "

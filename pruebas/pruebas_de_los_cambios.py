@@ -755,6 +755,16 @@ def probar(L):
             ([x["Fecha"] for x in ns["historial_precio_producto"](_prod_ll)],
              [x["Fecha"] for x in ns["listar_historial_vehiculo"](_auto_noche)]),
             (["2026-11-17 22:30"], ["2026-11-17"]))
+    # Y el estado de cuenta de un taller (el de su portal y el de Administrar).
+    _cuenta_noche = ns["crear_mecanico"]("Taller De Noche")
+    c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, fecha, concepto, importe, anulado) "
+              "VALUES (?, '2026-11-18 01:30:00', 'venta de noche', 100, 0)", (_cuenta_noche,))
+    esperar("el estado de cuenta, en la hora de acá",
+            [m["Fecha"] for m in ns["movimientos_de_cuenta"](_cuenta_noche)], ["17/11/2026 22:30"])
+    esperar("cuándo se cambió cada pieza (lo ve el dueño del auto), el día de acá",
+            [p["Cuándo"] for p in ns["estado_de_cada_pieza"](dict(c.execute(
+                "SELECT * FROM vehiculos WHERE id = ?", (_auto_noche,)).fetchone()))],
+            ["2026-11-17"])
     c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_prod_ll,))
     c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_auto_noche,))
     c.execute("DELETE FROM vehiculos WHERE id = ?", (_auto_noche,))

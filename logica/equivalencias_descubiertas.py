@@ -794,7 +794,7 @@ def la_respuesta_del_caso(caso):
     (el motivo y lo que había al decidir), y lo que dice HOY la ficha de prueba del par: qué
     faltaba y qué lo contradecía. {"correcta": "ok"|"rechazada", "texto": str, "ficha": ficha}"""
     ficha = ficha_de_prueba(caso["a"], caso["b"])
-    quien = f"{caso['revisado_por'] or 'alguien'} el {(caso['fecha'] or '')[:10]}"
+    quien = f"{caso['revisado_por'] or 'alguien'} el {dia_de_aca(caso['fecha'])}"
     if caso["decision"] == "ok":
         texto = f"✅ **La aprobó** {quien}."
     else:
@@ -956,7 +956,7 @@ def ventas_contra_la_recomendacion(dias=90):
         salida["contra_y_devueltas"] += volvio
         if len(salida["ejemplos"]) < 20:
             salida["ejemplos"].append({
-                "Fecha": (r["fecha"] or "")[:16], "Quién": r["usuario"] or "",
+                "Fecha": fecha_legible((r["fecha"] or "")[:16]), "Quién": r["usuario"] or "",
                 "Pidieron": r["pedido"] or "", "Se llevó": f"{r['marca']} {r['vendido']}",
                 "La app recomendaba": evidencia.split(VENDIDA_OTRA_QUE_LA_RECOMENDADA, 1)[1]
                                       .split(" · ")[0],

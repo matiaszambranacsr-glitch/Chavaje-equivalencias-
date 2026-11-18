@@ -257,7 +257,7 @@ if pagina == PAGINAS[2]:
                     if mapeo_previo["_como"] == "igual":
                         st.success(
                             f"💾 Se recordó cómo mapeaste las columnas la última vez que importaste "
-                            f"una lista de **{nombre_prov.strip().upper()}** ({mapeo_previo['fecha'][:10]}). "
+                            f"una lista de **{nombre_prov.strip().upper()}** ({fecha_legible(mapeo_previo['fecha'])[:10]}). "
                             "Ya viene preseleccionado — revisá que coincida con este archivo."
                         )
                     else:

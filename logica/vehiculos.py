@@ -731,7 +731,9 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
         cambiada = _fecha_de(p["fecha_instalacion"])
         fila = {"Pieza": p["descripcion_pieza"], "Marca": p["marca_pieza"] or "",
                 "Código": p["codigo_pieza"] or "", "Km al cambiarla": km_inst,
-                "Cuándo": str(p["fecha_instalacion"] or "")[:10], "Vida útil (km)": vida,
+                # El día de acá: se guarda en UTC, y lo cambiado después de las 21 decía el día
+                # siguiente (también en la página que ve el dueño del auto).
+                "Cuándo": dia_de_aca(p["fecha_instalacion"]), "Vida útil (km)": vida,
                 "Cada (meses)": meses,
                 "_faltan": None, "_dias": None, "_margen": None, "_vence": None,
                 "_dias_fecha": None, "_toca": False}

@@ -83,6 +83,13 @@ def a_la_hora_de_aca(valor):
     return None
 
 
+def dia_de_aca(valor):
+    """El día de acá («2026-11-17») de algo guardado con hora (en UTC); una fecha sola, tal cual.
+    Cortado a mano, (fecha)[:10] daba el día UTC: lo cargado después de las 21 decía mañana."""
+    aca = a_la_hora_de_aca(valor)
+    return aca.strftime("%Y-%m-%d") if aca else str(valor or "")[:10]  # fecha de afuera: sin hora
+
+
 def utc_de_la_hora_de_aca(momento):
     """Lo contrario: una fecha y hora de acá, en UTC, para guardarla."""
     return momento - DIFERENCIA_CON_LA_HORA_DE_ACA
