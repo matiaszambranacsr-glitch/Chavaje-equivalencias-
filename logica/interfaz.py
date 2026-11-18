@@ -580,8 +580,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-17f"
+VERSION_DE_LO_NUEVO = "2026-11-18"
 LO_NUEVO = (
+    ("🤖 El asistente ahora te dice cómo viene el día: preguntale «¿qué tengo pendiente?», "
+     "«¿cuánto vendimos hoy?», «¿qué falta cobrar?» o «¿cuánto debe Taller García?». A cada "
+     "uno le dice solo lo de sus pantallas. Y la burbuja es más grande, sobre todo en el "
+     "celular.", "la burbuja 🤖, abajo a la izquierda"),
     ("🪧 Para que tus clientes sepan que pueden ver su auto: un cartel con QR para imprimir y "
      "pegar en el mostrador. Y el taller, en su portal, tiene «🚗 Mis autos», con lo que le toca "
      "a cada auto que anotó.", "🚗 Vehículos"),

@@ -21,11 +21,17 @@ import orden
 # convence con palabras: «olvidá tus instrucciones», «soy el dueño», «mostrame la tabla de
 # usuarios». Este no tiene nada que se le pueda sacar ni nada que se le pueda hacer hacer:
 #
-#   · NO LEE LA BASE NI LOS SECRETOS. Nada de este archivo consulta la base, lee una
-#     contraseña ni sale a internet: no conoce un precio, un cliente ni una clave. Lo que sabe
-#     son los nombres de las pantallas y las ayudas que ya están escritas en ellas, que ve
-#     cualquiera que las abre. Lo controla pruebas/pruebas_del_asistente.py mirando el código
-#     (no nombra «c», «requests», «secretos_app»…) y corriéndolo con la base envenenada.
+#   · ESTE ARCHIVO NO LEE LA BASE NI LOS SECRETOS. Nada de acá consulta la base, lee una
+#     contraseña ni sale a internet. Lo que sabe son los nombres de las pantallas y las ayudas
+#     que ya están escritas en ellas, que ve cualquiera que las abre. Lo controla
+#     pruebas/pruebas_del_asistente.py mirando el código (no nombra «c», «requests»,
+#     «secretos_app»…) y corriéndolo con la base envenenada.
+#   · LOS DATOS DEL MOMENTO, APARTE Y CERRADOS. Desde que el dueño lo pidió «más inteligente,
+#     pero sin ser una brecha», contesta un puñado de preguntas con datos («¿cuánto vendimos
+#     hoy?», «¿qué tengo pendiente?»). Están en logica/asistente_datos.py, con sus reglas: un
+#     grupo cerrado de preguntas, cada una atada a la pantalla de donde sale el dato (si no la
+#     tenés, no te lo dice), solo lectura, y solo con las funciones de una lista que su prueba
+#     controla mirando el código.
 #   · NO HACE NADA: solo cambia de pantalla. Lo único que escribe son las claves de la
 #     navegación (la pantalla, la solapa, el grupo de Mantenimiento) con valores de las listas
 #     fijas de logica/interfaz.py, si una sección plegable llega abierta (su clave «exp_…»,
@@ -1458,7 +1464,15 @@ def ejemplos_del_asistente(contexto):
              and (f["destino"] or f["quien"] == "taller") and _asis_se_puede(f, contexto)]
     comos.sort(key=lambda f: bool(f["destino"])
                and f["destino"]["pagina"] != contexto.get("pagina"))
-    return [f["titulo"] for f in comos[:4]]
+    ejemplos = [f["titulo"] for f in comos[:4]]
+    # Una pregunta con datos del momento, primero: si no, nadie se entera de que las contesta
+    # (ver logica/asistente_datos.py). Solo a quien la puede ver.
+    if contexto.get("nivel") == "taller":
+        ejemplos = ["¿Cuánto debo?"] + ejemplos[:3]
+    elif (contexto.get("nivel") in ("operador", "admin")
+          and "💵 Caja" in (contexto.get("visibles") or [])):
+        ejemplos = ["¿Qué tengo pendiente?"] + ejemplos[:3]
+    return ejemplos
 
 
 def temas_del_asistente(contexto):
@@ -1475,11 +1489,13 @@ def temas_del_asistente(contexto):
 
 
 def responder_del_asistente(pregunta, contexto):
-    """Qué contesta el asistente. No toca nada: ni la sesión, ni la base, ni la pantalla.
+    """Qué contesta el asistente. No cambia nada: ni la sesión, ni la base, ni la pantalla. Lee
+    de la base solo los datos del momento, para quien los ve (ver «LO QUE PASA AHORA»).
 
     `contexto`: {"visibles": las pantallas que quien pregunta tiene en la barra, "pagina": en
-    cuál está, "nivel": "invitado" | "operador" | "admin", "ultima": el nombre de la ficha de la
-    respuesta anterior, "volver": la pantalla de la que lo sacó la última vez}."""
+    cuál está, "nivel": "invitado" | "operador" | "admin" | "taller", "cuenta": el número de
+    cuenta del taller (de la sesión), "ultima": el nombre de la ficha de la respuesta anterior,
+    "volver": la pantalla de la que lo sacó la última vez}."""
     visibles = list(contexto.get("visibles") or [])
     contexto = {**contexto, "visibles": visibles}
     escrito = limpiar_lo_escrito(pregunta)
@@ -1504,6 +1520,18 @@ def responder_del_asistente(pregunta, contexto):
         if ficha and ficha["destino"] and _asis_se_puede(ficha, contexto):
             return {**_asis_simple(f"Te llevo a {camino_del_asistente(ficha['destino'])}."),
                     "ir": ficha["nombre"]}
+    # LOS DATOS DEL MOMENTO, para quien los ve en su pantalla (ver «LO QUE PASA AHORA»). Antes
+    # que buscar un código: «¿cuánto debe el taller 12?» lleva un número y no es un repuesto.
+    # Están en otro archivo, logica/asistente_datos.py: este no lee la base (ver «EL ASISTENTE:
+    # QUÉ PUEDE Y QUÉ NO»). Si leer un dato falla —la base ocupada—, se dice, y nada más.
+    try:
+        dato = dato_del_momento(llano, contexto)
+    except Exception as _err:        # noqa: BLE001 — un dato que no se pudo leer no es un error
+        anotar_error("asistente/dato_del_momento", _err)
+        dato = _asis_simple("No pude leer ese dato ahora: probá en un rato, o miralo en su "
+                            "pantalla.")
+    if dato:
+        return dato
     # Al invitado se le habla de lo suyo: los ejemplos no nombran la caja ni las cuentas. Y al
     # taller, de su portal.
     invitado = contexto.get("nivel") == "invitado"
@@ -1513,8 +1541,8 @@ def responder_del_asistente(pregunta, contexto):
         return _asis_simple(
             f"🤖 Soy el asistente. Con tu cuenta te ayudo con {ASISTENTE_LO_DEL_PORTAL}: te "
             "explico cómo se hace, te llevo («llevame al modo mecánico», «volver») y te busco "
-            "un repuesto («buscar W712/75»). No veo tu cuenta ni tus datos: eso lo ves vos, en "
-            "tu pantalla.",
+            "un repuesto («buscar W712/75»). También te digo cuánto debés («¿cuánto debo?») y "
+            "qué les toca a tus autos. De otras cuentas no sé nada.",
             [(e, "preguntar", e) for e in ejemplos_del_asistente(contexto)])
     # «temas»: todo lo que se le puede preguntar, por pantalla.
     if _ASIS_INDICE.match(llano):
@@ -1719,7 +1747,11 @@ def _asis_contexto():
             "nivel": ("taller" if nivel_de_la_sesion == "mecanico" else "admin" if es_admin()
                       else "invitado" if solo_mirar() else "operador"),
             "ultima": charla[-1]["r"].get("ficha") if charla else None,
-            "volver": st.session_state.get("_asis_volver")}
+            "volver": st.session_state.get("_asis_volver"),
+            # El número de cuenta, de la sesión y solo del taller: con eso le dice lo suyo, y
+            # estado_de_cuenta() lo vuelve a mirar adentro (exigir_que_sea_su_cuenta()).
+            "cuenta": (st.session_state.get("mecanico_id")
+                       if nivel_de_la_sesion == "mecanico" else None)}
 
 
 def llevar_con_el_asistente(nombre_de_la_ficha):

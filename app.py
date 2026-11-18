@@ -167,6 +167,8 @@ específico, y las pantallas quedan todas al final:
         · LO QUE NO SE LE PUEDE SACAR AL ASISTENTE
         · LA RESPUESTA DEL ASISTENTE
         · LA BURBUJA DEL ASISTENTE
+    logica/asistente_datos.py
+        · LO QUE PASA AHORA: LOS DATOS DEL MOMENTO, SOLO PARA QUIEN LOS VE EN SU PANTALLA
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL

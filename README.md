@@ -7555,6 +7555,55 @@ crudo lo escrito…— los detecta todos. Contesta en un milisegundo; minimizada
 En el navegador de verdad (PC y celular) se probó abrir con F1, preguntar, llevar con la
 sección abierta, el cartel de «te llevé a…» y que F2 siga yendo a la búsqueda.
 
+## 🤖 El asistente, más inteligente y igual de cerrado
+
+El pedido: «hacé que el asistente sea más inteligente pero que siga sin ser una brecha de
+seguridad, y agrandá un poco el ícono, más que nada en el celular, porque no se ve prácticamente».
+
+**La burbuja.** Era de 54 px con el 🤖 a 1,6 rem, naranja sobre el fondo oscuro y sin borde. Ahora
+es de 60 px en la computadora y de 68 px en el teléfono, con el 🤖 más grande y un aro blanco; en
+el teléfono, además, separada del borde de abajo (en los que tienen barra de gestos quedaba medio
+tapada). La prueba del navegador exige en un teléfono simulado una burbuja redonda de 64 px o más,
+el 🤖 de 32 px o más y separada del borde; con la de 54 px, falla.
+
+**Los datos del momento.** Hasta acá explicaba, llevaba y buscaba: de lo que estaba pasando no
+sabía nada. Ahora contesta con datos:
+
+| Se le pregunta | Contesta | Lo ve quien tiene |
+|---|---|---|
+| «¿Cuánto vendimos hoy?» (y después «¿y ayer?») | Las ventas, lo que entró en efectivo y con tarjeta, lo puesto a cuenta y lo que espera en la caja: lo mismo que dice arriba 💵 Caja (`resumen_de_la_caja()`), con el botón al cierre de caja | 💵 Caja |
+| «¿Qué falta cobrar?» | Cuántas ventas esperan, por cuánto, y la más vieja | 💵 Caja |
+| «¿Qué pedidos hay en el depósito?» | Cuántos pedidos esperan y quién pidió el primero | 📦 Depósito |
+| «¿Cuánto debe Taller García?» | Su saldo, lo vencido y el crédito que le queda (hasta tres, si el nombre calza con varias) | 🗂️ Administrar |
+| «¿Qué tengo pendiente?» | Un renglón por lo que espera en sus pantallas: la caja, el depósito, las cuentas con vencido y los autos a los que les toca un cambio | lo de sus pantallas |
+| El taller: «¿Cuánto debo?» | Su saldo, lo vencido y lo disponible | su cuenta |
+| El taller: «¿A qué auto le toca el service?» | Sus autos anotados a los que ya les toca o les toca pronto | su cuenta |
+
+Al abrirlo, el primer ejemplo es una de estas («¿Qué tengo pendiente?»; al taller, «¿Cuánto
+debo?»): si no, nadie se enteraba de que las contesta.
+
+**Por qué sigue sin ser una brecha** (`logica/asistente_datos.py`, «LO QUE PASA AHORA»):
+
+- **El motor no se tocó**: `logica/asistente.py` sigue sin nombrar la base, los secretos ni
+  internet, y la prueba lo sigue corriendo con todo eso envenenado. Los datos están en su propio
+  archivo.
+- **Un grupo cerrado de preguntas.** Lo escrito solo elige cuál de ellas es; con lo escrito no se
+  arma ninguna consulta. El nombre de una cuenta se busca con `buscar_cuentas()`, en Python. Si no
+  es ninguna cuenta («¿cuánto debe durar una correa?»), sigue el camino de siempre.
+- **Cada dato, atado a la pantalla de donde sale.** Si quien pregunta no la tiene en su barra, no
+  se lo dice: el invitado no recibe ninguno; el del depósito, solo lo del depósito; el taller,
+  solo lo de SU cuenta, y `estado_de_cuenta()` lo vuelve a mirar con la sesión: con el número de
+  otra cuenta en el pedido, no la da. Las pantallas van por su nombre: con el número de la lista
+  (`PAGINAS[2]` es 📁 Cargar Excel, no 📦 Depósito) se ataba el dato a otra pantalla sin que
+  ningún rol lo mostrara; lo encontró la prueba nueva, que pregunta con una sola pantalla en la
+  barra, una por una.
+- **Solo lee**, y solo con las funciones de `FUNCIONES_QUE_PUEDE_USAR`. La prueba mira el código:
+  que no llame a otra cosa de la app, que esa lista no tenga nada que cobre, guarde o borre, que
+  no nombre la base ni los secretos, que no escriba en la sesión y que no importe nada.
+- **Lo que sale de la base va escapado** contra el formato y las fórmulas: una cuenta llamada
+  «Taller \*Negrita\* [link](http://…) $1 y $2» se ve tal cual, sin negritas, sin link y sin
+  fórmula.
+
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 
 Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar más de 2000 cuentas, sería una locura scrollear para encontrar cada una». Una cuenta (un taller, un mayorista, un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para diez. Se cargaron 2.000 en una copia de la base real y se miró qué se rompía.

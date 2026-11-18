@@ -30,7 +30,7 @@ ENTIENDE = (
     ("quiero fiarle a un taller", "como:a_cuenta"),
     ("como hago el cierre de caja", "como:cierre"),
     ("arqueo", "como:cierre"),
-    ("cuanto vendi hoy", "como:cierre"),
+    ("cuanto vendi hoy", "dato:ventas"),
     ("me equivoque en el medio de pago", "como:corregir_cobro"),
     ("la cajera cobro mal", "como:corregir_cobro"),
     ("como hago una factura", "como:factura"),
@@ -101,7 +101,7 @@ ENTIENDE = (
     ("separar stock para un cliente", "como:ver_stock"),
     ("anotar para reponer", "como:reponer"),
     ("cambiar la cantidad en la venta", "como:vender"),
-    ("como veo las ventas de ayer", "como:cierre"),
+    ("como veo las ventas de ayer", "dato:ventas_ayer"),
     ("quien vendio esto", "como:cierre"),
     ("cobrar con qr", "como:cobrar"),
     ("coeficiente de la lista", "como:escala"),
@@ -944,6 +944,155 @@ def probar(L):
                 at.text_input(key="mec_busqueda").value, "F100")
         cierto("y el portal se dibuja sin error", not at.exception, at.exception)
     finally:
+        st.session_state.clear()
+
+    # 9. LOS DATOS DEL MOMENTO (ver «LO QUE PASA AHORA» en logica/asistente_datos.py). El dueño lo
+    # pidió «más inteligente, pero que siga sin ser una brecha de seguridad». Primero, mirando el
+    # código: no nombra la base, los secretos ni internet, no escribe en la sesión, no importa
+    # nada, y de la app solo llama a las funciones de su lista (que leen) y a las del asistente.
+    with open(os.path.join(RAIZ, "logica", "asistente_datos.py"), encoding="utf-8") as f:
+        arbol_d = ast.parse(f.read())
+    esperar("los datos del momento no nombran la base, los secretos ni internet",
+            sorted({n.id for n in ast.walk(arbol_d) if isinstance(n, ast.Name)}
+                   & NOMBRES_PROHIBIDOS), [])
+    esperar("ni consultan, ni leen st.secrets, ni salen",
+            sorted({n.attr for n in ast.walk(arbol_d) if isinstance(n, ast.Attribute)}
+                   & (ATRIBUTOS_PROHIBIDOS | {"session_state"})), [])
+    esperar("ni importan nada",
+            [n for n in ast.walk(arbol_d) if isinstance(n, (ast.Import, ast.ImportFrom))], [])
+    _propias_d = {n.name for n in ast.walk(arbol_d) if isinstance(n, ast.FunctionDef)}
+    _del_asistente = {"_asis_simple", "_asis_escapar", "_asis_se_puede", "fichas_del_asistente"}
+    _sin_peligro = {"len", "max", "min", "sum", "sorted", "any", "all", "bool", "str", "int",
+                    "timedelta", "next", "range", "enumerate", "zip", "round", "float"}
+    _llamadas_d = {n.func.id for n in ast.walk(arbol_d)
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    esperar("de la app, solo llaman a las funciones de su lista",
+            sorted(_llamadas_d - _propias_d - _del_asistente - _sin_peligro
+                   - set(ns["FUNCIONES_QUE_PUEDE_USAR"])), [])
+    esperar("y su lista es de funciones que leen (ninguna cobra, guarda ni borra)",
+            [f for f in ns["FUNCIONES_QUE_PUEDE_USAR"]
+             if any(x in f for x in ("guardar", "cobrar_", "borrar", "crear", "cambiar",
+                                     "anotar", "eliminar", "cerrar"))], [])
+    # Después, con datos de verdad: una venta cobrada, una que espera, un pedido en el depósito
+    # y una cuenta con deuda (con un nombre con formato, para ver que sale escapado).
+    c = ns["c"]
+    c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada, "
+              "cobrada_en) VALUES (datetime('now'), 'ana', 'Efectivo', 1500, 1, 0, "
+              "datetime('now'))")
+    c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada) "
+              "VALUES (datetime('now'), 'beto', 'Efectivo', 900, 0, 0)")
+    _cuenta_d = ns["crear_mecanico"]("Taller *Negrita* [link](http://x.example) $1 y $2")
+    _otra_d = ns["crear_mecanico"]("Lubricentro Ajeno", "clave-ajeno-77")
+    c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, vence, anulado) "
+              "VALUES (?, 'venta', 5000, date('now', '-40 days'), 0)", (_cuenta_d,))
+    c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, vence, anulado) "
+              "VALUES (?, 'venta', 777, date('now', '+20 days'), 0)", (_otra_d,))
+    c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('MARCA DATOS', 'PROVEEDOR')")
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "SELECT 'DAT1', 'DAT1', 'FILTRO', id FROM marcas WHERE nombre = 'MARCA DATOS'")
+    _prod_d = (c.lastrowid,)
+    c.execute("INSERT INTO pedidos_deposito (producto_id, cantidad, estado, pedido_por, "
+              "pedido_en) VALUES (?, 1, 'pendiente', 'ana *pide*', datetime('now'))",
+              (_prod_d[0],))
+    ns["conn"].commit()
+    _todas_d = list(ns["ORDEN_DE_LAS_PAGINAS"])
+    _roles_d = {
+        "invitado": {"visibles": [p for p in _todas_d if p in ns["PAGINAS_ABIERTAS"]],
+                     "pagina": ns["PAGINAS"][0], "nivel": "invitado"},
+        "depósito": {"visibles": list(ns["PAGINAS_DEL_DEPOSITO"]),
+                     "pagina": ns["PAGINAS"][2], "nivel": "operador"},
+        "operador": {"visibles": _todas_d, "pagina": ns["PAGINAS"][0], "nivel": "operador"},
+        "taller": {"visibles": list(ns["PAGINAS_DEL_TALLER"]), "pagina": ns["PAGINA_DEL_PORTAL"],
+                   "nivel": "taller", "cuenta": _otra_d},
+    }
+    _preguntas_d = {
+        "cuanto vendimos hoy": "dato:ventas", "que falta cobrar": "dato:a_cobrar",
+        "que pedidos hay en el deposito": "dato:deposito",
+        "cuanto debe taller negrita": "dato:cuenta", "que tengo pendiente": "dato:pendiente",
+        "cuanto debo": "dato:mi_cuenta",
+    }
+    # Quién recibe cada dato: lo de las pantallas de cada uno, y nada más.
+    _quien_d = {
+        "invitado": set(),
+        "depósito": {"dato:deposito", "dato:pendiente"},
+        "operador": {"dato:ventas", "dato:a_cobrar", "dato:deposito", "dato:cuenta",
+                     "dato:pendiente"},
+        "taller": {"dato:mi_cuenta"},
+    }
+    if not _prod_d:
+        _quien_d["depósito"].discard("dato:deposito")
+        _quien_d["operador"].discard("dato:deposito")
+    for rol, contexto_d in _roles_d.items():
+        recibidos = set()
+        for pregunta_d, dato_d in _preguntas_d.items():
+            r = responder(pregunta_d, contexto_d)
+            if str(r["ficha"] or "").startswith("dato:"):
+                recibidos.add(r["ficha"])
+        esperar(f"{rol}: recibe solo los datos de sus pantallas", recibidos,
+                {d for d in _quien_d[rol]
+                 if d != "dato:deposito" or _prod_d} if rol != "taller" else _quien_d[rol])
+    # Cada dato, atado a SU pantalla: con solo esa en la barra lo dice; con cualquier otra, no.
+    # (Las posiciones de PAGINAS no son las de la barra, y con el número equivocado el dato
+    # quedaba atado a otra pantalla sin que ningún rol de verdad lo mostrara.)
+    for _pantalla_d, _pregunta_d, _dato_d in (
+            ("💵 Caja", "cuanto vendimos hoy", "dato:ventas"),
+            ("💵 Caja", "que falta cobrar", "dato:a_cobrar"),
+            ("📦 Depósito", "que pedidos hay en el deposito", "dato:deposito"),
+            ("🗂️ Administrar", "cuanto debe taller negrita", "dato:cuenta")):
+        _con_esa = responder(_pregunta_d, {"visibles": [_pantalla_d], "pagina": _pantalla_d,
+                                           "nivel": "operador"})["ficha"]
+        _sin_esa = [p for p in _todas_d if p != _pantalla_d
+                    and responder(_pregunta_d, {"visibles": [p], "pagina": p,
+                                                "nivel": "operador"})["ficha"] == _dato_d]
+        esperar(f"«{_pregunta_d}»: con {_pantalla_d} sí, con cualquier otra no",
+                (_con_esa, _sin_esa), (_dato_d, []))
+    _ventas_d = responder("cuanto vendimos hoy", _roles_d["operador"])
+    cierto("las ventas de hoy: lo cobrado y lo que espera, como dice la caja",
+           "\\$1.500" in _ventas_d["texto"] and "\\$900" in _ventas_d["texto"],
+           _ventas_d["texto"])
+    _dep_d = responder("que pedidos hay en el deposito", _roles_d["depósito"])
+    cierto("el depósito: cuántos pedidos esperan y quién pidió el primero (escapado)",
+           "**1** pedido" in _dep_d["texto"] and "ana \\*pide\\*" in _dep_d["texto"],
+           _dep_d["texto"])
+    _pend_d = responder("que tengo pendiente", _roles_d["operador"])
+    cierto("lo pendiente junta la caja, el depósito y las cuentas vencidas",
+           all(x in _pend_d["texto"] for x in ("esperan en la caja", "depósito",
+                                               "saldo vencido")), _pend_d["texto"])
+    _ayer_d = responder("y ayer", {**_roles_d["operador"], "ultima": "dato:ventas"})
+    esperar("«¿y ayer?» después de las ventas de hoy, las de ayer",
+            (_ayer_d["ficha"], _ayer_d["texto"].startswith("**Ayer**")), ("dato:ventas_ayer", True))
+    esperar("«y ayer» solo, sin venir de las ventas, no es un dato",
+            str(responder("y ayer", _roles_d["operador"])["ficha"]).startswith("dato:"), False)
+    _deuda_d = responder("cuanto debe taller negrita", _roles_d["operador"])
+    cierto("la deuda de una cuenta, con el vencido y el nombre escapado (sin link ni fórmula)",
+           "\\$5.000" in _deuda_d["texto"] and "vencido" in _deuda_d["texto"]
+           and "\\[link\\]" in _deuda_d["texto"] and "\\*Negrita\\*" in _deuda_d["texto"]
+           and "](http" not in _deuda_d["texto"].replace("\\]", ""), _deuda_d["texto"])
+    _mia_d = responder("cuanto debo", _roles_d["taller"])
+    cierto("el taller ve SU deuda y nada de la otra cuenta",
+           "\\$777" in _mia_d["texto"] and "5.000" not in _mia_d["texto"]
+           and "Negrita" not in _mia_d["texto"], _mia_d["texto"])
+    esperar("al taller no le dice cuánto debe otra cuenta",
+            str(responder("cuanto debe taller negrita", _roles_d["taller"])["ficha"]
+                ).startswith("dato:"), False)
+    esperar("«¿cuánto debe durar una correa?» no es una cuenta: sigue el camino de siempre",
+            str(responder("cuanto debe durar una correa", _roles_d["operador"])["ficha"]
+                ).startswith("dato:"), False)
+    esperar("«¿cómo cobro una venta?» sigue siendo la explicación, no un dato",
+            responder("como cobro una venta", _roles_d["operador"])["ficha"], "como:cobrar")
+    # El taller con el número de otra cuenta en el contexto (si algo se lo cambiara): la
+    # segunda barrera, estado_de_cuenta() con la sesión del taller, no le da la ajena.
+    _g_d = ns["estado_de_cuenta"].__globals__
+    _adentro_d = _g_d["_nivel_de_quien_esta_adentro"]
+    try:
+        _g_d["_nivel_de_quien_esta_adentro"] = lambda: "mecanico"
+        st.session_state["mecanico_id"] = _otra_d
+        _colado_d = responder("cuanto debo", {**_roles_d["taller"], "cuenta": _cuenta_d})
+        cierto("con el número de otra cuenta, la sesión del taller lo frena",
+               "5.000" not in _colado_d["texto"] and "No pude leer" in _colado_d["texto"],
+               _colado_d["texto"])
+    finally:
+        _g_d["_nivel_de_quien_esta_adentro"] = _adentro_d
         st.session_state.clear()
     return fallas
 
