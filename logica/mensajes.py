@@ -61,7 +61,10 @@ _TEXTO_DE_CADA_TIPO = {
     "location": "📍 Ubicación", "contacts": "👤 Contacto", "share": "🔗 Algo compartido",
     "story_mention": "📣 Te mencionó en una historia", "reaction": "👍 Reacción",
     "ig_reel": "🎬 Un reel", "template": "📋 Mensaje automático"}
-# Lo que se suma a la respuesta con un toque (ver la pantalla): lo que más se contesta.
+# Lo que se suma a la respuesta con un toque (ver la pantalla): lo que más se contesta. El
+# administrador las cambia por las suyas (el horario, la dirección) en Administrar → 💬
+# Mensajería y cobros: ver respuestas_rapidas().
+CLAVE_DE_LAS_RESPUESTAS_RAPIDAS = "respuestas_rapidas_de_los_chats"
 RESPUESTAS_RAPIDAS = ["¡Hola! ¿En qué te ayudo?", "Sí, lo tenemos.",
                       "No lo tenemos ahora: te lo consigo y te aviso.",
                       "¿Me pasás marca, modelo y año del auto (o la patente)?",
@@ -536,8 +539,12 @@ def chats_de_la_bandeja(filtro="todos", texto="", limite=60):
     if str(texto or "").strip():
         donde.append("(nombre LIKE ? OR externo LIKE ? OR ultimo_texto LIKE ?)")
         valores += [f"%{str(texto).strip()}%"] * 3
+    # ultimo_quien: quién mandó lo último (para «Ana: …» en la lista; «desde otro lado» si se
+    # contestó desde el teléfono).
     filas = c.execute(f"""SELECT id, canal, externo, nombre, ultimo_texto, ultimo_en, ultimo_entra,
-                                 ultimo_del_cliente_en, sin_leer, leido_por
+                                 ultimo_del_cliente_en, sin_leer, leido_por,
+                                 (SELECT m.quien FROM chat_mensajes m WHERE m.chat_id = chats.id
+                                  ORDER BY m.cuando DESC, m.id DESC LIMIT 1) AS ultimo_quien
                           FROM chats WHERE {' AND '.join(donde)}
                           ORDER BY (sin_leer > 0) DESC, COALESCE(ultimo_en, '') DESC
                           LIMIT ?""", valores + [int(limite)]).fetchall()
@@ -555,6 +562,36 @@ def mensajes_del_chat(chat_id, limite=80):
                          WHERE chat_id = ? ORDER BY cuando DESC, id DESC LIMIT ?""",
                       (int(chat_id), int(limite))).fetchall()
     return [dict(f) for f in reversed(filas)]
+
+
+def respuestas_rapidas():
+    """Las del administrador (una por renglón), o las de siempre si no puso ninguna."""
+    propias = [x.strip() for x in str(obtener_config(CLAVE_DE_LAS_RESPUESTAS_RAPIDAS, "") or "")
+               .splitlines() if x.strip()]
+    return propias[:15] or list(RESPUESTAS_RAPIDAS)
+
+
+def guardar_respuestas_rapidas(texto):
+    """Las guarda (una por renglón, hasta 15 de hasta 300 letras). Vacío vuelve a las de
+    siempre. Devuelve cuántas quedaron."""
+    exigir_nivel("admin", "cambiar las respuestas rápidas de los chats")
+    renglones = [x.strip()[:300] for x in str(texto or "").splitlines() if x.strip()][:15]
+    guardar_config(CLAVE_DE_LAS_RESPUESTAS_RAPIDAS, "\n".join(renglones))
+    anotar_cambio("cambió las respuestas rápidas", "configuración", CLAVE_DE_LAS_RESPUESTAS_RAPIDAS,
+                  despues=renglones)
+    return len(renglones)
+
+
+def hace_cuanto_espera(momento, ahora=None):
+    """«hace 5 min», «hace 2 h», «hace 3 días»: desde lo último del cliente (guardado en UTC)."""
+    try:
+        desde = datetime.strptime(str(momento or "")[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return ""
+    minutos = max(0, int(((ahora or datetime.now()) - desde).total_seconds() // 60))
+    if minutos < 60:
+        return f"hace {minutos} min"
+    return f"hace {minutos // 60} h" if minutos < 48 * 60 else f"hace {minutos // 1440} días"
 
 
 def texto_de_chat_para_markdown(texto):

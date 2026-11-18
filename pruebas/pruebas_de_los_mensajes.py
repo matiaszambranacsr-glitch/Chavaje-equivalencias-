@@ -64,6 +64,7 @@ class MetaDeMentira:
         self.avisos = []
         self.confirmados = []
         self.falla = None            # (estado, {"error": …}) o una excepción
+        self.numero = 0              # el número de cada mensaje mandado: Meta nunca lo repite
 
     def request(self, metodo, url, params=None, json=None, timeout=None, headers=None):
         # Lo que no va a Meta ni al relevo es de otra parte de la app (una tarea de fondo que
@@ -92,13 +93,15 @@ class MetaDeMentira:
                                     "instagram_business_account": {"id": "IG9",
                                                                    "username": "repuestos"}})
         if url.endswith("/NUM1/messages"):
-            return _Respuesta(200, {"messages": [{"id": f"wamid.SALE{len(self.pedidos)}"}]})
+            self.numero += 1
+            return _Respuesta(200, {"messages": [{"id": f"wamid.SALE{self.numero}"}]})
         if url.endswith("/NUM1"):
             return _Respuesta(200, {"display_phone_number": "+54 9 11 5555-0000",
                                     "verified_name": "Repuestos de Prueba"})
         if url.endswith("/PAG1/messages"):
+            self.numero += 1
             return _Respuesta(200, {"recipient_id": json["recipient"]["id"],
-                                    "message_id": f"m_SALE{len(self.pedidos)}"})
+                                    "message_id": f"m_SALE{self.numero}"})
         return _Respuesta(404, {"error": {"code": 803}})
 
     def get(self, url, **kw):
@@ -323,6 +326,30 @@ def probar():
                 ns["texto_de_chat_para_markdown"]("**a** ![x](http://y.example/p.png) $1 y $2\nfin"),
                 "\\*\\*a\\*\\* !\\[x\\](http://y.example/p.png) \\$1 y \\$2  \nfin")
 
+        _ahora = datetime(2026, 11, 18, 15, 0, 0)
+        esperar("hace cuánto espera",
+                [ns["hace_cuanto_espera"](x, _ahora) for x in
+                 ("2026-11-18 14:55:00", "2026-11-18 12:00:00", "2026-11-14 15:00:00", "")],
+                ["hace 5 min", "hace 3 h", "hace 4 días", ""])
+        # Las respuestas rápidas: las de siempre, las del negocio, y vacío vuelve a las de siempre.
+        esperar("las respuestas rápidas de siempre", ns["respuestas_rapidas"](),
+                list(ns["RESPUESTAS_RAPIDAS"]))
+        esperar("guardar las del negocio", ns["guardar_respuestas_rapidas"](
+            "  Abrimos de 8 a 18  \n\n Estamos en Av. Siempreviva 742 \n" + "x" * 400), 3)
+        esperar("y se usan esas", ns["respuestas_rapidas"](),
+                ["Abrimos de 8 a 18", "Estamos en Av. Siempreviva 742", "x" * 300])
+        ns["guardar_respuestas_rapidas"]("")
+        esperar("vacío vuelve a las de siempre", ns["respuestas_rapidas"](),
+                list(ns["RESPUESTAS_RAPIDAS"]))
+        try:
+            _g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+            ns["guardar_respuestas_rapidas"]("no")
+            fallas.append("un empleado pudo cambiar las respuestas rápidas")
+        except PermissionError:
+            pass
+        finally:
+            _g["_nivel_de_quien_esta_adentro"] = _adentro
+
         # 6. LA VUELTA DE FONDO: sola, una por vez, y no más de una por minuto.
         _sin_fondo = os.environ.pop("EQUIVALENCIAS_SIN_TAREAS_DE_FONDO", None)
         try:
@@ -365,7 +392,13 @@ def probar():
         cierto("la pantalla abre sin errores", not at.exception, at.exception)
         _botones = {b.key: b.label for b in at.button if str(b.key).startswith("msj_chat_")}
         esperar("un botón por chat", len(_botones), 3)
+        _maria_lbl = [lbl for lbl in _botones.values() if "María" in lbl]
+        # Lo último de María lo mandó otro (la prueba, sin sesión: «Invitado»): la lista dice
+        # quién, no «Vos:» como si lo hubiera mandado Ana.
+        cierto("lo último de María dice quién lo mandó, no «Vos:»",
+               _maria_lbl and "Invitado: Te espero" in _maria_lbl[0], _maria_lbl)
         _pedro = [lbl for lbl in _botones.values() if "Pedro" in lbl]
+        cierto("Pedro espera respuesta: dice hace cuánto", _pedro and "hace " in _pedro[0], _pedro)
         cierto("el nombre del cliente va escapado en la lista (sin link)",
                _pedro and "\\[link\\]" in _pedro[0] and "](http" not in _pedro[0].replace("\\]", ""),
                _pedro)
@@ -389,6 +422,13 @@ def probar():
                 [("https://graph.facebook.com/v26.0/NUM1/messages", "Lo tengo, ¿te lo separo?")])
         esperar("y la caja queda vacía para la próxima",
                 at.text_area(key=f"msj_respuesta_{_juan['id']}").value, "")
+        # Lo que mandó Ana, en la lista de Ana, dice «Vos:».
+        del at.session_state["msj_chat_abierto"]
+        at.run()
+        _juan_lbl = [b.label for b in at.button if b.key == f"msj_chat_{_juan['id']}"]
+        cierto("lo que mandó Ana, en su lista, dice «Vos:»",
+               _juan_lbl and "Vos: Lo tengo" in _juan_lbl[0], _juan_lbl)
+        at.button(key=f"msj_chat_{_juan['id']}").click().run()
         # DEL CHAT A LA COTIZACIÓN, Y DE VUELTA. «📋 Cotizar estos códigos» los suma a la lista
         # de WhatsApp (el que no está, se avisa) y lleva ahí.
         c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('MANN CHAT', 'PROVEEDOR')")

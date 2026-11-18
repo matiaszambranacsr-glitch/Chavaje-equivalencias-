@@ -1175,6 +1175,21 @@ if pagina == PAGINAS[3]:
                         'relevo_clave = "…"        # la misma que CLAVE_DEL_RELEVO en el relevo\n'
                         '# instagram = "no"        # si la página no tiene Instagram',
                         language="toml")
+                # LAS RESPUESTAS RÁPIDAS de los chats: las de siempre, o las del negocio.
+                st.markdown("**⚡ Respuestas rápidas de los chats** (una por renglón; vacío "
+                            "vuelve a las de siempre):")
+                st.text_area("Respuestas rápidas:", value="\n".join(respuestas_rapidas()),
+                             key="respuestas_rapidas_in", height=170,
+                             label_visibility="collapsed")
+                if candado("cambiar las respuestas rápidas de los chats",
+                           st.button("💾 Guardar las respuestas rápidas",
+                                     key="guardar_respuestas_rapidas"),
+                           "cambiar_las_respuestas_rapidas"):
+                    _cuantas_rap = guardar_respuestas_rapidas(
+                        st.session_state.get("respuestas_rapidas_in"))
+                    avisar("success", f"Guardadas: {miles(_cuantas_rap)} respuesta(s) rápida(s)."
+                           if _cuantas_rap else "Vuelven las respuestas rápidas de siempre.")
+                    st.rerun()
                 if not es_admin():
                     st.caption("🔌 La conexión la prueba un administrador.")
                 elif st.button("🔌 Probar la conexión", key="probar_los_canales",

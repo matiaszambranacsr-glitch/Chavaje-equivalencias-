@@ -114,11 +114,19 @@ if pagina == PAGINAS[12]:
             _icono = CANALES_DE_MENSAJES.get(_ch["canal"], {}).get("icono", "💬")
             _vista = str(_ch["ultimo_texto"] or "").replace("\n", " ")
             _vista = _vista[:60] + ("…" if len(_vista) > 60 else "")
-            _de_quien = "" if _ch["ultimo_entra"] else "Vos: "
+            # Quién contestó lo último: con varios atendiendo, «Vos:» para todos confundía.
+            _quien = str(_ch.get("ultimo_quien") or "")
+            _de_quien = "" if _ch["ultimo_entra"] else (
+                "Vos: " if _quien == obtener_usuario_actual()
+                else "Desde el teléfono: " if _quien == "desde otro lado"
+                else f"{_quien}: " if _quien else "")
             _marca = f"🔴 {miles(_ch['sin_leer'])} · " if _ch["sin_leer"] else (
                 "⏳ " if _ch["ultimo_entra"] else "")
+            # Lo que espera respuesta dice hace cuánto: a la media hora ya es mucho.
+            _cuando = (hace_cuanto_espera(_ch["ultimo_del_cliente_en"]) if _ch["ultimo_entra"]
+                       else _msj_hora(_ch["ultimo_en"]))
             _etiqueta = (f"{_icono} {_marca}**{texto_de_chat_para_markdown(nombre_del_chat(_ch))}**"
-                         f" · {_msj_hora(_ch['ultimo_en'])}  \n"
+                         f" · {_cuando}  \n"
                          f"{texto_de_chat_para_markdown(_de_quien + _vista)}")
             if st.button(_etiqueta, key=f"msj_chat_{_ch['id']}", width="stretch",
                          type="primary" if _ch["id"] == _abierto_msj else "secondary"):
@@ -219,7 +227,7 @@ if pagina == PAGINAS[12]:
                     # En el celular, plegadas: abiertas eran cuatro renglones antes de la caja.
                     _donde_rapidas = (st.popover("⚡ Respuestas rápidas", key="msj_pop_rapidas")
                                       if es_celular() else st.container())
-                    _donde_rapidas.pills("Respuestas rápidas:", RESPUESTAS_RAPIDAS,
+                    _donde_rapidas.pills("Respuestas rápidas:", respuestas_rapidas(),
                                          key=f"{_clave_resp}_rapida", on_change=_msj_rapida,
                                          args=(_clave_resp, f"{_clave_resp}_rapida"),
                                          label_visibility="collapsed")

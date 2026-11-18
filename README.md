@@ -7627,6 +7627,12 @@ barra; no la ven el invitado, el taller ni los del depósito):
 - Si escribe por WhatsApp un número que **ya tiene un auto anotado** en 🚗 Vehículos o un pedido
   esperando, se dice arriba del chat (se compara por los últimos 8 números).
 - En el celular, una cosa por vez: la lista, y al tocar un chat, el chat con «← Volver».
+- En la lista, **quién contestó lo último** («Vos: …», «Ana: …», «Desde el teléfono: …»: con
+  varios atendiendo, «Vos:» para todos confundía), y los que esperan respuesta dicen **hace
+  cuánto** («⏳ hace 25 min»).
+- Las **respuestas rápidas** son las del negocio: el administrador las cambia (una por renglón,
+  hasta 15) en 🗂️ Administrar → 💬 Mensajería y cobros → «📲 Conectar WhatsApp, Facebook e
+  Instagram». Vacío vuelve a las de siempre. Queda en el registro de cambios.
 
 **Del chat a la cotización, y de vuelta.** El cliente pregunta por el chat «¿tenés el W712/80 y
 el PH5949?». Antes: copiar los códigos, buscarlos, armar la cotización, abrir WhatsApp en el
