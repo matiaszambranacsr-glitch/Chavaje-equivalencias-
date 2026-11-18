@@ -69,7 +69,7 @@ _LARGO_QUE_SE_GUARDA = 4000
 # Lo que dura lo que el proceso: el candado de la tanda, cuándo fue la última y cómo le fue a
 # cada canal (ver del_proceso(): a este nivel, cada pasada crearía otro).
 _BANDEJA = del_proceso("bandeja_de_mensajes",
-                       lambda: {"candado": threading.Lock(), "ultima": 0.0, "estado": {},
+                       lambda: {"candado": threading.Lock(), "ultima": None, "estado": {},
                                 "propios": {}})
 
 
@@ -468,7 +468,11 @@ def arrancar_la_bandeja_de_fondo():
     cfg = config_de_los_mensajes()
     if not hay_mensajes_conectados(cfg):
         return False
-    if time.monotonic() - _BANDEJA["ultima"] < CADA_CUANTO_SE_MIRAN_LOS_MENSAJES:
+    # «Ninguna todavía» es None y no 0: time.monotonic() cuenta desde que se prendió la máquina,
+    # y en una recién prendida (un servidor reiniciado, las de GitHub) vale menos de un minuto:
+    # con 0, la primera vuelta se salteaba. Lo vio la prueba en GitHub.
+    _ultima = _BANDEJA["ultima"]
+    if _ultima is not None and time.monotonic() - _ultima < CADA_CUANTO_SE_MIRAN_LOS_MENSAJES:
         return False
     # El candado se toma acá, antes del hilo: dos pestañas juntas no largan dos vueltas (ver
     # arrancar_tanda_de_fondo()).

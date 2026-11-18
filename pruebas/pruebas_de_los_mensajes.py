@@ -315,7 +315,7 @@ def probar():
         # 6. LA VUELTA DE FONDO: sola, una por vez, y no más de una por minuto.
         _sin_fondo = os.environ.pop("EQUIVALENCIAS_SIN_TAREAS_DE_FONDO", None)
         try:
-            ns["_BANDEJA"]["ultima"] = 0.0
+            ns["_BANDEJA"]["ultima"] = None        # ninguna todavía
             _primera = ns["arrancar_la_bandeja_de_fondo"]()
             _segunda = ns["arrancar_la_bandeja_de_fondo"]()
             ns["_BANDEJA"]["candado"].acquire(timeout=20)
