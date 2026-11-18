@@ -7633,6 +7633,9 @@ barra; no la ven el invitado, el taller ni los del depósito):
 - Las **respuestas rápidas** son las del negocio: el administrador las cambia (una por renglón,
   hasta 15) en 🗂️ Administrar → 💬 Mensajería y cobros → «📲 Conectar WhatsApp, Facebook e
   Instagram». Vacío vuelve a las de siempre. Queda en el registro de cambios.
+- **🗑️ Borrar este chat** (solo el administrador, preguntando antes): para el cliente que pide que
+  se borren sus datos, o la publicidad. Se va con todos sus mensajes; en el registro de cambios
+  queda que se borró, de qué canal y cuántos mensajes tenía, nunca lo que decían.
 
 **Del chat a la cotización, y de vuelta.** El cliente pregunta por el chat «¿tenés el W712/80 y
 el PH5949?». Antes: copiar los códigos, buscarlos, armar la cotización, abrir WhatsApp en el

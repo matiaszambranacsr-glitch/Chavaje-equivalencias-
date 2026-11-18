@@ -671,6 +671,25 @@ def marcar_leido(chat_id, leido=True):
         c.execute("UPDATE chats SET sin_leer = MAX(sin_leer, 1) WHERE id = ?", (int(chat_id),))
 
 
+def borrar_chat(chat_id):
+    """Borra el chat y todos sus mensajes (un cliente que pidió que se borren sus datos, o
+    publicidad). Solo el administrador. En el registro de cambios queda que se borró, de qué
+    canal y cuántos mensajes tenía, nunca lo que decían. Si vuelve a escribir, es un chat nuevo.
+    Devuelve cuántos mensajes se borraron."""
+    exigir_nivel("admin", "borrar un chat")
+    chat = el_chat(chat_id)
+    if not chat:
+        return 0
+    with transaccion():
+        cuantos = c.execute("SELECT COUNT(*) FROM chat_mensajes WHERE chat_id = ?",
+                            (chat["id"],)).fetchone()[0]
+        c.execute("DELETE FROM chat_mensajes WHERE chat_id = ?", (chat["id"],))
+        c.execute("DELETE FROM chats WHERE id = ?", (chat["id"],))
+    anotar_cambio("borró un chat", "chat", chat["id"],
+                  antes={"canal": chat["canal"], "mensajes": cuantos})
+    return cuantos
+
+
 def fuera_de_la_ventana(chat, ahora=None):
     """Si ya pasaron las 24 horas en que Meta deja contestar (ver VENTANA_PARA_CONTESTAR)."""
     texto = str((chat or {}).get("ultimo_del_cliente_en") or "")

@@ -297,11 +297,19 @@ def probar():
         _g = ns["contestar_chat"].__globals__
         _adentro = _g["_nivel_de_quien_esta_adentro"]
         try:
+            # Y borrar, tampoco el empleado: es del administrador.
+            _g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+            try:
+                ns["borrar_chat"](_juan["id"])
+                fallas.append("un empleado pudo borrar un chat")
+            except PermissionError:
+                pass
             for _nivel in ("", "mecanico"):
                 _g["_nivel_de_quien_esta_adentro"] = lambda n=_nivel: n
                 for _nombre, _llamar in (("contestar", lambda: ns["contestar_chat"](_juan["id"], "x")),
                                          ("marcar leído", lambda: ns["marcar_leido"](_juan["id"])),
-                                         ("traer ahora", lambda: ns["traer_mensajes_ahora"]())):
+                                         ("traer ahora", lambda: ns["traer_mensajes_ahora"]()),
+                                         ("borrar un chat", lambda: ns["borrar_chat"](_juan["id"]))):
                     try:
                         _llamar()
                         fallas.append(f"«{_nivel or 'invitado'}» pudo {_nombre}")
@@ -508,6 +516,30 @@ def probar():
         # claves. Y la sección de conectar no las muestra.
         [b for b in at.button if b.label == "Salir"][0].click().run()
         _entrar(at, "duenio", "clave-duenio-1")
+        at.session_state["pagina_actual"] = ns["PAGINAS"][3]
+        at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
+        at.session_state["exp_conectar_canales"] = True
+        at.run()
+        # El administrador borra el chat de Pedro: se va con sus mensajes, y en el registro de
+        # cambios queda que se borró, sin lo que decía.
+        _pedro_id = c.execute("SELECT id FROM chats WHERE externo = '5493415550000'").fetchone()[0]
+        at.session_state["pagina_actual"] = ns["PAGINAS"][12]
+        at.session_state["msj_chat_abierto"] = _pedro_id
+        at.session_state["msj_chat_abierto_en"] = time.monotonic()
+        at.run()
+        _borrar = [b for b in at.button if b.key == f"msj_borrar_{_pedro_id}"]
+        cierto("el administrador tiene «🗑️ Borrar este chat»", _borrar)
+        if _borrar:
+            _borrar[0].click().run()
+        esperar("borrado, con sus mensajes",
+                (c.execute("SELECT COUNT(*) FROM chats WHERE id = ?", (_pedro_id,)).fetchone()[0],
+                 c.execute("SELECT COUNT(*) FROM chat_mensajes WHERE chat_id = ?",
+                           (_pedro_id,)).fetchone()[0]), (0, 0))
+        _registro = json.dumps([list(r) for r in c.execute(
+            "SELECT * FROM registro_de_cambios WHERE accion = 'borró un chat'").fetchall()],
+            ensure_ascii=False)
+        cierto("en el registro: que se borró, sin lo que decía",
+               "borró un chat" in _registro and "hola" not in _registro, _registro)
         at.session_state["pagina_actual"] = ns["PAGINAS"][3]
         at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
         at.session_state["exp_conectar_canales"] = True

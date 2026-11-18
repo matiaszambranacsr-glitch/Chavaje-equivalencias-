@@ -42,6 +42,14 @@ if pagina == PAGINAS[12]:
             anotar_error("mensajes/no_leido", _err)
         _msj_cerrar()
 
+    def _msj_borrar(chat_id):
+        try:
+            _aviso = ("success", f"🗑️ Chat borrado ({miles(borrar_chat(chat_id))} mensaje(s)).")
+        except PermissionError as _err:
+            _aviso = ("error", el_error_en_castellano(_err))
+        avisar(*_aviso)
+        _msj_cerrar()
+
     def _msj_hora(momento):
         return hora_corta_aca(momento) if momento else ""
 
@@ -240,3 +248,11 @@ if pagina == PAGINAS[12]:
                                               args=(_abierto_msj, _clave_resp))
                 st.button("Marcar como no leído", key=f"msj_no_leido_{_abierto_msj}",
                           on_click=_msj_no_leido, args=(_abierto_msj,))
+                # BORRAR EL CHAT: el cliente que pide que se borren sus datos, o publicidad. Solo
+                # el administrador, y preguntando antes: no hay cómo traerlo de vuelta.
+                if es_admin():
+                    with st.popover("🗑️ Borrar este chat", key="msj_pop_borrar"):
+                        st.markdown("Se borra el chat con **todos sus mensajes**, y no hay cómo "
+                                    "traerlo de vuelta. Si vuelve a escribir, empieza uno nuevo.")
+                        st.button("Sí, borrarlo", key=f"msj_borrar_{_abierto_msj}",
+                                  type="primary", on_click=_msj_borrar, args=(_abierto_msj,))
