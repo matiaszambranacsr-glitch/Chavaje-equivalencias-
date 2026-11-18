@@ -73,12 +73,12 @@ if pagina == PAGINAS[9]:
                 st.rerun()
         # EL COMPROBANTE para el cliente: por WhatsApp (a su número, si ya se anotó en la
         # ficha) o en PDF para imprimir. No es una factura y lo dice.
-        _tel_comp = re.sub(r"\D", "", (buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"])
-                                        or {}).get("cliente_telefono") or ""
-                           ) if recien.get("anotada") else ""
+        # El número, como lo pide WhatsApp (54 9 …): ver numero_para_whatsapp().
+        _tel_comp = ((buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"]) or {})
+                     .get("cliente_telefono") or "") if recien.get("anotada") else ""
         _cp1, _cp2 = cols([1, 1])
         _cp1.link_button("📲 Mandarle el comprobante por WhatsApp",
-                         f"https://wa.me/{_tel_comp}?text=" + quote(texto_del_comprobante(recien["id"])),
+                         link_de_whatsapp(_tel_comp, texto_del_comprobante(recien["id"])),
                          width="stretch")
         _cp2.download_button("📄 Comprobante (PDF)", data=comprobante_para_descargar(recien["id"]),
                              file_name=f"comprobante_{recien['id']}.pdf", mime="application/pdf",
@@ -134,14 +134,13 @@ if pagina == PAGINAS[9]:
             st.success(f"🚗 {anotada['texto']}")
             _vehiculo_v = buscar_vehiculo_por_id(anotada["vehiculo_id"])
             _link_v = link_publico_del_auto(anotada["vehiculo_id"])
-            _tel_cliente_v = re.sub(r"\D", "", (_vehiculo_v or {}).get("cliente_telefono") or "")
             _msj_v = (f"Hola {(_vehiculo_v or {}).get('cliente_nombre') or ''}! Gracias por tu "
                       f"compra. Acá podés ver lo que le pusimos a tu auto y cuánto le falta a "
                       f"cada cosa: {_link_v}").replace("Hola !", "Hola!")
             _w1, _w2 = cols([1, 1])
             _w1.link_button("📲 Mandarle el link de su auto",
-                            (f"https://wa.me/{_tel_cliente_v}" if _tel_cliente_v
-                             else "https://wa.me/") + "?text=" + quote(_msj_v), width="stretch")
+                            link_de_whatsapp((_vehiculo_v or {}).get("cliente_telefono"), _msj_v),
+                            width="stretch")
             if _w2.button("➕ Nueva venta", type="primary", key="venta_nueva", width="stretch"):
                 st.session_state.pop("venta_recien_cerrada", None)
                 st.rerun()

@@ -103,6 +103,27 @@ if pagina == PAGINAS[12]:
                 st.warning(f"⚠️ {_nombre_canal}: {_estado_msj['error']} "
                            f"(última vez: {_msj_hora(_estado_msj['cuando'])}).")
 
+        # ESCRIBIRLE A UN NÚMERO QUE NUNCA ESCRIBIÓ. Desde acá (la conexión de Meta) solo se
+        # puede con una plantilla aprobada, que Meta cobra. Desde el WhatsApp del teléfono o de la
+        # computadora es gratis: esto lo abre con el número y el texto, y se toca enviar. Si
+        # contesta, el chat aparece en la bandeja.
+        with st.expander("✉️ Escribirle a un número nuevo", key="exp_numero_nuevo"):
+            _n1, _n2 = st.columns([1, 2])
+            _numero_nuevo = _n1.text_input("Número:", key="msj_numero_nuevo",
+                                           placeholder="11 4567-8901")
+            _texto_nuevo = _n2.text_area("Mensaje:", key="msj_texto_nuevo", height=80,
+                                         placeholder="Hola! Te escribimos de El Chavo…")
+            if _numero_nuevo.strip():
+                if not numero_para_whatsapp(_numero_nuevo):
+                    st.warning("No entiendo ese número: va con la característica, por ejemplo "
+                               "11 4567-8901 o 0341 15 555-0000.")
+                else:
+                    st.link_button("📱 Abrirlo en WhatsApp para mandarlo",
+                                   link_de_whatsapp(_numero_nuevo, _texto_nuevo.strip()),
+                                   type="primary", width="stretch")
+                    st.caption(f"Va a +{numero_para_whatsapp(_numero_nuevo)}. Lo mandás vos desde "
+                               "WhatsApp, gratis; cuando conteste, el chat aparece acá.")
+
 
     @st.fragment(run_every=20)
     def _msj_la_lista():
@@ -229,8 +250,20 @@ if pagina == PAGINAS[12]:
                 if fuera_de_la_ventana(_chat_msj):
                     st.warning(f"⏰ {TEXTO_FUERA_DE_LA_VENTANA}")
                     if _chat_msj["canal"] == "whatsapp" and str(_chat_msj["externo"]).isdigit():
+                        # Lo que le quiere decir va escrito: en WhatsApp, solo tocar enviar.
+                        _texto_fuera = st.text_area(
+                            "Lo que le querés decir:", key=f"msj_fuera_{_abierto_msj}", height=80,
+                            placeholder="Se abre en WhatsApp escrito, para mandarlo desde ahí")
                         st.link_button("📱 Abrir este chat en WhatsApp",
-                                       f"https://wa.me/{_chat_msj['externo']}")
+                                       f"https://wa.me/{_chat_msj['externo']}"
+                                       + (f"?text={quote(_texto_fuera.strip())}"
+                                          if _texto_fuera.strip() else ""),
+                                       type="primary", width="stretch")
+                    else:
+                        # Facebook e Instagram: se contesta desde la bandeja de Meta.
+                        st.link_button("📱 Abrir la bandeja de Meta",
+                                       "https://business.facebook.com/latest/inbox/all",
+                                       width="stretch")
                 else:
                     # En el celular, plegadas: abiertas eran cuatro renglones antes de la caja.
                     _donde_rapidas = (st.popover("⚡ Respuestas rápidas", key="msj_pop_rapidas")

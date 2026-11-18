@@ -7633,6 +7633,14 @@ barra; no la ven el invitado, el taller ni los del depósito):
 - Las **respuestas rápidas** son las del negocio: el administrador las cambia (una por renglón,
   hasta 15) en 🗂️ Administrar → 💬 Mensajería y cobros → «📲 Conectar WhatsApp, Facebook e
   Instagram». Vacío vuelve a las de siempre. Queda en el registro de cambios.
+- **✉️ Escribirle a un número nuevo**: desde la conexión de Meta, a quien nunca escribió (o pasadas
+  las 24 horas) solo se le puede mandar una plantilla aprobada, que Meta cobra por mensaje. Desde
+  el WhatsApp del teléfono o de la computadora es gratis: ponés el número como lo anotás siempre
+  («11 4567-8901», «0341 15 555-0000») y el mensaje, y la app abre WhatsApp listo para tocar
+  enviar. Si contesta, el chat aparece en la bandeja. Lo mismo un chat de más de 24 horas: «📱
+  Abrir este chat en WhatsApp» lleva escrito lo que le querés decir (para Facebook e Instagram,
+  «📱 Abrir la bandeja de Meta»). Programas que manejan WhatsApp Web solos para no pagar van
+  contra las reglas y Meta bloquea el número: no se usan.
 - **🗑️ Borrar este chat** (solo el administrador, preguntando antes): para el cliente que pide que
   se borren sus datos, o la publicidad. Se va con todos sus mensajes; en el registro de cambios
   queda que se borró, de qué canal y cuántos mensajes tenía, nunca lo que decían.
@@ -7700,6 +7708,17 @@ administradores de la app, la verificación del negocio y la revisión de la app
 Cloudflare para recibir los WhatsApp. **Ojo con el número**: uno que hoy usa la aplicación WhatsApp
 Business del teléfono deja de andar ahí al pasarlo a la API, salvo con la «coexistencia» (por un
 proveedor de Meta).
+
+## 📲 Los links de WhatsApp a los clientes, al número correcto
+
+Los avisos de 🚗 Vehículos («le toca cambiar…»), «📲 Mandárselo por WhatsApp» de la ficha y, en
+🧾 Ventas, el comprobante y el link del auto armaban el link con el teléfono anotado tal cual,
+solo los números: «11 4567-8901» quedaba `wa.me/1145678901`, y WhatsApp lee ese 1 como el código
+de **Estados Unidos**. El aviso le llegaba a otra persona o a nadie. Ahora pasan por
+`numero_para_whatsapp()` (`logica/vehiculos.py`): 54, el 9 de los celulares, la característica
+sin el 0 y el número sin el 15, se anote como se anote («011 15 4567-8901», «(011) 4567-8901»,
+«+54 9 11 4567 8901»…). Sin característica («15 4567-8901») no se adivina: WhatsApp pregunta a
+quién. Una prueba que había fijaba justo el link con el error; ahora fija el correcto.
 
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 

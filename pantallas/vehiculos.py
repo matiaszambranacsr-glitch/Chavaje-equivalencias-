@@ -372,13 +372,13 @@ if pagina == PAGINAS[6]:
                 st.code(link_cliente, language=None)
                 _ql, _qb = st.columns([1, 2])
                 _ql.image(generar_qr_bytes(link_cliente), width=150)
-                _tel_cliente = re.sub(r"\D", "", vehiculo.get("cliente_telefono") or "")
                 _msj_link = (f"Hola {vehiculo.get('cliente_nombre') or ''}! Acá podés ver lo que "
                              f"le pusimos a tu auto ({vehiculo['patente']}) y cuánto le falta a "
                              f"cada cosa: {link_cliente}").replace("Hola !", "Hola!")
+                # Con el número como lo pide WhatsApp (54 9 …): ver numero_para_whatsapp().
                 _qb.link_button("📲 Mandárselo por WhatsApp",
-                                (f"https://wa.me/{_tel_cliente}" if _tel_cliente else "https://wa.me/")
-                                + "?text=" + quote(_msj_link), width="stretch")
+                                link_de_whatsapp(vehiculo.get("cliente_telefono"), _msj_link),
+                                width="stretch")
                 _qb.caption("El cartel con QR para el mostrador está arriba, en «🪧 Cartel con "
                             "QR para el mostrador».")
                 if _qb.button("🔄 Cambiar el link", key="cambiar_link_cliente",
@@ -412,10 +412,7 @@ if pagina == PAGINAS[6]:
                         f"toca pronto: {piezas_atrasadas_txt}. ¿Coordinamos un turno? Acá ves "
                         f"cuánto le falta a cada cosa: {link_cliente}"
                     ).replace("Hola !", "Hola!").strip()
-                    tel_limpio = re.sub(r"\D", "", vehiculo.get("cliente_telefono") or "")
-                    url_wa_vehiculo = (
-                        f"https://wa.me/{tel_limpio}" if tel_limpio else "https://wa.me/"
-                    ) + "?text=" + quote(mensaje_wa)
+                    url_wa_vehiculo = link_de_whatsapp(vehiculo.get("cliente_telefono"), mensaje_wa)
                     st.link_button("📲 Avisarle lo que le toca por WhatsApp", url_wa_vehiculo,
                                     type="primary", width="stretch")
                 else:

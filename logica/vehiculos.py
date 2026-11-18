@@ -526,8 +526,7 @@ def avisos_por_cliente(dias_de_aviso=30):
         salida.append({"vehiculo_id": vehiculo_id, "Patente": f["Patente"], "Cliente": f["Cliente"],
                        "Auto": f["Auto"], "Piezas": [(x["Pieza"], x["Le toca"]) for x in filas],
                        "_urgencia": min(x["_urgencia"] for x in filas),
-                       "_whatsapp": (f"https://wa.me/{f['_telefono']}" if f["_telefono"]
-                                     else "https://wa.me/") + "?text=" + quote(mensaje)})
+                       "_whatsapp": link_de_whatsapp(f["_telefono"], mensaje)})
     salida.sort(key=lambda x: (x["_urgencia"], x["Patente"]))
     return salida
 
@@ -809,7 +808,7 @@ def a_quien_avisar(dias_de_aviso=30, limite=100):
                        f"Según lo que anotamos de tu {auto} ({v['patente']}), le toca cambiar: "
                        f"{p['Pieza']}. ¿Coordinamos? Acá ves cuánto le falta a cada cosa: "
                        f"{link_publico_del_auto(v['id'])}").replace("Hola !", "Hola!")
-            tel = re.sub(r"\D", "", v.get("cliente_telefono") or "")
+            tel = numero_para_whatsapp(v.get("cliente_telefono"))
             # Lo más urgente primero: lo vencido (por km o por fecha) adelante.
             _urgencia = min([d for d in (
                 0 if faltan_km is not None and faltan_km <= 0 else p["_dias"],
@@ -820,8 +819,7 @@ def a_quien_avisar(dias_de_aviso=30, limite=100):
                 "Código": p["Código"], "Le toca": cuando,
                 "Km hoy (estimado)": km_hoy, "_faltan": faltan_km, "_urgencia": _urgencia,
                 "_vehiculo_id": v["id"], "_telefono": tel,
-                "_whatsapp": (f"https://wa.me/{tel}" if tel else "https://wa.me/")
-                             + "?text=" + quote(mensaje),
+                "_whatsapp": link_de_whatsapp(tel, mensaje),
                 "_vehiculo": v["patente"]})
     salida.sort(key=lambda x: (x["_urgencia"],
                                x["_faltan"] if x["_faltan"] is not None else 10**9))
@@ -948,6 +946,46 @@ def lo_ultimo_que_se_le_cambio(patente, cuantos=5):
               [f["id"] for f in fichas] + [int(cuantos)])
     return [{"Fecha": _dia_mes_anio(h[0]), "Pieza": h[1] or "", "Marca": h[2] or "",
              "Km": miles(h[3]) if h[3] is not None else ""} for h in c.fetchall()]
+
+
+def numero_para_whatsapp(texto):
+    """El teléfono como lo pide wa.me: 54, el 9 de los celulares, la característica sin el 0 y
+    el número sin el 15 (5491145678901). Acepta como se anota acá: «11 4567-8901», «011 15
+    4567-8901», «0341 15 555-0000», «+54 9 11 4567 8901». "" si no se puede saber (sin
+    característica: «15 4567-8901»).
+
+    Los links de los avisos de 🚗 Vehículos iban con el teléfono anotado tal cual, solo los
+    números: «11 4567-8901» quedaba wa.me/1145678901, y WhatsApp lee ese 1 como el código de
+    Estados Unidos. El aviso le llegaba a otro, o a nadie. Se supone celular (el 9): es lo que
+    tiene WhatsApp casi siempre."""
+    digitos = re.sub(r"\D", "", str(texto or ""))
+    if digitos.startswith("00"):
+        digitos = digitos[2:]
+    if digitos.startswith("54") and len(digitos) >= 12:
+        digitos = digitos[2:]
+        if digitos.startswith("9"):
+            digitos = digitos[1:]
+    if digitos.startswith("0"):
+        digitos = digitos[1:]
+    # El 15 de los celulares va después de la característica, que tiene de 2 a 4 números.
+    if len(digitos) == 12:
+        for largo in (2, 3, 4):
+            if digitos[largo:largo + 2] == "15":
+                digitos = digitos[:largo] + digitos[largo + 2:]
+                break
+    # Las características de acá empiezan con 11, 2 o 3: «15 4567-8901» (sin característica)
+    # tiene 10 números, pero no se sabe de dónde es.
+    if len(digitos) != 10 or not (digitos.startswith("11") or digitos[0] in "23"):
+        return ""
+    return "549" + digitos
+
+
+def link_de_whatsapp(telefono, texto=""):
+    """wa.me con el número (si se entiende) y el texto: abre WhatsApp en ese chat, listo para
+    mandar. Sin número, WhatsApp pregunta a quién."""
+    numero = numero_para_whatsapp(telefono)
+    return (f"https://wa.me/{numero}" if numero else "https://wa.me/") + (
+        "?text=" + quote(texto) if texto else "")
 
 
 def problema_del_whatsapp_del_negocio(numero):

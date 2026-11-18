@@ -932,6 +932,11 @@ def probar(L):
             (sorted(x["Pieza"] for x in _avisos),
              all("auto%3DAB123CD%26clave%3D" in x["_whatsapp"] for x in _avisos)),
             (["Correa de distribución", "Pastillas de freno"], True))
+    # Al número del cliente como lo pide WhatsApp: anotado «11 4567-8901», el link iba a
+    # wa.me/1145678901, que WhatsApp lee como un número de Estados Unidos.
+    esperar("el aviso va al número del cliente, con el 54 9",
+            sorted({x["_whatsapp"].split("?")[0] for x in _avisos}),
+            ["https://wa.me/5491145678901"])
     _link = ns["link_publico_del_auto"](_auto)
     _clave = _link.rsplit("clave=", 1)[-1]
     _link_otra_vez = ns["link_publico_del_auto"](_auto)
@@ -1080,7 +1085,8 @@ def probar(L):
     esperar("un aviso por cliente, con todo junto",
             ([p for p, _ in _ag.get("Piezas", [])], _msj_ag.count("le toca cambiar"),
              "Aceite (venció" in _msj_ag and "Líquido de frenos (vence" in _msj_ag,
-             _ag.get("_whatsapp", "").startswith("https://wa.me/1155550000?text=")),
+             # Con el 54 9: «1155550000» solo, WhatsApp lo leía como de Estados Unidos.
+             _ag.get("_whatsapp", "").startswith("https://wa.me/5491155550000?text=")),
             (["Aceite", "Líquido de frenos"], 1, True, True))
     ns["marcar_avisado"](_quieto, ["Aceite"])
     _despues = {x["Patente"]: x for x in ns["avisos_por_cliente"](30)}

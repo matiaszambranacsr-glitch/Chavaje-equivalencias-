@@ -358,6 +358,21 @@ def probar():
         finally:
             _g["_nivel_de_quien_esta_adentro"] = _adentro
 
+        # Los teléfonos, como los pide WhatsApp (54 9 …). Con «11 4567-8901» tal cual, el link
+        # de los avisos de Vehículos iba a wa.me/1145678901: un número de Estados Unidos.
+        esperar("los teléfonos de acá, como los pide WhatsApp",
+                [ns["numero_para_whatsapp"](x) for x in (
+                    "11 4567-8901", "011 15 4567-8901", "(011) 4567-8901", "0341 15 555-0000",
+                    "341 555-0000", "02954 15 123456", "+54 9 11 4567-8901", "54 11 4567 8901",
+                    "5491145678901", "0054 9 11 4567 8901", "15 4567-8901", "4567-8901", "", None)],
+                ["5491145678901", "5491145678901", "5491145678901", "5493415550000",
+                 "5493415550000", "5492954123456", "5491145678901", "5491145678901",
+                 "5491145678901", "5491145678901", "", "", "", ""])
+        esperar("el link: con número y texto, o sin número",
+                (ns["link_de_whatsapp"]("11 4567-8901", "hola che"),
+                 ns["link_de_whatsapp"]("15 4567-8901", "hola")),
+                ("https://wa.me/5491145678901?text=hola%20che", "https://wa.me/?text=hola"))
+
         # 6. LA VUELTA DE FONDO: sola, una por vez, y no más de una por minuto.
         _sin_fondo = os.environ.pop("EQUIVALENCIAS_SIN_TAREAS_DE_FONDO", None)
         try:
@@ -398,6 +413,18 @@ def probar():
         at.session_state["pagina_actual"] = ns["PAGINAS"][12]
         at.run()
         cierto("la pantalla abre sin errores", not at.exception, at.exception)
+        at.text_input(key="msj_numero_nuevo").input("0341 15 555-0000")
+        at.text_area(key="msj_texto_nuevo").input("Hola! Ya llegó tu repuesto")
+        at.run()
+        _links_nuevo = [str(x.proto.url) for x in at.get("link_button")
+                        if "Abrirlo en WhatsApp" in str(x.proto.label)]
+        esperar("«✉️ Escribirle a un número nuevo» abre WhatsApp con el número y el texto",
+                _links_nuevo, ["https://wa.me/5493415550000?text=Hola%21%20Ya%20lleg%C3%B3%20tu%20repuesto"])
+        at.text_input(key="msj_numero_nuevo").input("15 555-0000")
+        at.run()
+        cierto("sin característica, dice cómo va", any("característica" in w.value for w in at.warning))
+        at.text_input(key="msj_numero_nuevo").input("")
+        at.run()
         _botones = {b.key: b.label for b in at.button if str(b.key).startswith("msj_chat_")}
         esperar("un botón por chat", len(_botones), 3)
         _maria_lbl = [lbl for lbl in _botones.values() if "María" in lbl]
