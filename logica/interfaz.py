@@ -580,8 +580,11 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-17e"
+VERSION_DE_LO_NUEVO = "2026-11-17f"
 LO_NUEVO = (
+    ("🪧 Para que tus clientes sepan que pueden ver su auto: un cartel con QR para imprimir y "
+     "pegar en el mostrador. Y el taller, en su portal, tiene «🚗 Mis autos», con lo que le toca "
+     "a cada auto que anotó.", "🚗 Vehículos"),
     ("🔧 Lo que se anota en un auto sin vida útil (filtros, bujías, correas, pastillas…) ya "
      "dice cuánto le falta, con una referencia general prudente y marcada así. Si anotás la "
      "vida útil, manda la tuya.", "🚗 Vehículos"),
@@ -1607,6 +1610,44 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
             pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.",
                            new_x="LMARGIN", new_y="NEXT")
 
+    return bytes(pdf.output())
+
+
+def generar_pdf_cartel_del_auto():
+    """EL CARTEL PARA EL MOSTRADOR, en A4: «¿Qué se le cambió a tu auto?», el QR que abre la
+    consulta del auto y la dirección escrita (tocable en el PDF). Desde que el dueño del auto lo
+    ve con la patente sola, el que se entera es el que lo sabe: la dirección estaba escrita en
+    un renglón de la ficha de cada auto («para un cartel en el mostrador»), sin el cartel.
+    bytes."""
+    from fpdf import FPDF
+    link = link_general_de_consulta()
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(False)
+    pdf.add_page()
+    pdf.set_y(50)
+    pdf.set_font("Helvetica", "B", 34)
+    pdf.multi_cell(0, 15, limpiar("¿Qué se le cambió a tu auto?"), align="C",
+                   new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "", 17)
+    pdf.multi_cell(0, 9, limpiar(f"Escaneá el código con la cámara del celular y "
+                                 f"{como_entra_el_cliente()}: ves lo que se le puso, cuándo, y "
+                                 "cuánto le falta a cada cosa."),
+                   align="C", new_x="LMARGIN", new_y="NEXT")
+    lado = 115
+    arriba = pdf.get_y() + 12
+    pdf.image(io.BytesIO(generar_qr_bytes(link)), x=(pdf.w - lado) / 2, y=arriba, w=lado)
+    pdf.set_y(arriba + lado + 8)
+    pdf.set_font("Helvetica", "", 12)
+    pdf.multi_cell(0, 6, limpiar(link), align="C", link=link, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 12)
+    pdf.multi_cell(0, 6, limpiar("No hace falta cuenta. No se muestran tu nombre ni tu "
+                                 "teléfono."), align="C", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 

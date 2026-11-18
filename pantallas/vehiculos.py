@@ -41,6 +41,25 @@ if pagina == PAGINAS[6]:
                                   f"{DIAS_SIN_REPETIR_EL_AVISO} días.")
                 st.rerun()
 
+    # EL CARTEL PARA EL MOSTRADOR (ver generar_pdf_cartel_del_auto()). Perezoso: el QR se arma
+    # recién al abrirlo.
+    _exp_cartel = st.expander("🪧 Cartel con QR para el mostrador: «¿Qué se le cambió a tu auto?»",
+                              key="exp_cartel_del_auto", on_change="rerun")
+    if _exp_cartel.open:
+        with _exp_cartel:
+            ayuda(f"Imprimilo y pegalo en el mostrador: el cliente escanea el QR y "
+                  f"{como_entra_el_cliente()}, y ve lo que se le cambió a su auto y cuánto le "
+                  "falta a cada cosa. Cómo entra (con la patente sola o con los 4 números del "
+                  "teléfono) se elige en 🗂️ Administrar → 👥 Usuarios.")
+            _cq1, _cq2 = st.columns([1, 2])
+            _cq1.image(generar_qr_bytes(link_general_de_consulta()), width=150)
+            _cq2.download_button("⬇️ Bajar el cartel (PDF, A4)",
+                                 data=functools.partial(generar_pdf_cartel_del_auto),
+                                 file_name="cartel_que_se_le_cambio_a_tu_auto.pdf",
+                                 mime="application/pdf", key="bajar_cartel_del_auto",
+                                 width="stretch")
+            _cq2.code(link_general_de_consulta(), language=None)
+
     vehiculos_atrasados = listar_vehiculos_atrasados()
     with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})", key="exp_vehiculos_mantenimiento_atrasado"):
         if not vehiculos_atrasados:
@@ -347,8 +366,8 @@ if pagina == PAGINAS[6]:
                 ayuda(
                     "Con este link el cliente ve, desde el celular y sin entrar a la app, qué le "
                     "pusieron a su auto y cuánto le falta a cada cosa. No ve su nombre ni su "
-                    "teléfono, ni las notas. Va también en el QR de la ficha en PDF. Sin el link "
-                    "puede entrar con la patente y los últimos 4 números del teléfono de la ficha."
+                    "teléfono, ni las notas. Va también en el QR de la ficha en PDF. Sin el link, "
+                    f"en «🔑 Ingresar» → «🚗 Ver mi auto»: {como_entra_el_cliente()}."
                 )
                 st.code(link_cliente, language=None)
                 _ql, _qb = st.columns([1, 2])
@@ -360,8 +379,8 @@ if pagina == PAGINAS[6]:
                 _qb.link_button("📲 Mandárselo por WhatsApp",
                                 (f"https://wa.me/{_tel_cliente}" if _tel_cliente else "https://wa.me/")
                                 + "?text=" + quote(_msj_link), width="stretch")
-                _qb.caption(f"Para un cartel en el mostrador: {link_general_de_consulta()} "
-                            "(pide la patente y los últimos 4 números del teléfono).")
+                _qb.caption("El cartel con QR para el mostrador está arriba, en «🪧 Cartel con "
+                            "QR para el mostrador».")
                 if _qb.button("🔄 Cambiar el link", key="cambiar_link_cliente",
                               help="El link anterior deja de andar. Para cuando se lo mandaste a "
                                    "quien no era, o el auto cambió de dueño."):

@@ -62,6 +62,7 @@ ENTIENDE = (
     ("que solo mis clientes puedan ver el buscador", "como:solo_con_cuenta"),
     ("como veo lo que le cambiaron a mi auto", "como:ver_mi_auto"),
     ("que le pusieron a mi coche", "como:ver_mi_auto"),
+    ("quiero imprimir el cartel con el qr", "como:cartel_auto"),
     ("cuanto me debe un cliente", "como:cuenta_corriente"),
     ("el taller de juan vino a pagar lo que debe", "como:cuenta_corriente"),
     ("cambiar el limite de credito", "como:limite"),
@@ -496,7 +497,8 @@ def probar(L):
                             ("codigo de falla del escaner", "como:dtc"),
                             # En qué auto puso los repuestos, si quiere:
                             ("como anoto en que auto puse los repuestos", "como:portal_auto"),
-                            ("que se le cambio al auto de mi cliente", "como:portal_auto")):
+                            ("que se le cambio al auto de mi cliente", "como:portal_auto"),
+                            ("a que auto le toca el service", "como:portal_mis_autos")):
         esperar(f"taller, «{pregunta}»", responder(pregunta, taller_en_su_portal)["ficha"], ficha)
     esperar("al taller lo lleva al Modo Mecánico",
             responder("llevame al modo mecanico", taller_en_su_portal)["ir"],

@@ -1024,6 +1024,55 @@ def probar():
         _g_cuenta["_nivel_de_quien_esta_adentro"] = _adentro_real
         st.session_state.clear()
         st.session_state.update(_estado_g)
+    # MIS AUTOS (ver autos_del_taller()): los que anotó, con lo próximo que le toca, lo urgente
+    # primero; los de otro taller no. Un segundo auto con el aceite vencido (anotado hace 14
+    # meses: la referencia es 12) tiene que quedar arriba.
+    ns["c"].execute("INSERT INTO vehiculos (patente, marca_auto, modelo_auto, km_actual) "
+                    "VALUES ('AH888MN', 'FIAT', 'Palio', 50000)")
+    _auto_h = ns["c"].lastrowid
+    ns["c"].execute("INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, km_instalacion, "
+                    "fecha_instalacion) VALUES (?, 'Filtro aceite', 50000, "
+                    "datetime('now', '-14 months'))", (_auto_h,))
+    ns["c"].execute("INSERT INTO presupuestos_mecanico (mecanico_id, items_json, total, patente, "
+                    "anotado_en) VALUES (?, '[]', 0, 'AH888MN', datetime('now', '-14 months'))",
+                    (taller,))
+    ns["conn"].commit()
+    _mis_g = ns["autos_del_taller"](taller)
+    esperar("mis autos: los que anotó, lo vencido primero, con lo próximo y sin nombres",
+            ([a["Patente"] for a in _mis_g], _mis_g[0]["Estado"][:1] if _mis_g else None,
+             _mis_g[0]["Lo próximo"] if _mis_g else None, _mis_g[0]["Auto"] if _mis_g else None,
+             "Juan" in json.dumps(_mis_g, ensure_ascii=False)),
+            (["AH888MN", "AG777KL"], "🔴", "Filtro aceite", "FIAT Palio", False))
+    esperar("los autos de un taller no los ve otro",
+            ns["autos_del_taller"](_otro_taller), [])
+    _portal.session_state["exp_mis_autos"] = True
+    _portal.run()
+    esperar("en su portal, «🚗 Mis autos» los muestra y dice a cuántos les toca",
+            (any("AH888MN" in list(d.value.get("Patente", [])) for d in _portal.dataframe),
+             any("ya les toca o les toca pronto" in x.value for x in _portal.caption),
+             [e.value for e in _portal.exception]), (True, True, []))
+    # EL CARTEL PARA EL MOSTRADOR (ver generar_pdf_cartel_del_auto()): el QR, la dirección
+    # tocable, y lo que dice según cómo entra el cliente.
+    _cartel = ns["generar_pdf_cartel_del_auto"]()
+    esperar("el cartel: un PDF con el QR y la dirección tocable de la consulta del auto",
+            (_cartel[:4], b"/Subtype /Image" in _cartel,
+             f"/URI ({ns['link_general_de_consulta']()})".encode() in _cartel),
+            (b"%PDF", True, True))
+    # Y que el QR impreso se lea de verdad y abra la consulta del auto (lo que hace el celular).
+    import numpy as _np
+    import cv2 as _cv2
+    import pypdfium2 as _pdfium
+    _hoja = _pdfium.PdfDocument(_cartel)[0].render(scale=2).to_pil()
+    _leido, _, _ = _cv2.QRCodeDetector().detectAndDecode(
+        _cv2.cvtColor(_np.array(_hoja), _cv2.COLOR_RGB2BGR))
+    esperar("el QR del cartel, leído como lo lee el celular, abre la consulta del auto",
+            _leido, ns["link_general_de_consulta"]())
+    _como_sola = ns["como_entra_el_cliente"]()
+    ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "no")
+    _como_con_numeros = ns["como_entra_el_cliente"]()
+    ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "")
+    esperar("lo que dice el cartel sigue la opción del dueño",
+            (_como_sola, "4 números" in _como_con_numeros), ("poné la patente", True))
     # Lo que ve el dueño del auto: lo del taller, sin el nombre de su cliente ni las notas.
     _publico_g, _ = ns["abrir_ficha_publica"]("AG777KL", solo_patente=True)
     _json_g = json.dumps(_publico_g, ensure_ascii=False, default=str)

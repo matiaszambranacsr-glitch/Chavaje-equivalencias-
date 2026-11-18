@@ -995,9 +995,17 @@ def link_publico_del_auto(vehiculo_id, nueva=False):
             + f"&clave={quote(clave)}")
 
 
+def como_entra_el_cliente():
+    """Cómo entra el dueño del auto sin el link, dicho para él: «poné la patente» o «poné la
+    patente y los últimos 4 números de tu teléfono». Lo usan el cartel del mostrador y las
+    ayudas de 🚗 Vehículos, que decían siempre lo de los 4 números (ver «CON LA PATENTE SOLA»)."""
+    return ("poné la patente" if se_ve_el_auto_con_la_patente_sola() else
+            "poné la patente y los últimos 4 números de tu teléfono")
+
+
 def link_general_de_consulta():
-    """El link sin patente ni clave: pide la patente y los 4 números. Para un cartel o un QR en
-    el mostrador."""
+    """El link sin patente ni clave: pide la patente (y los 4 números, si el dueño lo pide así).
+    Para el cartel del mostrador (ver generar_pdf_cartel_del_auto())."""
     base = obtener_config("url_de_la_app", URL_DE_LA_APP).strip() or URL_DE_LA_APP
     return base.rstrip("/") + "/?auto="
 

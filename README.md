@@ -7305,8 +7305,25 @@ tiempo —juntas, retenes, sensores, la cadena de distribución, el embrague, la
 diciendo «Sin datos» (y «Retén distribución» no se confunde con la correa). Es la misma cuenta
 para «A quién avisar» y para la consulta del dueño del auto.
 
-**El asistente** le explica al dueño del auto cómo verlo («¿qué le pusieron a mi coche?») y al
-taller cómo anotarlo. «¿Qué auto es por la patente?» sigue siendo del Modo Mecánico: la
+**El cartel para el mostrador** (`generar_pdf_cartel_del_auto()`). El que se entera de que
+puede ver su auto es el que lo sabe: la dirección estaba escrita en un renglón adentro de la ficha
+de cada auto («para un cartel en el mostrador»), sin el cartel. Ahora 🚗 Vehículos tiene «🪧 Cartel
+con QR para el mostrador»: un PDF A4 con «¿Qué se le cambió a tu auto?», el QR, la dirección
+(tocable en el PDF) y cómo se entra, según la opción del dueño (`como_entra_el_cliente()`). La
+prueba lee el QR impreso como lo lee un celular (OpenCV sobre la hoja dibujada) y controla que abra
+la consulta del auto. De paso, las ayudas de 🚗 Vehículos que decían siempre «la patente y los
+últimos 4 números» ahora dicen lo que es cierto.
+
+**«🚗 Mis autos», en el portal del taller** (`autos_del_taller()`). Lo que le devuelve al taller
+anotar la patente: los autos que anotó con «✅ Ya se lo puse», con lo próximo que le toca a cada
+uno (la cuenta de siempre, con la vida útil de referencia si nadie la anotó), lo vencido primero, y
+cuántos ya están para avisarle al cliente. No tiene que llevar la cuenta de cuándo le toca el
+aceite o la correa a cada uno, y avisarle es lo que vuelve a traer el auto al taller (y los
+repuestos, al negocio). Los de un taller no los ve otro; sin nombres ni teléfonos. Se arma recién
+al abrirlo.
+
+**El asistente** le explica al dueño del auto cómo verlo («¿qué le pusieron a mi coche?»), al
+taller cómo anotarlo y qué le toca a cada auto, y al personal dónde está el cartel. «¿Qué auto es por la patente?» sigue siendo del Modo Mecánico: la
 explicación nueva no lleva «patente» en el título, a propósito, porque le ganaba.
 
 **En la base real** (copia del 8/11) todavía no hay ninguna ficha de auto ni ventas anotadas:

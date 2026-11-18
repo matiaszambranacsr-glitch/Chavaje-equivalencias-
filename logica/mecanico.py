@@ -1406,6 +1406,45 @@ def generar_pdf_presupuesto_mecanico(nombre_mecanico, cliente_nombre, items, man
     return bytes(pdf.output())
 
 
+# MIS AUTOS: los que el taller anotó, con lo próximo que le toca a cada uno. Es lo que le
+# devuelve anotarlos: no tiene que llevar la cuenta de cuándo le toca el aceite o la correa a
+# cada cliente, y avisarle es lo que vuelve a traer el auto al taller (y al negocio, los
+# repuestos). La cuenta es la de siempre (estado_de_cada_pieza(), con la vida útil de
+# referencia si nadie la anotó): lo que se le puso en cualquier lado, no solo lo de este taller.
+# Ni nombres ni teléfonos: el auto, la patente y las piezas.
+AUTOS_DEL_TALLER_A_LA_VISTA = 100
+
+
+def autos_del_taller(mecanico_id, limite=AUTOS_DEL_TALLER_A_LA_VISTA):
+    """[{Estado, Patente, Auto, Lo próximo, Le falta, Anotado}]: lo urgente primero; entre
+    iguales, el último que anotó."""
+    exigir_que_sea_su_cuenta(mecanico_id, "ver sus autos", None)
+    c.execute("""SELECT patente, MAX(anotado_en) AS ultimo FROM presupuestos_mecanico
+                 WHERE mecanico_id = ? AND anotado_en IS NOT NULL AND COALESCE(patente, '') <> ''
+                 GROUP BY patente ORDER BY ultimo DESC LIMIT ?""", (mecanico_id, int(limite)))
+    filas = []
+    for patente, ultimo in c.fetchall():
+        vehiculo = buscar_vehiculo(patente)
+        if not vehiculo:
+            continue
+        estado = estado_de_cada_pieza(vehiculo)
+        proximo = next((p for p in estado if not p["Estado"].startswith("⚪")), None)
+        filas.append({
+            "Estado": proximo["Estado"] if proximo else "⚪ Sin datos",
+            "Patente": vehiculo["patente"],
+            "Auto": " ".join(x for x in (vehiculo.get("marca_auto"), vehiculo.get("modelo_auto"),
+                                         vehiculo.get("anio")) if (x or "").strip()),
+            "Lo próximo": proximo["Pieza"] if proximo else "",
+            "Le falta": proximo["Le falta"] if proximo else "",
+            "Anotado": fecha_legible(ultimo),
+            "_orden": (_ORDEN_DEL_ESTADO[(proximo["Estado"] if proximo else "⚪")[:1]], ultimo),
+        })
+    # Lo urgente primero (el orden de estado_de_cada_pieza()); entre iguales, el más reciente.
+    filas.sort(key=lambda f: f["_orden"][1] or "", reverse=True)
+    filas.sort(key=lambda f: f["_orden"][0])
+    return [{k: v for k, v in f.items() if not k.startswith("_")} for f in filas]
+
+
 # ============================================================
 # CUENTA CORRIENTE DE LOS TALLERES
 # ============================================================
@@ -2520,6 +2559,24 @@ def mostrar_portal_mecanico():
                             st.warning(_texto_ant)
     else:
         st.caption("Todavía no guardaste ningún presupuesto.")
+
+    # MIS AUTOS (ver autos_del_taller()). Perezoso: arma la cuenta de cada auto recién al abrirlo.
+    st.markdown("---")
+    _exp_autos = st.expander("🚗 Mis autos: lo próximo que le toca a cada uno",
+                             key="exp_mis_autos", on_change="rerun")
+    if _exp_autos.open:
+        with _exp_autos:
+            _mis_autos = autos_del_taller(mecanico_id)
+            if _mis_autos:
+                _les_toca = sum(1 for a in _mis_autos if a["Estado"][:1] in ("🔴", "🟡"))
+                st.caption(f"Los {miles(len(_mis_autos))} que anotaste con «✅ Ya se lo puse»"
+                           + (f"; a {miles(_les_toca)} ya les toca o les toca pronto: avisale "
+                              "a tu cliente." if _les_toca else "."))
+                st.dataframe(_mis_autos, width="stretch", hide_index=True)
+            else:
+                st.caption("Todavía no anotaste ningún auto. Poné la patente en el presupuesto "
+                           "y, cuando lo hagas, «✅ Ya se lo puse»: acá vas a ver qué le toca a "
+                           "cada uno.")
 
 
 # ============================================================================================

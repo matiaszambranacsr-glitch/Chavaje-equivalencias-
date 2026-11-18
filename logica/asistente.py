@@ -848,7 +848,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "En «📋 Presupuesto actual» poné la patente y el km (no hace falta: es opcional). Con la "
      "patente ves lo que ya se le cambió a ese auto. Cuando lo hiciste, marcá «✅ Ya se lo "
      "puse» antes de guardar, o después, en «📁 Mis presupuestos anteriores». El dueño del "
-     "auto lo ve con su patente; tu cliente no sale en ningún lado.",
+     "auto lo ve con su patente; tu cliente no sale en ningún lado. En «🚗 Mis autos», abajo de "
+     "todo, ves lo próximo que le toca a cada uno.",
+     None, "taller"),
+    ("portal_mis_autos", "Ver qué le toca a cada auto que anoté",
+     "mis autos toca toque proximo vence vencido avisar aviso aceite correa service lista "
+     "anote",
+     "Abajo de todo, en «🚗 Mis autos», están los autos que anotaste con «✅ Ya se lo puse», "
+     "con lo próximo que le toca a cada uno: lo vencido primero. Avisale a tu cliente.",
      None, "taller"),
     ("portal_contrasena", "Cambiar la contraseña de mi portal",
      "contrasena clave password cambiar olvide olvido nueva",
@@ -865,6 +872,11 @@ COMO_HAGO_DEL_ASISTENTE = (
     # Sin «patente» ni «vehículo» en el título ni en las claves, a propósito: «¿qué auto es
     # por la patente?» es identificar un auto, que es del Modo Mecánico (al invitado se le dice
     # que es para clientes), y con esas palabras esta le ganaba.
+    ("cartel_auto", "Imprimir el cartel con QR para que el cliente vea su auto",
+     "cartel qr imprimir mostrador pegar cliente auto codigo escanear poster afiche",
+     "Arriba está «🪧 Cartel con QR para el mostrador»: «⬇️ Bajar el cartel (PDF, A4)», "
+     "imprimilo y pegalo. El cliente escanea el QR y ve lo que se le cambió a su auto.",
+     "🚗 Vehículos", "empleado"),
     ("ver_mi_auto", "Ver qué se le cambió a tu auto",
      "auto mi coche cambiaron cambio cambiado cambie pusieron puesto historial service "
      "mantenimiento ver revisar cuanto falta",
