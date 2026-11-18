@@ -495,11 +495,14 @@ def diagnostico_de_salud():
     # que es plata a un llamado de distancia, y lo que más rápido se pierde: entra la
     # mercadería, nadie se acuerda quién la pidió, y el cliente ya la compró en otro lado.
     try:
-        esperando = consultas_que_ahora_hay_en_stock()
+        # Los que ya se avisaron hace poco no: ya se hizo lo que había (ver «AVISARLE QUE
+        # LLEGÓ» en logica/mostrador.py).
+        esperando = consultas_que_ahora_hay_en_stock(sin_las_avisadas=True)
         if esperando:
             sumar("alto", f"{len(esperando)} cliente(s) esperando algo que YA hay",
                   "Preguntaron por algo que en ese momento no tenías y ahora está en stock. "
-                  "Un llamado y es una venta. Es lo que más rápido se enfría.",
+                  "Un mensaje y es una venta: ahí está «📲 Avisarle» con el WhatsApp escrito. "
+                  "Es lo que más rápido se enfría.",
                   f"{miga_hasta('Para pedir')} → 📞 Consultas de clientes")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)

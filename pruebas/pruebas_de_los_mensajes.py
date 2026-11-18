@@ -539,6 +539,21 @@ def probar():
                            + [str(e.value) for e in at.code], ensure_ascii=False)
         cierto("ningún permiso en la pantalla", not any(s in _todo for s in SECRETAS))
 
+        # En la ficha del auto, un teléfono que no sirve para WhatsApp se dice (sin característica,
+        # los avisos no sabrían a quién ir); uno que sirve, no.
+        c.execute("INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono) "
+                  "VALUES ('AC 111 BB', 'Sin Caract', '15 4567-8901'), "
+                  "('AC 222 BB', 'Con Caract', '011 15 4567-8901')")
+        ns["conn"].commit()
+        at.session_state["pagina_actual"] = ns["PAGINAS"][6]
+        at.run()
+        _avisos_tel = {}
+        for _pat in ("AC111BB", "AC222BB"):
+            at.text_input(key="patente_buscar").input(_pat).run()
+            _avisos_tel[_pat] = any("no sirve para WhatsApp" in w.value for w in at.warning)
+        esperar("la ficha avisa el teléfono sin característica, y no el que está bien",
+                _avisos_tel, {"AC111BB": True, "AC222BB": False})
+
         # 8. ADMINISTRAR: probar la conexión dice el nombre de la página y del número, no las
         # claves. Y la sección de conectar no las muestra.
         [b for b in at.button if b.label == "Salir"][0].click().run()

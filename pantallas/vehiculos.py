@@ -178,6 +178,13 @@ if pagina == PAGINAS[6]:
                            "(provincial, hasta 1994).")
 
         with st.expander("✏️ Datos del cliente / vehículo", expanded=(vehiculo is None), key="exp_datos_del_cliente_vehiculo"):
+            # Un teléfono que no sirve para WhatsApp (sin característica: «15 4567-8901»): los
+            # avisos no sabrían a quién ir. Se dice acá, donde se corrige.
+            _tel_guardado = (vehiculo or {}).get("cliente_telefono") or ""
+            if _tel_guardado.strip() and not numero_para_whatsapp(_tel_guardado):
+                st.warning(f"📞 El teléfono «{texto_para_markdown(_tel_guardado)}» no sirve para "
+                           "WhatsApp: falta la característica. Anotalo como 11 4567-8901 (o "
+                           "0341 15 555-0000) para que los avisos le lleguen.")
             with st.form("form_vehiculo"):
                 cv1, cv2 = st.columns(2)
                 cliente_nombre = cv1.text_input("Nombre del cliente", value=(vehiculo or {}).get("cliente_nombre") or "")

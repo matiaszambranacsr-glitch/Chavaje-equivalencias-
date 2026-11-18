@@ -717,6 +717,9 @@ def _esquema_mostrador(c):
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_estado ON consultas_cliente(estado)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_tel ON consultas_cliente(telefono)")
+    # Cuándo se le avisó que llegó lo que esperaba (ver marcar_consulta_avisada()).
+    if "avisado_en" not in [f[1] for f in c.execute("PRAGMA table_info(consultas_cliente)")]:
+        c.execute("ALTER TABLE consultas_cliente ADD COLUMN avisado_en TEXT")
 
 
     # QUÉ MOTORES SE LLEVAN ENTRE SÍ, PARA CADA TIPO DE PIEZA. No sale de ningún catálogo

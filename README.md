@@ -7720,6 +7720,21 @@ sin el 0 y el número sin el 15, se anote como se anote («011 15 4567-8901», �
 «+54 9 11 4567 8901»…). Sin característica («15 4567-8901») no se adivina: WhatsApp pregunta a
 quién. Una prueba que había fijaba justo el link con el error; ahora fija el correcto.
 
+Y la ficha del auto avisa, arriba de «✏️ Datos del cliente / vehículo», cuando el teléfono
+guardado no sirve para WhatsApp («15 4567-8901», sin característica): ahí es donde se corrige.
+
+## 📦 Avisarle al que esperaba algo que ahora hay
+
+En 📊 Estadísticas → 📌 Para pedir → 📞 Consultas de clientes, la lista de los que preguntaron
+por algo que no había y ahora sí decía «es una venta a un llamado de distancia», pero no había
+cómo escribirles ni cómo anotar que ya se les escribió: dos empleados le avisaban, o ninguno.
+Ahora cada uno tiene **«📲 Avisarle»**, que abre WhatsApp a su número (con el 54 9: ver más
+arriba) con el mensaje escrito —«ya llegó LL100, que nos habías consultado. ¿Te lo guardamos?»,
+sin precio, porque el de la lista puede estar en otra escala y el que se le dijo puede haber
+cambiado— y **«✅ Ya le avisé»**: queda la fecha en la lista y sale del aviso del día (la
+campanita); si a los 3 días no vino, vuelve a aparecer (`DIAS_PARA_VOLVER_A_AVISAR`, en
+`logica/mostrador.py`).
+
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 
 Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar más de 2000 cuentas, sería una locura scrollear para encontrar cada una». Una cuenta (un taller, un mayorista, un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para diez. Se cargaron 2.000 en una copia de la base real y se miró qué se rompía.

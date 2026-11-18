@@ -585,8 +585,11 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-18d"
+VERSION_DE_LO_NUEVO = "2026-11-18e"
 LO_NUEVO = (
+    ("📦 Los clientes que esperaban algo que ahora hay tienen «📲 Avisarle» (WhatsApp con el "
+     "mensaje escrito) y «✅ Ya le avisé», así nadie les escribe dos veces.",
+     "📊 Estadísticas → 📌 Para pedir"),
     ("📲 Los avisos por WhatsApp a los clientes (lo que le toca al auto, el comprobante) iban "
      "mal armados si el teléfono estaba anotado como «11 4567-8901»: le llegaban a otro. Ya van "
      "al número correcto. Y en 💬 Mensajes, «✉️ Escribirle a un número nuevo» abre WhatsApp "

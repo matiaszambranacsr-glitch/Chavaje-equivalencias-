@@ -316,21 +316,54 @@ def cerrar_consulta(consulta_id, resultado):
     return True
 
 
-def consultas_que_ahora_hay_en_stock():
+# AVISARLE QUE LLEGÓ: la lista de abajo decía «un llamado y es una venta», pero no había cómo
+# escribirle ni cómo anotar que ya se le escribió: dos empleados le avisaban, o ninguno. Ahora
+# cada uno tiene su WhatsApp con el mensaje escrito (ver mensaje_de_que_llego()) y «✅ Ya le
+# avisé». Avisado, sale del aviso del día; si a los DIAS_PARA_VOLVER_A_AVISAR no vino, vuelve.
+DIAS_PARA_VOLVER_A_AVISAR = 3
+
+
+def mensaje_de_que_llego(consulta):
+    """El WhatsApp para el cliente que esperaba algo que ahora hay. Sin precio: el de la lista
+    puede estar en otra escala, y el que se le dijo puede haber cambiado."""
+    nombre = str(consulta.get("Cliente") or "").strip()
+    que = str(consulta.get("Pidió") or consulta.get("Descripción") or "lo que nos consultaste")
+    return (f"Hola{' ' + nombre if nombre else ''}! Te escribimos de El Chavo: ya llegó {que}, "
+            "que nos habías consultado. ¿Te lo guardamos?")
+
+
+def marcar_consulta_avisada(consulta_id):
+    """«✅ Ya le avisé»: queda la fecha, y sale del aviso del día por unos días."""
+    exigir_nivel("empleado", "anotar que se le avisó a un cliente")
+    with db_lock:
+        c.execute("UPDATE consultas_cliente SET avisado_en = datetime('now') WHERE id = ?",
+                  (int(consulta_id),))
+        conn.commit()
+    anotar_cambio("le avisó que llegó", "consulta", consulta_id)
+
+
+def consultas_que_ahora_hay_en_stock(sin_las_avisadas=False):
     """Clientes esperando algo que en su momento no había y ahora sí. Son ventas a un llamado.
+    Con sin_las_avisadas, no las que se avisaron hace menos de DIAS_PARA_VOLVER_A_AVISAR días
+    (para el aviso del día: ya se hizo lo que había que hacer).
 
     Es el caso que más se pierde en el mostrador: entró la mercadería, nadie se acuerda quién
     la había pedido, y el cliente ya la compró en otro lado."""
+    _filtro = (f" AND (cc.avisado_en IS NULL OR cc.avisado_en < "
+               f"datetime('now', '-{int(DIAS_PARA_VOLVER_A_AVISAR)} days'))"
+               if sin_las_avisadas else "")
     try:
-        c.execute("""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+        c.execute(f"""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
                             cc.codigo_buscado AS "Pidió", cc.cantidad AS "Quería",
                             p.stock AS "Hay ahora", p.precio AS "Precio hoy",
                             cc.precio_dicho AS "Le dijimos",
-                            CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días"
+                            CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días",
+                            CAST(julianday('now') - julianday(cc.avisado_en) AS INTEGER)
+                                AS "_avisado_hace"
                      FROM consultas_cliente cc
                      JOIN productos p ON p.id = cc.producto_id
                      WHERE cc.estado = 'activa'
-                       AND COALESCE(p.stock, 0) >= COALESCE(cc.cantidad, 1)
+                       AND COALESCE(p.stock, 0) >= COALESCE(cc.cantidad, 1){_filtro}
                      ORDER BY cc.fecha LIMIT 100""")
         return filas_a_listas(c)
     except sqlite3.OperationalError as _err:

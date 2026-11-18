@@ -1041,7 +1041,26 @@ a traer solas desde Administrar → Mantenimiento.
                 f"📦 **{len(_ahora_hay)} cliente(s) esperando algo que AHORA hay en stock.** "
                 "Es una venta a un llamado de distancia."
             )
-            st.dataframe(quitar_id(_ahora_hay), width="stretch", hide_index=True)
+            st.dataframe([{**{k: v for k, v in x.items() if not k.startswith("_")},
+                           "Avisado": (f"hace {x['_avisado_hace']} día(s)"
+                                       if x.get("_avisado_hace") is not None else "—")}
+                          for x in _ahora_hay], width="stretch", hide_index=True)
+            # AVISARLE: su WhatsApp con el mensaje escrito, y «✅ Ya le avisé» para que nadie le
+            # escriba dos veces. Ver «AVISARLE QUE LLEGÓ» en logica/mostrador.py.
+            for _x in _ahora_hay[:20]:
+                _av1, _av2, _av3 = st.columns([3, 2, 2], vertical_alignment="center")
+                _av1.markdown(f"**{texto_para_markdown(_x['Cliente'] or _x['Teléfono'] or 'Sin nombre')}**"
+                              f" — {texto_para_markdown(_x['Pidió'] or '')}"
+                              + (f" · ✅ avisado hace {_x['_avisado_hace']} día(s)"
+                                 if _x.get("_avisado_hace") is not None else ""))
+                if numero_para_whatsapp(_x["Teléfono"]):
+                    _av2.link_button("📲 Avisarle", link_de_whatsapp(_x["Teléfono"],
+                                                                    mensaje_de_que_llego(_x)),
+                                     width="stretch")
+                else:
+                    _av2.caption("Sin un teléfono que sirva para WhatsApp.")
+                _av3.button("✅ Ya le avisé", key=f"ya_avise_{_x['_id']}", width="stretch",
+                            on_click=marcar_consulta_avisada, args=(_x["_id"],))
             st.markdown("")
 
         _esperando = consultas_de_clientes()

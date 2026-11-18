@@ -727,6 +727,35 @@ def probar(L):
     esperar("y sí como vendida", ns["cerrar_consulta"](_una, "vendida"), True)
     c.execute("DELETE FROM consultas_cliente")
     conn.commit()
+    # AVISARLE QUE LLEGÓ (ver mostrador.py): el que esperaba algo que ahora hay tiene su
+    # WhatsApp con el mensaje escrito, al número correcto; «✅ Ya le avisé» lo saca del aviso
+    # del día, y a los tres días sin venir vuelve.
+    c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('LLEGO SA', 'PROVEEDOR')")
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, stock) "
+              "SELECT 'LL100', 'LL100', 'FILTRO', id, 5 FROM marcas WHERE nombre = 'LLEGO SA'")
+    _prod_ll = c.lastrowid
+    ns["anotar_consulta_cliente"]("Ruiz", "11 5555-1234", producto_id=_prod_ll, codigo="LL100",
+                                  descripcion="FILTRO")
+    _llego = ns["consultas_que_ahora_hay_en_stock"]()
+    esperar("el que esperaba algo que ahora hay, en la lista y en el aviso del día",
+            ([x["Cliente"] for x in _llego],
+             [x["Cliente"] for x in ns["consultas_que_ahora_hay_en_stock"](sin_las_avisadas=True)]),
+            (["Ruiz"], ["Ruiz"]))
+    esperar("su WhatsApp, con el mensaje y al número con el 54 9",
+            ns["link_de_whatsapp"](_llego[0]["Teléfono"], ns["mensaje_de_que_llego"](_llego[0])),
+            "https://wa.me/5491155551234?text=" + urllib.parse.quote(
+                "Hola Ruiz! Te escribimos de El Chavo: ya llegó LL100, que nos habías "
+                "consultado. ¿Te lo guardamos?"))
+    ns["marcar_consulta_avisada"](_llego[0]["_id"])
+    esperar("avisado: sigue en la lista (dice cuándo) y sale del aviso del día",
+            ([x["_avisado_hace"] for x in ns["consultas_que_ahora_hay_en_stock"]()],
+             ns["consultas_que_ahora_hay_en_stock"](sin_las_avisadas=True)), ([0], []))
+    c.execute("UPDATE consultas_cliente SET avisado_en = datetime('now', '-4 days')")
+    esperar("a los tres días sin venir, vuelve al aviso",
+            len(ns["consultas_que_ahora_hay_en_stock"](sin_las_avisadas=True)), 1)
+    c.execute("DELETE FROM consultas_cliente")
+    c.execute("DELETE FROM productos WHERE codigo_clean = 'LL100'")
+    conn.commit()
 
     # 9i. Pegar códigos de barras en masa (ver cargar_codigos_de_barras_masivo()). No tenía
     # prueba. Un código que no cierra no entra (salvo numeración propia); uno que ya tiene otro
