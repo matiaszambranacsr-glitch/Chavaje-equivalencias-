@@ -65,6 +65,11 @@ class MetaDeMentira:
         self.falla = None            # (estado, {"error": …}) o una excepción
 
     def request(self, metodo, url, params=None, json=None, timeout=None, headers=None):
+        # Lo que no va a Meta ni al relevo es de otra parte de la app (una tarea de fondo que
+        # justo sale a internet): no se anota ni se contesta como Meta. En GitHub, con la base
+        # nueva, una se colaba entre «contestar» y lo que se miraba de ese pedido.
+        if not url.startswith(("https://graph.facebook.com/", "https://relevo.example/")):
+            return _Respuesta(404, {})
         self.pedidos.append({"metodo": metodo, "url": url, "params": params or {},
                              "json": json, "headers": headers or {}})
         if isinstance(self.falla, Exception):
@@ -228,10 +233,11 @@ def probar():
         meta.pedidos.clear()
         esperar("contestar a Juan por WhatsApp", ns["contestar_chat"](_juan["id"], "Sí, tenemos"),
                 (True, None))
-        _p = meta.pedidos[-1]
+        _p = ([p for p in meta.pedidos if p["url"].endswith("/NUM1/messages")] or [{}])[-1]
         esperar("va al número del negocio, al de Juan, con el permiso en la cabecera",
-                (_p["metodo"], _p["url"], _p["json"]["to"], _p["json"]["text"]["body"],
-                 _p["headers"].get("Authorization")),
+                (_p.get("metodo"), _p.get("url"), (_p.get("json") or {}).get("to"),
+                 ((_p.get("json") or {}).get("text") or {}).get("body"),
+                 (_p.get("headers") or {}).get("Authorization")),
                 ("POST", "https://graph.facebook.com/v26.0/NUM1/messages", "5491155556666",
                  "Sí, tenemos", "Bearer TOKEN-WA-SECRETO-456"))
         cierto("el permiso nunca va en la dirección ni en lo que se manda",
@@ -494,6 +500,9 @@ def probar_el_relevo(carpeta):
 
 
 def main():
+    # Las tareas de fondo de la app, apagadas: la vuelta por los mensajes se prueba aparte (6),
+    # y las demás no tienen nada que hacer acá.
+    os.environ["EQUIVALENCIAS_SIN_TAREAS_DE_FONDO"] = "1"
     carpeta = tempfile.mkdtemp(prefix="pruebas_mensajes_")
     os.chdir(carpeta)
     sys.path.insert(0, RAIZ)
