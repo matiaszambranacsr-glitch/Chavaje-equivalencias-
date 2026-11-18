@@ -7735,6 +7735,25 @@ cambiado— y **«✅ Ya le avisé»**: queda la fecha en la lista y sale del av
 campanita); si a los 3 días no vino, vuelve a aparecer (`DIAS_PARA_VOLVER_A_AVISAR`, en
 `logica/mostrador.py`).
 
+## 🕘 Las fechas que quedaban con la hora del servidor
+
+La app guarda todo en UTC y muestra la hora de acá (ver «La hora de Argentina» más arriba), y el
+auditor ya controlaba las horas sueltas y los días. Pero no la fecha con hora entera: quince
+lugares la mostraban tal cual, **tres horas adelantada**, y lo cargado después de las 21 con el
+día de mañana:
+
+- la fecha de cada consulta de un cliente (y su historial), de una reserva de stock y de una
+  importación (en «Deshacer una importación»);
+- el historial de revisiones de un par, el registro de errores de las equivalencias, el
+  historial de medidas de un producto y el de precios;
+- la lista de usuarios («Creado»), la papelera, el historial de piezas de un auto, las últimas
+  ventas marcadas y lo vendido con un vínculo que después se rechazó;
+- el título de los presupuestos guardados en el portal del taller.
+
+Ahora pasan por `datetime(col, '-3 hours')` (o `fecha_legible()`), y **el auditor ya no deja
+entrar** un `substr(fecha, 1, 16)` sin convertir: encontró uno más que la revisión a mano no había
+visto. Probado con lo cargado a las 22:30 de acá: dice 22:30 de ese día, no 01:30 del siguiente.
+
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 
 Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar más de 2000 cuentas, sería una locura scrollear para encontrar cada una». Una cuenta (un taller, un mayorista, un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para diez. Se cargaron 2.000 en una copia de la base real y se miró qué se rompía.

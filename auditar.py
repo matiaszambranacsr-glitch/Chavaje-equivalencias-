@@ -2603,12 +2603,21 @@ _DIA_UTC_DE_UNA_COLUMNA = re.compile(
     r"\b(?:date\(\s*|substr\(\s*)(?:\w+\.)?(?:fecha\w*|\w+_en|cuando|momento)\s*"
     r"(?:\)|,\s*1\s*,\s*10\s*\))", re.I)
 _DIA_UTC = re.compile(r"date\(\s*'now'\s*,\s*'localtime'\s*\)", re.I)
+# Y la fecha con la hora entera, substr(fecha, 1, 16): ocho pantallas la mostraban así —la consulta
+# de un cliente, una reserva, una importación, el historial de revisiones y de medidas—, tres
+# horas adelantada, y lo cargado después de las 21 con el día de mañana. Lo encontró una revisión
+# a mano en noviembre de 2026; esto no deja que vuelva.
+_FECHA_Y_HORA_SIN_CONVERTIR = re.compile(
+    r"\bsubstr\(\s*(?:\w+\.)?(?:fecha\w*|\w+_en|cuando|momento)\s*,\s*1\s*,\s*1[69]\s*\)", re.I)
 _MODIFICADOR_DE_ACA = re.compile(r"'(-?\d+) hours'")
 for _n in ast.walk(ARBOL):
     if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
         if _HORA_SIN_CONVERTIR.search(_n.value):
             reportar("ERROR", _n.lineno, "una hora de la base sin pasar a la de acá: "
                                          "substr(datetime(col, '-3 hours'), 12, 5)")
+        if _FECHA_Y_HORA_SIN_CONVERTIR.search(_n.value):
+            reportar("ERROR", _n.lineno, "una fecha y hora de la base sin pasar a la de acá: "
+                                         "substr(datetime(col, '-3 hours'), 1, 16)")
         if _DIA_UTC.search(_n.value):
             reportar("ERROR", _n.lineno, "date('now', 'localtime') es el día UTC: el de acá es "
                                          "date('now', '-3 hours'); una marca interna, date('now')")

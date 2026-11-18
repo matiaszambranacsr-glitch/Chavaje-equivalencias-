@@ -2528,7 +2528,8 @@ def mostrar_portal_mecanico():
     anteriores = listar_presupuestos_mecanico(mecanico_id)
     if anteriores:
         for p in anteriores[:20]:
-            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'}"
+            # La fecha, en la hora de acá (se guarda en UTC): ver fecha_legible().
+            with st.expander(f"{fecha_legible(p['Fecha'])} — {p['Cliente'] or 'sin nombre'}"
                              + (f" — 🚗 {p['Patente']}" if p["Patente"] else "")
                              + f" — ${miles(p['Total'], 0)}", key=f"exp_presupuesto_{p['ID']}"):
                 items_p = json.loads(p["items_json"])

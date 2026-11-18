@@ -736,6 +736,28 @@ def probar(L):
     _prod_ll = c.lastrowid
     ns["anotar_consulta_cliente"]("Ruiz", "11 5555-1234", producto_id=_prod_ll, codigo="LL100",
                                   descripcion="FILTRO")
+    # La fecha de la consulta, en la hora de acá: guardada en UTC, la de las 22:30 de acá es la
+    # 01:30 del día siguiente, y así se mostraba.
+    c.execute("UPDATE consultas_cliente SET fecha = '2026-11-18 01:30:00' WHERE codigo_buscado = 'LL100'")
+    esperar("la fecha de la consulta, en la hora de acá (no la del servidor)",
+            [x["Cuándo"] for x in ns["consultas_de_clientes"]() if x["Pidió"] == "LL100"],
+            ["2026-11-17 22:30"])
+    c.execute("UPDATE consultas_cliente SET fecha = datetime('now') WHERE codigo_buscado = 'LL100'")
+    # Lo mismo el historial de precios de un producto y el de piezas de un auto: lo cargado a las
+    # 22:30 de acá (01:30 UTC del día siguiente) se mostraba con la hora y el día del servidor.
+    c.execute("INSERT INTO historial_precios (producto_id, precio, fecha) "
+              "VALUES (?, 999, '2026-11-18 01:30:00')", (_prod_ll,))
+    c.execute("INSERT INTO vehiculos (patente) VALUES ('AH 300 NN')")
+    _auto_noche = c.lastrowid
+    c.execute("INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, fecha_instalacion) "
+              "VALUES (?, 'Filtro de noche', '2026-11-18 01:30:00')", (_auto_noche,))
+    esperar("el historial de precios y el de piezas, en la hora de acá",
+            ([x["Fecha"] for x in ns["historial_precio_producto"](_prod_ll)],
+             [x["Fecha"] for x in ns["listar_historial_vehiculo"](_auto_noche)]),
+            (["2026-11-17 22:30"], ["2026-11-17"]))
+    c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_prod_ll,))
+    c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_auto_noche,))
+    c.execute("DELETE FROM vehiculos WHERE id = ?", (_auto_noche,))
     _llego = ns["consultas_que_ahora_hay_en_stock"]()
     esperar("el que esperaba algo que ahora hay, en la lista y en el aviso del día",
             ([x["Cliente"] for x in _llego],

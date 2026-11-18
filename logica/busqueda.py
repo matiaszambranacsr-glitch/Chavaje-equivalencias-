@@ -791,7 +791,7 @@ def reparar_codigos_con_decimal():
 def listar_importaciones_deshacibles(limite=40):
     """Importaciones que dejaron vínculos rastreables, con cuántos quedan vivos."""
     c.execute("""SELECT i.id AS "_id", i.marca AS "Marca", i.archivo AS "Archivo",
-                        substr(i.fecha, 1, 16) AS "Fecha", i.filas_cargadas AS "Filas",
+                        substr(datetime(i.fecha, '-3 hours'), 1, 16) AS "Fecha", i.filas_cargadas AS "Filas",
                         i.lote AS "_lote",
                         (SELECT COUNT(*) FROM equivalencias e WHERE e.lote = i.lote) AS "Vínculos vivos",
                         (SELECT COUNT(*) FROM equivalencias_pendientes ep WHERE ep.lote = i.lote)
