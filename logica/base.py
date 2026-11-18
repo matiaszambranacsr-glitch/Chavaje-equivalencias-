@@ -784,17 +784,33 @@ button:disabled { opacity: 0.45 !important; }
 .st-key-asistente_minimizado.st-key-asistente_minimizado.st-key-asistente_minimizado div {
   width: auto !important;
 }
+/* MÁS GRANDE Y CON UN ARO BLANCO: el dueño lo pidió, «agrandá el ícono, más que nada en el
+   celular, porque no se ve prácticamente». Eran 54 px con el 🤖 a 1,6 rem, naranja sobre el
+   fondo oscuro y sin borde: en el teléfono se perdía. */
 .st-key-asistente_minimizado.st-key-asistente_minimizado.st-key-asistente_minimizado button {
-  width: 54px !important; min-width: 54px !important; height: 54px !important;
-  min-height: 54px !important; padding: 0 !important;
+  width: 60px !important; min-width: 60px !important; height: 60px !important;
+  min-height: 60px !important; padding: 0 !important;
   border-radius: 50% !important; border: 0 !important; background: var(--accent) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55); opacity: 0.94;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.92), 0 8px 24px rgba(0, 0, 0, 0.6);
 }
 .st-key-asistente_minimizado button:hover, .st-key-asistente_minimizado button:focus,
 .st-key-asistente_minimizado button:active {
-  background: var(--accent) !important; opacity: 1; transform: scale(1.07) !important;
+  background: var(--accent) !important; transform: scale(1.07) !important;
 }
-.st-key-asistente_minimizado button p { font-size: 1.6rem; line-height: 1; }
+.st-key-asistente_minimizado button p { font-size: 1.95rem; line-height: 1; }
+/* En el teléfono, más todavía, y separada del borde de abajo: en los que tienen la barra de
+   gestos (el «safe area»), la burbuja quedaba medio tapada. */
+@media (max-width: 768px), (pointer: coarse) {
+  .st-key-asistente_minimizado.st-key-asistente_minimizado.st-key-asistente_minimizado button {
+    width: 68px !important; min-width: 68px !important; height: 68px !important;
+    min-height: 68px !important;
+  }
+  .st-key-asistente_minimizado.st-key-asistente_minimizado button p { font-size: 2.35rem; }
+  .st-key-asistente_minimizado, .st-key-asistente_abierto {
+    left: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .stMainBlockContainer { padding-bottom: 7rem; }
+}
 .st-key-asistente_abierto {
   width: min(390px, calc(100vw - 28px)) !important; max-height: min(76vh, 640px);
   overflow-y: auto; padding: 12px 14px 14px; gap: 0.55rem;

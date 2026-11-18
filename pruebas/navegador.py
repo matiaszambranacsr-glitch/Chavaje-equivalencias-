@@ -246,9 +246,20 @@ def probar(url, clave, carpeta):
         medida = burbuja.first.bounding_box() if burbuja.count() else None
         if not medida:
             fallas.append("en el teléfono no está la burbuja del asistente")
-        elif abs(medida["width"] - medida["height"]) > 2 or medida["width"] < 44:
-            fallas.append("en el teléfono la burbuja del asistente no es redonda: "
+        elif abs(medida["width"] - medida["height"]) > 2 or medida["width"] < 64:
+            # Redonda y grande: el dueño la pidió más grande en el celular («no se ve
+            # prácticamente»), y es de 68 px; con 54 se perdía.
+            fallas.append("en el teléfono la burbuja del asistente no es redonda o es chica: "
                           f"{medida['width']:.0f} x {medida['height']:.0f}")
+        else:
+            _letra = celular.evaluate("""() => { const p = document.querySelector(
+                '.st-key-asis_abrir button p'); return p ? parseFloat(getComputedStyle(p).fontSize) : 0; }""")
+            _abajo = celular.evaluate("""() => { const b = document.querySelector(
+                '.st-key-asis_abrir button'); const r = b.getBoundingClientRect();
+                return window.innerHeight - r.bottom; }""")
+            if _letra < 32 or _abajo < 12:
+                fallas.append(f"en el teléfono el 🤖 es chico ({_letra:.0f} px) o la burbuja "
+                              f"queda pegada al borde ({_abajo:.0f} px)")
         celular.locator(".st-key-busqueda_input input").fill("F100")
         celular.get_by_role("button", name="Buscar equivalencias").first.tap()
         _esperar(celular, 2)
