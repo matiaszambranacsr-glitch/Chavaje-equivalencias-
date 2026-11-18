@@ -1087,11 +1087,16 @@ def probar():
         _dueno.text_input(key="ingreso_patente").set_value("ag 777 kl")
         [b for b in _dueno.button if b.label == "🔎 Ver mi auto"][0].click().run()
         _como = "cerrada" if _cerrada_g else "abierta"
+        # En el celular (así se ve en estas pruebas), tarjetas y una lista: sin tablas que se
+        # corten a lo ancho.
         esperar(f"con la página {_como}, «Ver mi auto» con la patente sola abre su auto",
                 (any("Tu auto en El Chavo" in m.value for m in _dueno.markdown),
                  any("Todo lo que se le cambió" in m.value for m in _dueno.markdown),
-                 len(_dueno.dataframe) >= 1, [e.value for e in _dueno.exception]),
-                (True, True, True, []))
+                 any("NGK" in m.value for m in _dueno.markdown),
+                 len(_dueno.dataframe), [e.value for e in _dueno.exception],
+                 [x.value[:60] for x in list(_dueno.success) + list(_dueno.warning)
+                  if "le faltan por tiempo" in x.value]),
+                (True, True, True, 0, [], []))
         _dueno.button(key="volver_de_la_consulta").click().run()
         esperar(f"con la página {_como}, «Volver a la página» sale de su auto",
                 (any("Tu auto en El Chavo" in m.value for m in _dueno.markdown),
@@ -1115,6 +1120,14 @@ def probar():
                     (_pudo_g, ns["se_ve_el_auto_con_la_patente_sola"]()), (False, True))
     finally:
         _g_auto["_nivel_de_quien_esta_adentro"] = _adentro_auto
+    # En la computadora, las tablas de siempre.
+    _en_la_pc = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+    _en_la_pc.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+    _en_la_pc.session_state["modo_vista"] = ns["VISTAS"][1]
+    _en_la_pc.query_params["auto"] = "AG777KL"
+    _en_la_pc.run()
+    esperar("en la computadora, el auto con sus dos tablas",
+            (len(_en_la_pc.dataframe), [e.value for e in _en_la_pc.exception]), (2, []))
     # Con la opción apagada, la patente sola no abre: pide además los 4 números.
     ns["guardar_config"](ns["CLAVE_DEL_AUTO_CON_LA_PATENTE_SOLA"], "no")
     ns["conn"].commit()

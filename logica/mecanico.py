@@ -2663,15 +2663,35 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
     if resumen["proximo"]:
         _p = resumen["proximo"]
         _cartel = {"🔴": st.error, "🟡": st.warning}.get(_p["Estado"][:1], st.success)
-        _cartel(f"**Lo próximo: {_p['Pieza']}** — "
+        # «le faltan» solo delante de los km: «le faltan por tiempo, hasta el 18/11/2027» se
+        # leía mal (se vio con el filtro de aceite, que vence por fecha antes que por km).
+        _cartel(f"**Lo próximo: {texto_para_markdown(_p['Pieza'])}** — "
                 + (_p["Le falta"] if _p["Estado"].startswith("🔴")
+                   or _p["Le falta"].startswith("por tiempo")
                    else f"le faltan {_p['Le falta']}"))
 
+    # EN EL CELULAR, TARJETAS. El dueño del auto entra casi siempre desde el teléfono (escanea el
+    # QR del cartel), y la tabla se cortaba a lo ancho: se vio en un teléfono simulado, con
+    # «Código» afuera de la pantalla. Como las tarjetas del Buscador: lo que importa arriba
+    # —la pieza, cómo está y cuánto le falta—, y abajo de qué marca es y cuándo se cambió.
+    _celular = es_celular()
     st.markdown("**🔧 Cuánto le falta a cada cosa**")
-    if resumen["piezas"]:
+    if resumen["piezas"] and _celular:
+        for _pz in resumen["piezas"]:
+            with st.container(border=True):
+                st.markdown(f"**{texto_para_markdown(_pz['Pieza'])}** — {_pz['Estado']}  \n"
+                            f"{texto_para_markdown(_pz['Le falta'])}")
+                _de_que = " ".join(x for x in (_pz["Marca"], _pz["Código"]) if x)
+                _cuando = " ".join(x for x in (
+                    f"cambiada el {_pz['Cuándo']}" if _pz["Cuándo"] else "",
+                    f"a los {_pz['Km al cambiarla']} km" if _pz["Km al cambiarla"] else "") if x)
+                if _de_que or _cuando:
+                    st.caption(" · ".join(x for x in (texto_para_markdown(_de_que), _cuando) if x))
+    elif resumen["piezas"]:
         st.dataframe(resumen["piezas"], width="stretch", hide_index=True,
                      column_order=["Estado", "Pieza", "Le falta", "Marca", "Código",
                                    "Km al cambiarla", "Cuándo", "Vida útil (km)", "Cada (meses)"])
+    if resumen["piezas"]:
         if resumen["le_toca"]:
             st.info("🔴 y 🟡: ya le toca o le toca pronto. Escribinos y coordinamos.")
         st.caption("Es una estimación con el km anotado y lo que anda tu auto, o con la fecha "
@@ -2682,7 +2702,14 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
         st.caption("Todavía no hay piezas anotadas para tu auto.")
 
     st.markdown("**📋 Todo lo que se le cambió**")
-    if resumen["historial"]:
+    if resumen["historial"] and _celular:
+        st.markdown("  \n".join(
+            f"**{h['Fecha']}** · {texto_para_markdown(h['Pieza'])}"
+            + (f" ({texto_para_markdown(' '.join(x for x in (h['Marca'], h['Código']) if x))})"
+               if h["Marca"] or h["Código"] else "")
+            + (f" · {h['Km']} km" if h["Km"] else "")
+            for h in resumen["historial"]))
+    elif resumen["historial"]:
         st.dataframe(resumen["historial"], width="stretch", hide_index=True)
     else:
         st.caption("Todavía nada anotado.")

@@ -7322,6 +7322,12 @@ aceite o la correa a cada uno, y avisarle es lo que vuelve a traer el auto al ta
 repuestos, al negocio). Los de un taller no los ve otro; sin nombres ni teléfonos. Se arma recién
 al abrirlo.
 
+**En el celular, tarjetas.** El dueño del auto entra casi siempre desde el teléfono (escanea el
+QR), y las tablas de su auto se cortaban a lo ancho: en un teléfono simulado, «Código» quedaba
+afuera. Ahora cada pieza es una tarjeta —la pieza, cómo está y cuánto le falta arriba; la marca, el
+código y cuándo se cambió abajo— y «Todo lo que se le cambió» es una lista; en la computadora
+siguen las tablas. Y el aviso de arriba ya no dice «le faltan por tiempo, hasta el…».
+
 **El asistente** le explica al dueño del auto cómo verlo («¿qué le pusieron a mi coche?»), al
 taller cómo anotarlo y qué le toca a cada auto, y al personal dónde está el cartel. «¿Qué auto es por la patente?» sigue siendo del Modo Mecánico: la
 explicación nueva no lleva «patente» en el título, a propósito, porque le ganaba.
