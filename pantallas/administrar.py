@@ -1124,6 +1124,66 @@ if pagina == PAGINAS[3]:
             avisar("success", "Alias eliminado.")
             st.rerun()
 
+        # LOS MENSAJES DE WHATSAPP, FACEBOOK E INSTAGRAM: qué está conectado, los pasos para
+        # conectar cada canal y probar la conexión. Las claves van en los secretos de Streamlit
+        # y nunca se muestran: acá se ve si están, no qué dicen. Ver logica/mensajes.py.
+        st.markdown("---")
+        _exp_canales = st.expander("📲 Conectar WhatsApp, Facebook e Instagram",
+                                   key="exp_conectar_canales", on_change="rerun")
+        if _exp_canales.open:
+            with _exp_canales:
+                _hay_canal = canales_conectados()
+                st.dataframe([
+                    {"Canal": "🔵 Facebook (Messenger)", "Recibir": _hay_canal["messenger"],
+                     "Contestar": _hay_canal["messenger"]},
+                    {"Canal": "🟣 Instagram", "Recibir": _hay_canal["instagram"],
+                     "Contestar": _hay_canal["instagram"]},
+                    {"Canal": "🟢 WhatsApp", "Recibir": _hay_canal["relevo"],
+                     "Contestar": _hay_canal["whatsapp"]},
+                ], hide_index=True, width="stretch")
+                explicar(
+                    "Cómo se conecta cada canal (una vez).",
+                    "Todo se hace en **developers.facebook.com** con una app de tipo «Empresa», y "
+                    "los permisos permanentes salen de un **usuario del sistema** (business."
+                    "facebook.com → Configuración del negocio → Usuarios del sistema).\n\n"
+                    "**Facebook e Instagram**: sumá «Messenger» a la app, vinculá la página (la "
+                    "cuenta de Instagram tiene que ser profesional y estar vinculada a la página) "
+                    "y generá el permiso de la página con `pages_messaging`, "
+                    "`pages_read_engagement`, `pages_manage_metadata`, `instagram_basic` e "
+                    "`instagram_manage_messages`. Para escribirles a clientes que no son "
+                    "administradores de la app, Meta pide **verificar el negocio** y la "
+                    "**revisión de la app** (acceso avanzado a esos permisos).\n\n"
+                    "**WhatsApp**: sumá «WhatsApp» a la app y pasá el número a la API de "
+                    "WhatsApp Cloud; el permiso, con `whatsapp_business_messaging` y "
+                    "`whatsapp_business_management`. **Ojo**: un número que hoy usa la "
+                    "aplicación WhatsApp Business del teléfono deja de andar ahí al pasarlo, "
+                    "salvo con la «coexistencia» (se activa por un proveedor de Meta); si no, "
+                    "conviene un número aparte. Para **recibir** los de WhatsApp hace falta "
+                    "además el relevo gratis de Cloudflare: los pasos están en "
+                    "`integraciones/relevo_de_mensajes/LEEME.md` del repositorio.\n\n"
+                    "**Las 24 horas**: Meta deja contestar hasta 24 horas después del último "
+                    "mensaje del cliente. Después, desde el teléfono.", en_expander=True)
+                st.markdown("En los secretos de Streamlit (**Settings → Secrets**), una sección "
+                            "así, con lo tuyo en lugar de los «…» (nunca en el repositorio ni en "
+                            "un chat):")
+                st.code('[mensajes]\n'
+                        'meta_token = "…"          # el permiso de la página (Facebook e Instagram)\n'
+                        'meta_pagina_id = "…"      # el número de la página\n'
+                        'whatsapp_token = "…"      # el permiso para WhatsApp\n'
+                        'whatsapp_numero_id = "…"  # el «Phone number ID», no el teléfono\n'
+                        'relevo_url = "https://…workers.dev"\n'
+                        'relevo_clave = "…"        # la misma que CLAVE_DEL_RELEVO en el relevo\n'
+                        '# instagram = "no"        # si la página no tiene Instagram',
+                        language="toml")
+                if not es_admin():
+                    st.caption("🔌 La conexión la prueba un administrador.")
+                elif st.button("🔌 Probar la conexión", key="probar_los_canales",
+                               disabled=not any(_hay_canal.values())):
+                    with st.spinner("Preguntando a Meta y al relevo…"):
+                        _pruebas_canales = probar_los_canales()
+                    for _canal_p, _bien_p, _dijo_p in _pruebas_canales:
+                        (st.success if _bien_p else st.error)(f"{_canal_p}: {_dijo_p}")
+
     if sub_admin == SUB_ADMIN[3]:
         st.markdown("**🧩 Combos de repuestos relacionados**",
                     help="Cuando alguien busca un producto cuya descripción contenga el "

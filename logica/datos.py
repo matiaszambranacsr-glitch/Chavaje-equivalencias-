@@ -3221,6 +3221,44 @@ def _esquema_del_mapa(c):
         c.execute("ALTER TABLE usuarios ADD COLUMN solo_deposito INTEGER DEFAULT 0")
 
 
+def _esquema_de_los_mensajes(c):
+    """LOS MENSAJES de WhatsApp, Facebook e Instagram: un renglón por chat y uno por mensaje.
+    Ver «LOS MENSAJES: WHATSAPP, FACEBOOK E INSTAGRAM EN UNA BANDEJA» en logica/mensajes.py.
+    Las horas, en UTC como todo lo guardado. Viajan en la copia como las ventas y las cuentas:
+    la copia sube solo cifrada o a un repositorio privado (ver copias_y_mantenimiento.py)."""
+    c.execute("""CREATE TABLE IF NOT EXISTS chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        canal TEXT NOT NULL,
+        externo TEXT NOT NULL,
+        nombre TEXT,
+        ultimo_texto TEXT,
+        ultimo_en TEXT,
+        ultimo_entra INTEGER DEFAULT 1,
+        ultimo_del_cliente_en TEXT,
+        sin_leer INTEGER NOT NULL DEFAULT 0,
+        leido_por TEXT,
+        leido_en TEXT,
+        creado_en TEXT DEFAULT (datetime('now')),
+        UNIQUE(canal, externo)
+    )""")
+    # externo_id es el número que le pone Meta al mensaje: el mismo mensaje traído dos veces
+    # (el relevo que reintenta, el aviso y la pregunta) entra una sola vez.
+    c.execute("""CREATE TABLE IF NOT EXISTS chat_mensajes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        canal TEXT NOT NULL,
+        externo_id TEXT NOT NULL,
+        entra INTEGER NOT NULL,
+        texto TEXT,
+        cuando TEXT,
+        quien TEXT,
+        guardado_en TEXT DEFAULT (datetime('now')),
+        UNIQUE(canal, externo_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_mensajes_chat ON chat_mensajes(chat_id, cuando)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chats_sin_leer ON chats(sin_leer, ultimo_en)")
+
+
 # EL COSTO CON LA BONIFICACIÓN DEL PROVEEDOR. Las listas traen el precio de lista y no el
 # costo, y cargarlo a mano producto por producto no lo hizo nadie: en la copia de la base real,
 # 0 de 71.659 productos de proveedor tenían costo, así que la ganancia por marca, el «a costo de
@@ -3269,6 +3307,7 @@ def crear_esquema(c):
     _esquema_gestion(c)
     _esquema_ventas(c)
     _esquema_del_mapa(c)
+    _esquema_de_los_mensajes(c)
     _datos_precargados_y_migraciones(c)
     _esquema_registro_y_reglas(c)
     _esquema_numeros_que_son_numeros(c)

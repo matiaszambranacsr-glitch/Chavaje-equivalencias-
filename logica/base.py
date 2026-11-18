@@ -152,7 +152,10 @@ MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
     "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",
     "sesiones_de_portal", "token_de_mercado_libre", "ultimos_errores", "respuestas_de_gemini",
-    "lo_de_antemano_lanzado")
+    "lo_de_antemano_lanzado",
+    # La vuelta por los mensajes: su candado, cuándo fue, cómo le fue a cada canal y el número
+    # de la cuenta de Instagram. Los mensajes mismos están en la base.
+    "bandeja_de_mensajes")
 
 
 def olvidar_lo_guardado_de_la_base():
@@ -787,6 +790,11 @@ button:disabled { opacity: 0.45 !important; }
 /* MÁS GRANDE Y CON UN ARO BLANCO: el dueño lo pidió, «agrandá el ícono, más que nada en el
    celular, porque no se ve prácticamente». Eran 54 px con el 🤖 a 1,6 rem, naranja sobre el
    fondo oscuro y sin borde: en el teléfono se perdía. */
+/* LA LISTA DE CHATS de «💬 Mensajes»: cada chat es un botón con el nombre y lo último que se
+   escribió; alineado a la izquierda se lee como una bandeja, centrado no. */
+[class*="st-key-msj_chat_"] button,
+[class*="st-key-msj_chat_"] button > div { justify-content: flex-start; text-align: left; }
+[class*="st-key-msj_chat_"] button [data-testid="stMarkdownContainer"] p { text-align: left; }
 .st-key-asistente_minimizado.st-key-asistente_minimizado.st-key-asistente_minimizado button {
   width: 60px !important; min-width: 60px !important; height: 60px !important;
   min-height: 60px !important; padding: 0 !important;

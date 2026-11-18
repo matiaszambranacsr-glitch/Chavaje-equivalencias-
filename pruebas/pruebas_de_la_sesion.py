@@ -581,22 +581,24 @@ def probar():
         st.session_state.clear()
         st.session_state.update(_estado_v)
 
-    # 4a'. EL ORDEN DE LA BARRA: tres grupos de cuatro, con la rayita entre uno y otro para el
-    # que tiene las doce; el invitado, el del depósito y el taller no tienen qué separar.
-    esperar("el orden es de las doce pantallas, cada una una vez",
+    # 4a'. EL ORDEN DE LA BARRA: tres grupos —el mostrador, con «💬 Mensajes» al lado de Ventas,
+    # y dos de cuatro—, con la rayita entre uno y otro para el que tiene las trece; el invitado,
+    # el del depósito y el taller no tienen qué separar.
+    esperar("el orden es de las trece pantallas, cada una una vez",
             (sorted(ns["ORDEN_DE_LAS_PAGINAS"]), [len(g) for g in ns["GRUPOS_DE_LA_BARRA"]]),
-            (sorted(ns["PAGINAS"]), [4, 4, 4]))
-    esperar("ventas y depósito primero, y la configuración al final",
-            (ns["ORDEN_DE_LAS_PAGINAS"][:4], ns["ORDEN_DE_LAS_PAGINAS"][-1]),
-            (["🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ Devoluciones"], "🗂️ Administrar"))
+            (sorted(ns["PAGINAS"]), [5, 4, 4]))
+    esperar("ventas, los mensajes y la caja primero, y la configuración al final",
+            (ns["ORDEN_DE_LAS_PAGINAS"][:5], ns["ORDEN_DE_LAS_PAGINAS"][-1]),
+            (["🧾 Ventas", "💬 Mensajes", "💵 Caja", "📦 Depósito", "↩️ Devoluciones"],
+             "🗂️ Administrar"))
     esperar("dónde va la rayita, para cada barra",
             [ns["cortes_de_la_barra"](b) for b in (
                 ns["ORDEN_DE_LAS_PAGINAS"], ns["PAGINAS_ABIERTAS"], ns["PAGINAS_DEL_DEPOSITO"],
-                ns["PAGINAS_DEL_TALLER"])], [[4, 8], [], [], []])
+                ns["PAGINAS_DEL_TALLER"])], [[5, 9], [], [], []])
     _rayitas = ns["rayitas_de_la_barra"](ns["ORDEN_DE_LAS_PAGINAS"])
-    esperar("la rayita va después de la cuarta y de la octava",
-            (":nth-child(4)" in _rayitas, ":nth-child(8)::after" in _rayitas,
-             ":nth-child(12)" in _rayitas, ns["rayitas_de_la_barra"](ns["PAGINAS_ABIERTAS"])),
+    esperar("la rayita va después de la quinta y de la novena",
+            (":nth-child(5)" in _rayitas, ":nth-child(9)::after" in _rayitas,
+             ":nth-child(13)" in _rayitas, ns["rayitas_de_la_barra"](ns["PAGINAS_ABIERTAS"])),
             (True, True, False, ""))
 
     # 4b. EN EL PORTAL, EL PRECIO ES EL QUE SE LE DICE A UN CLIENTE: la lista que está en otra

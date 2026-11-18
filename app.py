@@ -159,6 +159,13 @@ específico, y las pantallas quedan todas al final:
         · DÓNDE ESTÁ CADA COSA
         · LA COLA POR PISO
         · EL DIBUJO DEL PISO
+    logica/mensajes.py
+        · LOS MENSAJES: WHATSAPP, FACEBOOK E INSTAGRAM EN UNA BANDEJA
+        · LA CONEXIÓN CON META
+        · LO QUE AVISA META: LEER UN AVISO (WEBHOOK)
+        · GUARDAR LO QUE LLEGA
+        · LA BANDEJA
+        · CONTESTAR
     logica/asistente.py
         · EL ASISTENTE: QUÉ PUEDE Y QUÉ NO
         · LO QUE SABE EL ASISTENTE: EL MAPA DE LA APP, ARMADO SOLO
@@ -206,6 +213,8 @@ específico, y las pantallas quedan todas al final:
         · DEVOLUCIONES: lo que vuelve al depósito, lo que devuelve un cliente y las etiquetas
     pantallas/caja.py
         · CAJA: lo que mandan los vendedores, para cobrarlo o ponerlo a cuenta, y el cierre
+    pantallas/mensajes.py
+        · MENSAJES: los chats de WhatsApp, Facebook e Instagram, para contestar desde acá
 
 La lógica que no depende de Streamlit está ADEMÁS en el paquete nucleo/, que se puede usar
 desde otro sistema. Se genera desde logica/ con `python3 nucleo/generar.py`, así que si
@@ -512,6 +521,24 @@ def _lo_que_termino_otro():
                                                        _momento)
     except sqlite3.Error as _err:
         anotar_error("novedades_de", _err)
+    # LOS MENSAJES DE LOS CLIENTES (WhatsApp, Facebook, Instagram): de paso, se larga la vuelta
+    # que los trae —sola, como mucho una vez por minuto, y solo con alguien mirando— y salta un
+    # cartel por cada uno que llegó desde que entró y sigue sin leer. Ver logica/mensajes.py.
+    try:
+        arrancar_la_bandeja_de_fondo()
+        if "_ultimo_mensaje_avisado" not in st.session_state:
+            st.session_state["_ultimo_mensaje_avisado"] = ultimo_mensaje_guardado()
+        for _m in mensajes_nuevos_desde(st.session_state["_ultimo_mensaje_avisado"]):
+            st.session_state["_ultimo_mensaje_avisado"] = max(
+                st.session_state["_ultimo_mensaje_avisado"], _m["id"])
+            # Lo que escribió el cliente va escapado: un «[link](…)» o un «**» suyo no se dibuja.
+            _texto_corto = _m["texto"][:90] + ("…" if len(_m["texto"]) > 90 else "")
+            st.toast(f"💬 {CANALES_DE_MENSAJES[_m['canal']]['icono']} "
+                     f"**{texto_de_chat_para_markdown(_m['nombre'])}**: "
+                     f"{texto_de_chat_para_markdown(_texto_corto)} — en 💬 Mensajes.",
+                     duration="long")
+    except sqlite3.Error as _err:
+        anotar_error("mensajes_nuevos_desde", _err)
 
 
 if es_operador_o_admin() and not _es_del_deposito and obtener_usuario_actual():
@@ -560,9 +587,14 @@ recordar_lo_elegido_al_cambiar_de_pantalla()
 _rayitas = rayitas_de_la_barra(_paginas_a_la_vista)
 if _rayitas:
     st.markdown(_rayitas, unsafe_allow_html=True)
+# «💬 Mensajes · 3»: los chats sin leer, en la misma pastilla, para verlos desde cualquier
+# pantalla (el cartel salta una vez; esto queda hasta que alguien los abre).
+_chats_sin_leer = cuantos_chats_sin_leer() if PAGINAS[12] in _paginas_a_la_vista else 0
 with st.container(key="nav_principal"):
     st.radio("Sección:", _paginas_a_la_vista, key="pagina_actual", horizontal=True,
-             label_visibility="collapsed")
+             label_visibility="collapsed",
+             format_func=lambda p: (f"{p} · {miles(_chats_sin_leer)}"
+                                    if p == PAGINAS[12] and _chats_sin_leer else p))
 
 pagina = st.session_state["pagina_actual"]
 
@@ -845,7 +877,8 @@ _corte("avisos")
 NIVEL_DE_CADA_SECCION = {PAGINAS[1]: "empleado", PAGINAS[3]: "empleado",
                          PAGINAS[4]: "empleado", PAGINAS[6]: "empleado",
                          PAGINAS[8]: "empleado", PAGINAS[9]: "empleado",
-                         PAGINAS[10]: "empleado", PAGINAS[11]: "empleado"}
+                         PAGINAS[10]: "empleado", PAGINAS[11]: "empleado",
+                         PAGINAS[12]: "empleado"}
 if (NIVEL_DE_CADA_SECCION.get(pagina)
         and not seccion_permitida(NIVEL_DE_CADA_SECCION[pagina], pagina.split(" ", 1)[-1])):
     _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()

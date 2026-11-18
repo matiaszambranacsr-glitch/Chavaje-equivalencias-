@@ -7,8 +7,9 @@ mismo espacio de nombres que los otros archivos de logica/ (ver orden.py)."""
 # El dueño pidió un asistente «más inteligente, pero que siga sin ser una brecha de seguridad».
 # Hasta acá explicaba, llevaba y buscaba: de lo que estaba pasando no sabía nada. Ahora contesta
 # un puñado de preguntas con datos —cuánto se vendió, qué falta cobrar, qué espera el depósito,
-# cuánto debe una cuenta, qué hay pendiente; al taller, cuánto debe y qué les toca a sus
-# autos— con estas reglas, que son las que lo mantienen cerrado:
+# cuánto debe una cuenta, qué hay pendiente, qué chats hay sin leer (de quién, nunca lo que
+# escribieron); al taller, cuánto debe y qué les toca a sus autos— con estas reglas, que son
+# las que lo mantienen cerrado:
 #  · Un grupo CERRADO de preguntas, cada una con su función de siempre (la misma que dibuja la
 #    pantalla, así dice lo mismo que ella). Lo escrito solo elige cuál de estas preguntas es; con
 #    lo escrito no se arma ninguna consulta. El nombre de una cuenta se busca con
@@ -26,7 +27,7 @@ mismo espacio de nombres que los otros archivos de logica/ (ver orden.py)."""
 FUNCIONES_QUE_PUEDE_USAR = (
     "resumen_de_la_caja", "ventas_a_cobrar", "pedidos_pendientes", "pendientes_por_pedido",
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
-    "autos_del_taller", "hoy_aca", "miles", "texto_para_markdown",
+    "autos_del_taller", "chats_sin_leer", "hoy_aca", "miles", "texto_para_markdown",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -52,6 +53,14 @@ _DATO_MI_DEUDA = re.compile(
 _DATO_MIS_AUTOS = re.compile(
     r"\b(que|a que|a cuales?|cuales?)\b.{0,15}\b(autos?|coches?)\b.{0,25}\b(toca|tocan|vence|vencen|"
     r"vencid\w*|service|cambio)\b")
+# «¿Hay mensajes sin leer?», «¿llegó algún mensaje?», «¿quién escribió?». No «¿cómo mando un
+# WhatsApp?» ni «¿cómo contesto un mensaje?»: eso es explicar, y lo hacen las fichas.
+_DATO_MENSAJES = re.compile(
+    r"\b(mensajes?|chats?|whatsapps?|wasaps?)\b.{0,20}\b(sin leer|sin abrir|nuevos?|sin contestar|"
+    r"sin responder|pendientes?)\b"
+    r"|\b(hay|tenemos|tengo|llego|llegaron|entro|entraron)\b( algun| algunos| nuevos?)? "
+    r"(mensajes?|chats?)\b"
+    r"|\b(quien|alguien) (me |nos )?(escribio|escribieron|mando un mensaje)\b")
 _DATO_PENDIENTE = re.compile(
     r"\b(que|algo) (tengo|hay|queda|quedo) (pendiente|para hacer|por hacer|que hacer)\b"
     r"|^(pendientes?|resumen del dia|como estamos|que hay para hoy)$|\bresumen del dia\b")
@@ -61,6 +70,7 @@ _DATO_PENDIENTE = re.compile(
 # es el de la barra («_DEPOSITO» es 📁 Cargar Excel, no 📦 Depósito), y con el número se ataba
 # el dato a otra pantalla sin que se notara.
 _CAJA, _DEPOSITO, _ADMINISTRAR, _VEHICULOS = "💵 Caja", "📦 Depósito", "🗂️ Administrar", "🚗 Vehículos"
+_MENSAJES = "💬 Mensajes"
 
 
 def _asis_nombre(texto):
@@ -179,6 +189,19 @@ def _dato_de_mis_autos(contexto):
     return _asis_dato(texto, [], "mis_autos")
 
 
+def _dato_de_los_mensajes(contexto):
+    """Cuántos chats hay sin leer y de quién: los nombres, nunca lo que escribieron."""
+    cuantos, primeros = chats_sin_leer()
+    if not cuantos:
+        return _asis_dato("✅ No hay mensajes sin leer.", _asis_ir_a(_MENSAJES, contexto),
+                          "mensajes")
+    lista = ", ".join(f"{icono} {_asis_nombre(nombre)} ({miles(n)})"
+                      for icono, nombre, n in primeros)
+    return _asis_dato(f"💬 **{miles(cuantos)}** chat(s) sin leer: {lista}"
+                      + (" y más." if cuantos > len(primeros) else "."),
+                      _asis_ir_a(_MENSAJES, contexto), "mensajes")
+
+
 def _dato_de_lo_pendiente(contexto):
     """«¿Qué tengo pendiente?»: un renglón por lo que está esperando, de las pantallas que
     quien pregunta tiene."""
@@ -196,6 +219,11 @@ def _dato_de_lo_pendiente(contexto):
             lineas.append(f"📦 **{miles(len(pendientes_por_pedido(pendientes)))}** pedido(s) "
                           "esperan en el depósito.")
             botones += _asis_ir_a(_DEPOSITO, contexto)
+    if _MENSAJES in visibles:
+        sin_leer, _primeros = chats_sin_leer(limite=0)
+        if sin_leer:
+            lineas.append(f"💬 **{miles(sin_leer)}** chat(s) de clientes sin leer.")
+            botones += _asis_ir_a(_MENSAJES, contexto)
     if _ADMINISTRAR in visibles:
         vencidas = [r for r in resumen_de_cuentas() if (r.get("Vencido") or 0) > 0]
         if vencidas:
@@ -235,6 +263,8 @@ def dato_del_momento(llano, contexto):
             return _dato_a_cobrar(contexto)
     if _DEPOSITO in visibles and _DATO_DEPOSITO.search(llano):
         return _dato_del_deposito(contexto)
+    if _MENSAJES in visibles and _DATO_MENSAJES.search(llano):
+        return _dato_de_los_mensajes(contexto)
     if _DATO_PENDIENTE.search(llano):
         return _dato_de_lo_pendiente(contexto)
     if _ADMINISTRAR in visibles:

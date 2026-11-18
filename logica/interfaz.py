@@ -113,7 +113,7 @@ def herramientas_que_coinciden(texto):
 # solapa, y el auditor controla que cada miga escrita exista.
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
-           "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones", "💵 Caja"]
+           "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones", "💵 Caja", "💬 Mensajes"]
 # EN QUÉ ORDEN SE VEN: EN TRES GRUPOS, con una rayita entre uno y otro (ver
 # rayitas_de_la_barra()). Primero lo que más se usa, que lo pidió el dueño («ventas y depósito
 # son más importantes que las equivalencias»), y después pidió «mejorar el orden»: eran doce
@@ -125,8 +125,10 @@ PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂�
 #   · la trastienda: los números, cargar listas, vincular, y al final la configuración, que es
 #     donde uno la busca en cualquier programa.
 # Es solo el orden de la barra: PAGINAS[n] sigue siendo la misma pantalla en todo el código.
+# «💬 Mensajes» (PAGINAS[12], la última en sumarse) va al lado de Ventas: los chats de WhatsApp,
+# Facebook e Instagram los contesta el mostrador, entre venta y venta.
 GRUPOS_DE_LA_BARRA = (
-    ("🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ Devoluciones"),
+    ("🧾 Ventas", "💬 Mensajes", "💵 Caja", "📦 Depósito", "↩️ Devoluciones"),
     ("🔍 Buscador", "📋 Lista WhatsApp", "🛠️ Modo Mecánico", "🚗 Vehículos"),
     ("📊 Estadísticas", "📁 Cargar Excel", "🔗 Vincular manual", "🗂️ Administrar"),
 )
@@ -175,6 +177,8 @@ PARA_QUE_SIRVE = {
                       "devuelve un cliente, y las etiquetas para imprimir.",
     "💵 Caja": "Lo que mandan los vendedores: cobrarlo (F10) o ponerlo a cuenta (F11), y el "
               "cierre de caja.",
+    "💬 Mensajes": "Los chats de WhatsApp, Facebook e Instagram en un solo lugar: los sin leer "
+                  "arriba, y se contestan desde acá.",
 }
 
 # Las solapas de cada pantalla. Viven acá y no adentro de la pantalla porque el botón de los
@@ -375,11 +379,13 @@ def cortes_de_la_barra(paginas):
             if grupo_de.get(paginas[n]) != grupo_de.get(paginas[n + 1])]
 
 
-# Hasta qué ancho de pantalla la barra de doce se parte en dos renglones. Más ancha, entran
-# las doce en uno (medido: hacen falta unos 1.350 px, y con otra letra, algo más).
-ANCHO_EN_QUE_ENTRA_LA_BARRA = 1500
-# Y desde qué ancho entran dos grupos (ocho pastillas) en un renglón: medido, unos 905 px.
-ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS = 940
+# Desde qué ancho de pantalla entran los dos primeros grupos (nueve pastillas, con la cuenta
+# de «💬 Mensajes · 3») en un renglón: medido en un navegador, a 1.000 px no entraban y a
+# 1.040 sí; con «· 12» es un poco más. Con doce pastillas, desde 1.500 px entraban todas en un
+# renglón; con trece ya no entran nunca —el contenido tiene un tope de 1.400 px, y a 1.700 px
+# «🗂️ Administrar» quedaba sola abajo—, así que en la computadora la barra va siempre en dos
+# renglones: el mostrador y la búsqueda arriba, la trastienda abajo.
+ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS = 1060
 
 
 def rayitas_de_la_barra(paginas):
@@ -390,8 +396,8 @@ def rayitas_de_la_barra(paginas):
     cuando la barra no entra en un renglón, queda al final del de arriba y no como un palito
     suelto al principio del de abajo.
 
-    Y SI NO ENTRAN LAS DOCE, EL RENGLÓN SE CORTA ENTRE GRUPOS: arriba el mostrador y la
-    búsqueda, abajo la trastienda. Sola, la barra cortaba donde se le acababa el lugar, y a
+    Y EL RENGLÓN SE CORTA ENTRE GRUPOS (las trece no entran en uno, ver
+    ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS): arriba el mostrador y la búsqueda, abajo la trastienda. Sola, la barra cortaba donde se le acababa el lugar, y a
     1.300 px «🗂️ Administrar» quedaba sola en el segundo renglón. El corte es un renglón vacío
     que se mete entre las dos mitades (las de antes van primero, las de después al final): la
     barra es un st.radio y no hay cómo ponerle un salto adentro. En una ventana angosta, un
@@ -408,17 +414,16 @@ def rayitas_de_la_barra(paginas):
               "height: 56%; width: 1px; background: var(--border-strong); }")
     if len(cortes) >= 2:
         primero, ultimo = cortes[0], cortes[-1]
-        # Entre 940 px y donde entran todas: dos renglones, cortando antes de la trastienda.
+        # Desde ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS: dos renglones, cortando antes de la trastienda.
         estilo += (
-            f" @media (min-width: {ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS}px) and "
-            f"(max-width: {ANCHO_EN_QUE_ENTRA_LA_BARRA - 1}px) {{ "
+            f" @media (min-width: {ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS}px) {{ "
             f"{barra} > :nth-child(-n+{ultimo}) {{ order: 1; }} "
             f"{barra}::after {{ content: ''; flex-basis: 100%; height: 0; order: 2; }} "
             f"{barra} > :nth-child(n+{ultimo + 1}) {{ order: 3; }} "
             # Al final del renglón la rayita no separa nada.
             f"{barra} > :nth-child({ultimo})::after {{ display: none; }} }}")
         # Más angosta (una ventana chica, una tableta): ni dos grupos entran en un renglón, y a
-        # 900 px «🚗 Vehículos» quedaba sola en el medio. Un grupo por renglón.
+        # 1.000 px «🚗 Vehículos» quedaba sola en el medio. Un grupo por renglón.
         estilo += (
             f" @media (min-width: 768px) and (max-width: {ANCHO_EN_QUE_ENTRAN_DOS_GRUPOS - 1}px) {{ "
             f"{barra} > :nth-child(-n+{primero}) {{ order: 1; }} "
@@ -580,8 +585,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-18"
+VERSION_DE_LO_NUEVO = "2026-11-18b"
 LO_NUEVO = (
+    ("💬 Mensajes: los chats de WhatsApp, Facebook e Instagram en un solo lugar, los sin leer "
+     "arriba, y se contestan desde la página. La pastilla dice cuántos hay sin leer y salta un "
+     "cartel cuando llega uno. Para conectar los canales, los pasos y «🔌 Probar la conexión» "
+     "están en Administrar.", "🗂️ Administrar → 💬 Mensajería y cobros"),
     ("🤖 El asistente ahora te dice cómo viene el día: preguntale «¿qué tengo pendiente?», "
      "«¿cuánto vendimos hoy?», «¿qué falta cobrar?» o «¿cuánto debe Taller García?». A cada "
      "uno le dice solo lo de sus pantallas. Y la burbuja es más grande, sobre todo en el "

@@ -63,6 +63,9 @@ ENTIENDE = (
     ("como veo lo que le cambiaron a mi auto", "como:ver_mi_auto"),
     ("que le pusieron a mi coche", "como:ver_mi_auto"),
     ("quiero imprimir el cartel con el qr", "como:cartel_auto"),
+    ("como contesto un mensaje de whatsapp", "como:contestar_mensaje"),
+    ("me escribieron por instagram como respondo", "como:contestar_mensaje"),
+    ("como conecto el whatsapp y el facebook a la pagina", "como:conectar_canales"),
     ("cuanto me debe un cliente", "como:cuenta_corriente"),
     ("el taller de juan vino a pagar lo que debe", "como:cuenta_corriente"),
     ("cambiar el limite de credito", "como:limite"),
@@ -163,6 +166,11 @@ NOMBRES_PROHIBIDOS = {
     "guardar_config", "eval", "exec", "compile", "__import__", "subprocess", "pickle",
     "preguntar_a_gemini", "validar_password", "crear_usuario", "cambiar_password_usuario",
     "cerrar_venta", "cobrar_venta", "globals", "locals", "setattr", "delattr",
+    # Los mensajes de los clientes: el asistente puede decir cuántos chats hay sin leer y de
+    # quién (chats_sin_leer), pero no leer lo que escribieron, ni contestar, ni marcar.
+    "contestar_chat", "marcar_leido", "traer_mensajes_ahora", "traer_mensajes_nuevos",
+    "probar_los_canales", "config_de_los_mensajes", "mensajes_del_chat",
+    "mensajes_nuevos_desde", "chats_de_la_bandeja", "guardar_mensaje_de_afuera",
 }
 # Ni llamar: las formas de consultar una base, de leer los secretos de Streamlit o de salir.
 ATRIBUTOS_PROHIBIDOS = {"execute", "executemany", "executescript", "fetchone", "fetchall",
@@ -994,6 +1002,10 @@ def probar(L):
     c.execute("INSERT INTO pedidos_deposito (producto_id, cantidad, estado, pedido_por, "
               "pedido_en) VALUES (?, 1, 'pendiente', 'ana *pide*', datetime('now'))",
               (_prod_d[0],))
+    # Y un chat sin leer, con un nombre con formato y un texto que no se tiene que decir.
+    c.execute("INSERT INTO chats (canal, externo, nombre, ultimo_texto, ultimo_en, sin_leer) "
+              "VALUES ('whatsapp', '5491100000000', 'Rosa *Pro* [x](http://x.example)', "
+              "'el secreto de Rosa', datetime('now'), 2)")
     ns["conn"].commit()
     _todas_d = list(ns["ORDEN_DE_LAS_PAGINAS"])
     _roles_d = {
@@ -1009,14 +1021,14 @@ def probar(L):
         "cuanto vendimos hoy": "dato:ventas", "que falta cobrar": "dato:a_cobrar",
         "que pedidos hay en el deposito": "dato:deposito",
         "cuanto debe taller negrita": "dato:cuenta", "que tengo pendiente": "dato:pendiente",
-        "cuanto debo": "dato:mi_cuenta",
+        "cuanto debo": "dato:mi_cuenta", "hay mensajes sin leer": "dato:mensajes",
     }
     # Quién recibe cada dato: lo de las pantallas de cada uno, y nada más.
     _quien_d = {
         "invitado": set(),
         "depósito": {"dato:deposito", "dato:pendiente"},
         "operador": {"dato:ventas", "dato:a_cobrar", "dato:deposito", "dato:cuenta",
-                     "dato:pendiente"},
+                     "dato:pendiente", "dato:mensajes"},
         "taller": {"dato:mi_cuenta"},
     }
     if not _prod_d:
@@ -1038,7 +1050,8 @@ def probar(L):
             ("💵 Caja", "cuanto vendimos hoy", "dato:ventas"),
             ("💵 Caja", "que falta cobrar", "dato:a_cobrar"),
             ("📦 Depósito", "que pedidos hay en el deposito", "dato:deposito"),
-            ("🗂️ Administrar", "cuanto debe taller negrita", "dato:cuenta")):
+            ("🗂️ Administrar", "cuanto debe taller negrita", "dato:cuenta"),
+            ("💬 Mensajes", "hay mensajes sin leer", "dato:mensajes")):
         _con_esa = responder(_pregunta_d, {"visibles": [_pantalla_d], "pagina": _pantalla_d,
                                            "nivel": "operador"})["ficha"]
         _sin_esa = [p for p in _todas_d if p != _pantalla_d
@@ -1058,6 +1071,20 @@ def probar(L):
     cierto("lo pendiente junta la caja, el depósito y las cuentas vencidas",
            all(x in _pend_d["texto"] for x in ("esperan en la caja", "depósito",
                                                "saldo vencido")), _pend_d["texto"])
+    _msj_d = responder("hay mensajes sin leer", _roles_d["operador"])
+    cierto("los mensajes: cuántos chats y de quién (escapado), nunca lo que escribieron",
+           "**1** chat" in _msj_d["texto"] and "Rosa \\*Pro\\*" in _msj_d["texto"]
+           and "\\[x\\]" in _msj_d["texto"] and "secreto" not in _msj_d["texto"],
+           _msj_d["texto"])
+    cierto("y lo pendiente suma los chats sin leer", "chat(s) de clientes sin leer" in _pend_d["texto"],
+           _pend_d["texto"])
+    for _otra_forma in ("llego algun mensaje", "quien me escribio", "tengo chats nuevos"):
+        esperar(f"«{_otra_forma}» también es el dato de los mensajes",
+                responder(_otra_forma, _roles_d["operador"])["ficha"], "dato:mensajes")
+    for _no_es in ("como contesto un mensaje de whatsapp", "mandar cotizacion por wasap",
+                   "cambiar el texto del mensaje de whatsapp"):
+        esperar(f"«{_no_es}» no es el dato de los mensajes",
+                responder(_no_es, _roles_d["operador"])["ficha"] == "dato:mensajes", False)
     _ayer_d = responder("y ayer", {**_roles_d["operador"], "ultima": "dato:ventas"})
     esperar("«¿y ayer?» después de las ventas de hoy, las de ayer",
             (_ayer_d["ficha"], _ayer_d["texto"].startswith("**Ayer**")), ("dato:ventas_ayer", True))

@@ -46,6 +46,7 @@ PARTES_DE_LA_LOGICA = [
     "ventas.py",
     "facturas.py",
     "mapa.py",
+    "mensajes.py",
     "asistente.py",
     "asistente_datos.py",
 ]
@@ -74,6 +75,7 @@ PANTALLAS = [
     "ventas.py",
     "devoluciones.py",
     "caja.py",
+    "mensajes.py",
 ]
 
 # En app.py, la línea donde se ejecutan las pantallas. fuente_completa() pone ahí su texto.

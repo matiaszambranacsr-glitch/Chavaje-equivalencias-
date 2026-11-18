@@ -7604,6 +7604,83 @@ debo?»): si no, nadie se enteraba de que las contesta.
   «Taller \*Negrita\* [link](http://…) $1 y $2» se ve tal cual, sin negritas, sin link y sin
   fórmula.
 
+## 💬 Mensajes: WhatsApp, Facebook e Instagram en una bandeja
+
+El pedido: «una sección de mensajes para los empleados en la cual puedas vincular los mensajes
+de WhatsApp, Facebook, Instagram y demás, para que los podamos contestar directamente desde la
+página, que nos salten los chats todos ahí que no estén leídos y poder ir contestando».
+
+**Lo que ve el personal** (`pantallas/mensajes.py`, «💬 Mensajes», al lado de 🧾 Ventas en la
+barra; no la ven el invitado, el taller ni los del depósito):
+
+- La lista de chats, **los sin leer arriba con 🔴** y cuántos mensajes tienen; «⏳» los que tienen
+  lo último del cliente aunque alguien ya los haya leído. Filtros «Todos / 🔴 Sin leer / ⏳ Sin
+  contestar» y un buscador por nombre, número o lo que escribió.
+- **La pastilla de la barra dice cuántos hay sin leer** («💬 Mensajes · 3») en cualquier pantalla, y
+  **cuando llega uno salta un cartel** con quién y qué escribió, una sola vez.
+- Al tocar un chat, la conversación (queda leída para todos) y la caja para contestar, con
+  **respuestas rápidas** («Sí, lo tenemos», «¿Me pasás marca, modelo y año?»…). La lista y la
+  conversación se ponen al día solas cada 20 segundos; la caja para escribir no se toca, así lo
+  que uno está escribiendo no se borra cuando llega algo.
+- Si el cliente escribió **un código** («¿tenés el W712/80?»), el botón «🔍 Buscar W712/80» lo deja
+  buscado en el Buscador con sus equivalencias. Plata, años, fechas y teléfonos no cuentan.
+- Si escribe por WhatsApp un número que **ya tiene un auto anotado** en 🚗 Vehículos o un pedido
+  esperando, se dice arriba del chat (se compara por los últimos 8 números).
+- En el celular, una cosa por vez: la lista, y al tocar un chat, el chat con «← Volver».
+
+**Cómo llega cada uno** (`logica/mensajes.py`). Facebook e Instagram: la app le pregunta a Meta por
+las conversaciones de la página, como mucho una vez por minuto y solo mientras alguien tiene la
+app abierta. WhatsApp no deja preguntar: avisa cada mensaje a una dirección fija que tiene que
+contestar siempre, y la app de Streamlit se duerme; va un **relevo** gratis de Cloudflare
+(`integraciones/relevo_de_mensajes/`, con su LEEME paso a paso) que controla que el aviso lo
+firmó Meta y lo guarda hasta que la app lo pasa a buscar. Contestar va directo a Meta.
+
+- **Lo de antes de conectar entra como leído**: si no, el primer día saltaban todas las
+  conversaciones viejas de la página.
+- **El mismo mensaje entra una sola vez** (el relevo que reintenta, el aviso y la pregunta):
+  `UNIQUE(canal, externo_id)`. Al relevo se le confirma lo guardado recién después de guardarlo.
+- Lo que se contesta **desde el teléfono** (Facebook, y WhatsApp con la «coexistencia») llega como
+  eco: se suma al chat como nuestro y el chat deja de estar sin leer.
+- **Las 24 horas**: Meta deja contestar hasta 24 horas después del último mensaje del cliente. La
+  app lo dice antes y no lo intenta; para WhatsApp ofrece abrir el chat en el teléfono.
+- Fotos, audios y archivos se avisan («📷 Foto: este», «🎤 Audio») y se miran en el teléfono.
+
+**Las claves**, en los secretos de Streamlit (sección `[mensajes]`; los pasos en 🗂️ Administrar →
+💬 Mensajería y cobros → «📲 Conectar WhatsApp, Facebook e Instagram», que dice qué está puesto y
+tiene «🔌 Probar la conexión», que contesta con el nombre de la página y del número, nunca una
+clave). Van en la cabecera de cada pedido, nunca en la dirección: un error de red trae la dirección
+entera y no las lleva. Los errores de Meta se dicen en castellano con su número («El permiso de
+Meta venció… (código 190)»), sin el texto de Meta.
+
+**Lo que se probó** (`pruebas/pruebas_de_los_mensajes.py`, con Meta y el relevo de mentira: nada sale
+a internet): leer los avisos de los tres canales (y avisos rotos sin romperse), traer sin repetir,
+lo viejo como leído, contestar por el canal de cada chat con el permiso en la cabecera, nada pasadas
+las 24 horas, las claves en ningún error ni pantalla ni error anotado, que solo el personal pueda
+contestar o marcar, la pastilla con la cuenta, el cartel escapado (un «[ver](http://…)» del cliente no
+se dibuja como link, ni un «![](…)» carga una imagen de afuera), abrir, contestar y buscar un código
+desde la pantalla, y Administrar. Y el relevo mismo, con Node: sin la firma de Meta no guarda, sin la
+clave no entrega, y «entregado/leído» no ocupa lugar. Las 15 garantías se rompieron a propósito una
+por una y la prueba saltó en todas.
+
+**El asistente**, de paso: «¿hay mensajes sin leer?», «¿llegó algún mensaje?» o «¿quién escribió?»
+dicen cuántos chats y de quién (nunca lo que escribieron), y «¿qué tengo pendiente?» los suma. Solo
+a quien tiene «💬 Mensajes» en la barra; contestar, marcar o leer los mensajes no está entre lo que
+puede tocar (la prueba lo mira en el código). Y explica «¿cómo contesto un WhatsApp?» y, al
+administrador, «¿cómo conecto WhatsApp y Facebook?».
+
+**La barra**: con trece pastillas ya no entran en un renglón ni en una pantalla ancha (el contenido
+tiene un tope de 1.400 px, y a 1.700 px «🗂️ Administrar» quedaba sola abajo). En la computadora va
+siempre en dos renglones, cortando entre grupos; en una ventana de menos de 1.060 px, un grupo por
+renglón. Medido en un navegador a doce anchos.
+
+**Lo que tiene que hacer el dueño del lado de Meta** (una vez): una app de tipo «Empresa» en
+developers.facebook.com con Messenger (y la cuenta de Instagram profesional vinculada a la página) y
+WhatsApp; el permiso permanente de un «usuario del sistema»; para escribirles a clientes que no son
+administradores de la app, la verificación del negocio y la revisión de la app; y el relevo de
+Cloudflare para recibir los WhatsApp. **Ojo con el número**: uno que hoy usa la aplicación WhatsApp
+Business del teléfono deja de andar ahí al pasarlo a la API, salvo con la «coexistencia» (por un
+proveedor de Meta).
+
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 
 Lo pidió el dueño: «hacé que las cuentas para vender tengan un buscador porque se van a sumar más de 2000 cuentas, sería una locura scrollear para encontrar cada una». Una cuenta (un taller, un mayorista, un cliente con cuenta corriente) es un renglón de `mecanicos`, y la app estaba pensada para diez. Se cargaron 2.000 en una copia de la base real y se miró qué se rompía.

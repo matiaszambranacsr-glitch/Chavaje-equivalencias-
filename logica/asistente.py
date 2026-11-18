@@ -875,6 +875,20 @@ COMO_HAGO_DEL_ASISTENTE = (
      "venta o la manda a la caja; en la caja, F10 cobra y F11 pone a cuenta. En la "
      "computadora, el click derecho sobre un producto abre sus botones.",
      None, "empleado"),
+    # ---- los mensajes de los clientes (ver logica/mensajes.py) ----
+    ("contestar_mensaje", "Contestar un mensaje de WhatsApp, Facebook o Instagram",
+     "contestar responder mensaje mensajes chat chats whatsapp facebook instagram messenger "
+     "wasap leer leido sin leer escribio escribieron bandeja inbox consulta cliente",
+     "En «💬 Mensajes» están todos los chats, los sin leer arriba con 🔴. Tocá uno, escribí "
+     "abajo (o tocá una respuesta rápida) y «📤 Enviar». Meta deja contestar hasta 24 horas "
+     "después del último mensaje del cliente; después, desde el teléfono.",
+     "💬 Mensajes", "empleado"),
+    ("conectar_canales", "Conectar WhatsApp, Facebook e Instagram a la app",
+     "conectar vincular configurar enlazar whatsapp facebook instagram messenger meta canales "
+     "mensajes token webhook relevo",
+     "Abajo de todo está «📲 Conectar WhatsApp, Facebook e Instagram»: dice qué falta, los "
+     "pasos en Meta y qué poner en los secretos de Streamlit. Después, «🔌 Probar la conexión».",
+     "💬 Mensajería y cobros", "admin"),
     # Sin «patente» ni «vehículo» en el título ni en las claves, a propósito: «¿qué auto es
     # por la patente?» es identificar un auto, que es del Modo Mecánico (al invitado se le dice
     # que es para clientes), y con esas palabras esta le ganaba.
