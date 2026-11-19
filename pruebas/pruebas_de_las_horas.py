@@ -29,7 +29,9 @@ _COLUMNAS_CON_HORA = re.compile(r"fecha\w*|\w+_en|cuando|momento|ultimo_ingreso|
 _HORA_MAL = re.compile(r"\b(01:30|19:30)\b")
 # Las que tienen que mostrar la hora buena con los datos que se cargan acá.
 _TIENEN_QUE_MOSTRARLA = ("💵 Caja", "🗂️ Administrar → 💳 Cuentas corrientes",
-                         "📊 Estadísticas → 📌 Para pedir")
+                         "📊 Estadísticas → 📌 Para pedir",
+                         "🗂️ Administrar → 🧹 Mantenimiento → 🩺 Estado y papelera",
+                         "🚗 Vehículos → AB 999 HH")
 
 
 def _todo_a_la_noche(c, noche):
@@ -119,24 +121,35 @@ def probar():
     _todo_a_la_noche(ns["c"], noche)
     ns["conn"].commit()
     mal, bien, rotas = {}, set(), []
+    # Cada pantalla y solapa; además, cada grupo de 🧹 Mantenimiento (ahí está la papelera) y la
+    # ficha del auto cargado en 🚗 Vehículos (lo cambiado, cuándo).
+    lugares = []
     for pagina in ns["ORDEN_DE_LAS_PAGINAS"]:
         solapas, clave = ns["SOLAPAS_DE_LA_PAGINA"].get(pagina, ([None], None))
         for solapa in solapas:
-            at.session_state["pagina_actual"] = pagina
-            if clave:
-                at.session_state[clave] = solapa
-            donde = pagina + (f" → {solapa}" if solapa else "")
-            at.run()
-            if at.exception:
-                rotas.append(donde)
-                continue
-            for tipo, texto in _lo_que_se_ve(at):
-                if "22:30" in texto:
-                    bien.add(donde)
-                for m in _HORA_MAL.finditer(texto):
-                    mal.setdefault(donde, set()).add(
-                        f"[{tipo}] …{texto[max(0, m.start() - 60):m.end() + 15]}…"
-                        .replace("\n", " "))
+            lugares.append((pagina, {clave: solapa} if clave else {},
+                            pagina + (f" → {solapa}" if solapa else "")))
+    _mant = ns["SUB_ADMIN"][4]
+    for grupo in ns["GRUPOS_MANTENIMIENTO"]:
+        lugares.append((ns["PAGINAS"][3], {"sub_admin": _mant, "sub_mantenimiento": grupo},
+                        f"{ns['PAGINAS'][3]} → {_mant} → {grupo}"))
+    lugares.append((ns["PAGINAS"][6], {"patente_buscar": "AB999HH"},
+                    f"{ns['PAGINAS'][6]} → AB 999 HH"))
+    for pagina, estado, donde in lugares:
+        at.session_state["pagina_actual"] = pagina
+        for _clave, _valor in estado.items():
+            at.session_state[_clave] = _valor
+        at.run()
+        if at.exception:
+            rotas.append(donde)
+            continue
+        for tipo, texto in _lo_que_se_ve(at):
+            if "22:30" in texto:
+                bien.add(donde)
+            for m in _HORA_MAL.finditer(texto):
+                mal.setdefault(donde, set()).add(
+                    f"[{tipo}] …{texto[max(0, m.start() - 60):m.end() + 15]}…"
+                    .replace("\n", " "))
     fallas = [f"{donde}: hora mal: " + " | ".join(sorted(cosas)[:3])
               for donde, cosas in mal.items()]
     fallas += [f"{donde}: se rompió" for donde in rotas]
