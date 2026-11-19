@@ -1460,8 +1460,9 @@ if pagina == PAGINAS[3]:
                 if _con_portal or _recien:
                     st.link_button(
                         "📲 Mandarle cómo entrar, por WhatsApp",
-                        "https://wa.me/?text=" + quote(mensaje_de_acceso(mecanico_id_sel,
-                                                                         mecanico_elegido)),
+                        # A su WhatsApp, si la cuenta lo tiene anotado; si no, WhatsApp pregunta.
+                        link_de_whatsapp(telefono_de_la_cuenta(mecanico_id_sel),
+                                         mensaje_de_acceso(mecanico_id_sel, mecanico_elegido)),
                         help="Le llega la dirección —que ya trae su usuario— y qué tiene adentro. "
                              "La contraseña no va en el mensaje: mandásela aparte o dictásela.")
                 if _recien and st.button("✔️ Ya se la pasé", key="mecanico_ya_se_la_pase"):
@@ -1654,7 +1655,7 @@ if pagina == PAGINAS[3]:
                                + (f", de los que ${miles(_estado['vencido'], 0)} ya vencieron"
                                   if _estado["vencido"] else "") + ". ¡Gracias!")
                 st.link_button("📲 Mandarle el saldo por WhatsApp",
-                               "https://wa.me/?text=" + quote(_mensaje_cc))
+                               link_de_whatsapp(telefono_de_la_cuenta(_mid), _mensaje_cc))
                 _anulables = {f"{m['Fecha']} — {m['Concepto']} — "
                               f"${miles((m['Debe'] or m['Haber'] or 0), 0)}": m["ID"]
                               for m in _movs if "(ANULADO)" not in m["Concepto"]}
@@ -1731,6 +1732,21 @@ if pagina == PAGINAS[3]:
                             st.rerun()
 
             with st.expander(f"⚙️ Configuración de la cuenta de {_taller}", key="exp_configuracion_cuenta"):
+                # EL WHATSAPP DE LA CUENTA: lo anota cualquiera del personal, aparte del resto
+                # (que pide administrador). Ver telefono_de_la_cuenta().
+                _t1, _t2 = st.columns([3, 1], vertical_alignment="bottom")
+                _tel_cuenta = _t1.text_input(
+                    "📞 WhatsApp de la cuenta:", value=telefono_de_la_cuenta(_mid),
+                    key=f"cc_tel_{_mid}", placeholder="11 4567-8901",
+                    help="El saldo y el acceso van directo a su WhatsApp, y cuando escribe por "
+                         "💬 Mensajes se sabe que es esta cuenta y cuánto debe.")
+                if _t2.button("💾 Guardar", key=f"cc_guardar_tel_{_mid}", width="stretch"):
+                    guardar_telefono_de_la_cuenta(_mid, _tel_cuenta)
+                    avisar("success", "Teléfono guardado.")
+                    st.rerun()
+                if _tel_cuenta.strip() and not numero_para_whatsapp(_tel_cuenta):
+                    st.warning("Ese teléfono no sirve para WhatsApp: va con la característica, "
+                               "por ejemplo 11 4567-8901.")
                 _limite = st.number_input("Límite de crédito ($, 0 = sin límite):", min_value=0.0,
                                           step=1000.0, value=float(_config["limite"]),
                                           key=f"cc_limite_{_mid}")

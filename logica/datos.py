@@ -1670,6 +1670,9 @@ def _esquema_gestion(c):
         c.execute("ALTER TABLE mecanicos ADD COLUMN ultimo_ingreso TEXT")
     if "ingresos" not in _cols_mecanicos:
         c.execute("ALTER TABLE mecanicos ADD COLUMN ingresos INTEGER DEFAULT 0")
+    # El WhatsApp de la cuenta (ver telefono_de_la_cuenta() en logica/mecanico.py).
+    if "telefono" not in _cols_mecanicos:
+        c.execute("ALTER TABLE mecanicos ADD COLUMN telefono TEXT")
 
     # Presupuestos armados por mecánicos externos: repuestos elegidos + su propia mano de obra.
     c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_mecanico (

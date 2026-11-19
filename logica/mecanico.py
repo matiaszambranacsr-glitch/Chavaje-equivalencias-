@@ -1489,6 +1489,38 @@ def configuracion_de_cuenta(mecanico_id):
 DESCUENTO_MAXIMO = 90.0
 
 
+# EL WHATSAPP DE LA CUENTA. Las cuentas no tenían teléfono: el saldo y el acceso se mandaban
+# con un WhatsApp sin destinatario (había que buscar al taller en la agenda), y cuando el taller
+# escribía por 💬 Mensajes nadie sabía que era una cuenta ni cuánto debía. Se compara por los
+# últimos 8 números, como el resto de la app (ver historial_de_un_cliente()).
+def telefono_de_la_cuenta(mecanico_id):
+    fila = c.execute("SELECT telefono FROM mecanicos WHERE id = ?", (int(mecanico_id),)).fetchone()
+    return str(fila["telefono"] or "") if fila else ""
+
+
+def guardar_telefono_de_la_cuenta(mecanico_id, telefono):
+    """Lo anota el personal (no el taller). Vacío lo borra."""
+    exigir_nivel("empleado", "anotar el teléfono de una cuenta")
+    antes = telefono_de_la_cuenta(mecanico_id)
+    nuevo = str(telefono or "").strip()[:40]
+    with db_lock:
+        c.execute("UPDATE mecanicos SET telefono = ? WHERE id = ?", (nuevo or None, int(mecanico_id)))
+        conn.commit()
+    anotar_cambio("anotó el teléfono", "cuenta", mecanico_id, antes=antes, despues=nuevo)
+
+
+def cuenta_del_telefono(telefono):
+    """(id, nombre) de la cuenta con ese teléfono (los últimos 8 números), o None."""
+    final = re.sub(r"\D", "", str(telefono or ""))[-8:]
+    if len(final) < 8:
+        return None
+    for fila in c.execute("SELECT id, nombre, telefono FROM mecanicos "
+                          "WHERE telefono IS NOT NULL AND telefono <> '' AND activo = 1").fetchall():
+        if re.sub(r"\D", "", fila["telefono"])[-8:] == final:
+            return fila["id"], fila["nombre"]
+    return None
+
+
 def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo, descuento=None,
                                 cobra_mora=None):
     """Guarda la configuración. descuento=None y cobra_mora=None dejan lo que tenía."""

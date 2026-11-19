@@ -7723,6 +7723,20 @@ quién. Una prueba que había fijaba justo el link con el error; ahora fija el c
 Y la ficha del auto avisa, arriba de «✏️ Datos del cliente / vehículo», cuando el teléfono
 guardado no sirve para WhatsApp («15 4567-8901», sin característica): ahí es donde se corrige.
 
+## 📞 El WhatsApp de cada cuenta corriente
+
+Las cuentas no tenían teléfono: el saldo («📲 Mandarle el saldo por WhatsApp») y el acceso («📲
+Mandarle cómo entrar») abrían WhatsApp sin destinatario, y cuando un taller escribía por 💬
+Mensajes nadie sabía que era una cuenta ni cuánto debía. Ahora, en 🗂️ Administrar → 💳 Cuentas
+corrientes → «⚙️ Configuración de la cuenta», está **«📞 WhatsApp de la cuenta»** (lo anota
+cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
+
+- el saldo y el acceso van directo a su WhatsApp (con el 54 9, ver `numero_para_whatsapp()`);
+- en 💬 Mensajes, el chat de ese número dice **«💳 Cuenta: Taller García — debe $X ($Y
+  vencido)»** (se compara por los últimos 8 números, como el resto de la app).
+
+Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
+
 ## 📦 Avisarle al que esperaba algo que ahora hay
 
 En 📊 Estadísticas → 📌 Para pedir → 📞 Consultas de clientes, la lista de los que preguntaron
@@ -7771,45 +7785,6 @@ Se volvió todo a la fecha guardada, y ahora:
 - el auditor marca una fecha con hora convertida en la consulta (la tabla la vuelve a correr), y
   un día cortado a mano (`[:10]`) que no pase por `dia_de_aca()`; las fechas que vienen de afuera
   (BCRA, cheques rechazados) se marcan con «# fecha de afuera».
-
-## 📦 Avisarle al que esperaba algo que ahora hay
-
-En 📊 Estadísticas → 📌 Para pedir → 📞 Consultas de clientes, la lista de los que preguntaron
-por algo que no había y ahora sí decía «es una venta a un llamado de distancia», pero no había
-cómo escribirles ni cómo anotar que ya se les escribió: dos empleados le avisaban, o ninguno.
-Ahora cada uno tiene **«📲 Avisarle»**, que abre WhatsApp a su número (con el 54 9: ver más
-arriba) con el mensaje escrito —«ya llegó LL100, que nos habías consultado. ¿Te lo guardamos?»,
-sin precio, porque el de la lista puede estar en otra escala y el que se le dijo puede haber
-cambiado— y **«✅ Ya le avisé»**: queda la fecha en la lista y sale del aviso del día (la
-campanita); si a los 3 días no vino, vuelve a aparecer (`DIAS_PARA_VOLVER_A_AVISAR`, en
-`logica/mostrador.py`).
-
-## 🕘 Las fechas que quedaban con la hora del servidor
-
-La app guarda todo en UTC y muestra la hora de acá (ver «La hora de Argentina» más arriba), y el
-auditor ya controlaba las horas sueltas y los días. Pero no la fecha con hora entera: quince
-lugares la mostraban tal cual, **tres horas adelantada**, y lo cargado después de las 21 con el
-día de mañana:
-
-- la fecha de cada consulta de un cliente (y su historial), de una reserva de stock y de una
-  importación (en «Deshacer una importación»);
-- el historial de revisiones de un par, el registro de errores de las equivalencias, el
-  historial de medidas de un producto y el de precios;
-- la lista de usuarios («Creado»), la papelera, el historial de piezas de un auto, las últimas
-  ventas marcadas y lo vendido con un vínculo que después se rechazó;
-- el título de los presupuestos guardados en el portal del taller.
-
-Ahora pasan por `datetime(col, '-3 hours')` (o `fecha_legible()`), y **el auditor ya no deja
-entrar** un `substr(fecha, 1, 16)` sin convertir: encontró uno más que la revisión a mano no había
-visto. Probado con lo cargado a las 22:30 de acá: dice 22:30 de ese día, no 01:30 del siguiente.
-
-**Y cortadas a mano en Python** (`(fila["fecha"] or "")[:16]`), otras cinco: el **estado de cuenta
-de los talleres** (el de su portal y el de Administrar), la fecha en que se cambió cada pieza de un
-auto —que ve también el dueño en la página de su auto—, la de una equivalencia revisada (dos
-lugares) y la del mapeo de columnas recordado. Ahora pasan por `fecha_legible()` o por
-`dia_de_aca()` (`logica/base.py`), y el auditor marca una fecha guardada cortada a mano que no pase
-por ellas; las que vienen de afuera (el BCRA, los cheques rechazados) se marcan en el renglón con
-«# fecha de afuera».
 
 ## 🔎 Miles de cuentas: buscarlas, cargarlas de una vez, y que el ingreso no se cuelgue
 

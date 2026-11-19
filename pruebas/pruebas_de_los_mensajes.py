@@ -327,6 +327,28 @@ def probar():
                   "VALUES ('AB123CD', 'Juan', '11 5555-6666')")
         esperar("el que escribe por WhatsApp y ya tiene un auto anotado",
                 ns["lo_que_sabemos_del_numero"](dict(_juan)), [("🚗 Auto", "AB123CD (Juan)")])
+        # Si es una cuenta corriente con ese WhatsApp anotado: quién es y cuánto debe. Y el
+        # saldo y el acceso van a su número.
+        _cuenta_juan = ns["crear_mecanico"]("Taller De Juan")
+        ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "11 5555-6666")
+        c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, vence, anulado) "
+                  "VALUES (?, 'venta', 1000, date('now', '-40 days'), 0)", (_cuenta_juan,))
+        esperar("el chat sabe que es la cuenta, y cuánto debe",
+                ns["lo_que_sabemos_del_numero"](dict(_juan))[0],
+                ("💳 Cuenta", "Taller De Juan — debe $1.000 ($1.000 vencido)"))
+        esperar("el saldo y el acceso, al WhatsApp de la cuenta",
+                ns["link_de_whatsapp"](ns["telefono_de_la_cuenta"](_cuenta_juan), "x"),
+                "https://wa.me/5491155556666?text=x")
+        try:
+            _g["_nivel_de_quien_esta_adentro"] = lambda: "mecanico"
+            ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "11 0000-0000")
+            fallas.append("un taller pudo cambiar el teléfono de una cuenta")
+        except PermissionError:
+            pass
+        finally:
+            _g["_nivel_de_quien_esta_adentro"] = _adentro
+        ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "")
+        esperar("sin teléfono, ya no la reconoce", ns["cuenta_del_telefono"]("5491155556666"), None)
         esperar("las 24 horas", (ns["fuera_de_la_ventana"]({"ultimo_del_cliente_en": ns["_momento_utc"](None)}),
                                  ns["fuera_de_la_ventana"]({"ultimo_del_cliente_en": "2020-01-01 10:00:00"}),
                                  ns["fuera_de_la_ventana"]({})), (False, True, True))

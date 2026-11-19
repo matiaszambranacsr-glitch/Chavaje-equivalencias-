@@ -710,6 +710,13 @@ def lo_que_sabemos_del_numero(chat):
     if len(final) < 8:
         return []
     salida = []
+    # Si es una cuenta corriente: quién es y cuánto debe (ver telefono_de_la_cuenta()).
+    cuenta = cuenta_del_telefono(final)
+    if cuenta:
+        estado = estado_de_cuenta(cuenta[0])
+        salida.append(("💳 Cuenta", f"{cuenta[1]} — debe ${miles(estado['saldo'], 0)}"
+                                   + (f" (${miles(estado['vencido'], 0)} vencido)"
+                                      if estado["vencido"] else "")))
     for fila in c.execute("""SELECT patente, cliente_nombre, cliente_telefono FROM vehiculos
                              WHERE cliente_telefono IS NOT NULL AND cliente_telefono <> ''
                              ORDER BY id DESC LIMIT 5000""").fetchall():
