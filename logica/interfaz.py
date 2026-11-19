@@ -585,11 +585,14 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-19b"
+VERSION_DE_LO_NUEVO = "2026-11-19c"
 LO_NUEVO = (
     ("📲 «Cobrar lo vencido»: las cuentas que deben vencido, cada una con su WhatsApp ya escrito "
      "para recordárselo y «✅ Ya se lo recordé», para no escribirle dos veces al mismo.",
      "🗂️ Administrar → 💳 Cuentas corrientes"),
+    ("💳 Si escribe por 💬 Mensajes una cuenta que debe vencido, «💳 Recordarle lo vencido» "
+     "pone el recordatorio en la respuesta; mandado desde ahí queda anotado solo.",
+     "💬 Mensajes"),
     ("📞 Cada cuenta corriente puede tener su WhatsApp: el saldo y el acceso le llegan directo, "
      "y cuando escribe por 💬 Mensajes se ve qué cuenta es y cuánto debe.",
      "🗂️ Administrar → 💳 Cuentas corrientes"),

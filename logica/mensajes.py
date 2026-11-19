@@ -700,6 +700,30 @@ def fuera_de_la_ventana(chat, ahora=None):
     return (ahora or datetime.now()) - ultimo > VENTANA_PARA_CONTESTAR
 
 
+def recordatorio_del_chat(chat):
+    """(id de la cuenta, mensaje) si el que escribe por WhatsApp es una cuenta corriente con algo
+    vencido; si no, None. Cuando el taller que debe escribe para preguntar otra cosa, es el
+    mejor momento para recordárselo: el chat está abierto y la respuesta es gratis (ver
+    «📲 Cobrar lo vencido» en logica/mecanico.py)."""
+    if (chat or {}).get("canal") != "whatsapp":
+        return None
+    cuenta = cuenta_del_telefono(chat.get("externo"))
+    if not cuenta:
+        return None
+    estado = estado_de_cuenta(cuenta[0])
+    if (estado["vencido"] or 0) < 1:
+        return None
+    return cuenta[0], mensaje_de_lo_vencido(cuenta[1], estado["saldo"], estado["vencido"])
+
+
+def anotar_si_le_recordamos(chat, texto):
+    """Lo que se le mandó a una cuenta llevaba el recordatorio: queda anotado, como con
+    «✅ Ya se lo recordé» (no hace falta tocarlo después)."""
+    recordatorio = recordatorio_del_chat(chat)
+    if recordatorio and recordatorio[1] in str(texto or ""):
+        marcar_recordatorio(recordatorio[0])
+
+
 def lo_que_sabemos_del_numero(chat):
     """Si el que escribe por WhatsApp ya está en la app: los autos con ese teléfono y lo que
     pidió y está esperando. Se compara por los últimos 8 números (11 5555-6666, 5491155556666 y

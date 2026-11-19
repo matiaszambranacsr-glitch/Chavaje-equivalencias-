@@ -237,17 +237,36 @@ if pagina == PAGINAS[12]:
                     st.session_state[eleccion] = None
 
                 def _msj_enviar(chat_id, clave):
+                    _texto_enviado = st.session_state.get(clave)
                     try:
-                        ok, error = contestar_chat(chat_id, st.session_state.get(clave))
+                        ok, error = contestar_chat(chat_id, _texto_enviado)
                     except PermissionError as _err:
                         ok, error = False, el_error_en_castellano(_err)
                     if ok:
+                        anotar_si_le_recordamos(el_chat(chat_id), _texto_enviado)
                         st.session_state[clave] = ""
                         avisar("success", "📤 Enviado.")
                     else:
                         avisar("error", f"No se mandó: {error}")
 
-                if fuera_de_la_ventana(_chat_msj):
+                # LA CUENTA QUE DEBE VENCIDO y escribe: el recordatorio, a un toque, en la caja de
+                # la respuesta (o en la de WhatsApp, pasadas las 24 horas). Mandado desde acá
+                # queda anotado solo (ver anotar_si_le_recordamos()).
+                _recordatorio = recordatorio_del_chat(_chat_msj)
+                _fuera = fuera_de_la_ventana(_chat_msj)
+                if _recordatorio:
+                    def _msj_poner_recordatorio(clave, texto):
+                        _antes = str(st.session_state.get(clave) or "").rstrip()
+                        if texto not in _antes:
+                            st.session_state[clave] = f"{_antes}\n\n{texto}".strip()
+                    st.button("💳 Recordarle lo vencido", key=f"msj_recordar_{_abierto_msj}",
+                              on_click=_msj_poner_recordatorio,
+                              args=(f"msj_fuera_{_abierto_msj}" if _fuera else _clave_resp,
+                                    _recordatorio[1]),
+                              help="Pone en la respuesta el recordatorio de lo que debe "
+                                   "vencido, ya escrito. Mandado desde acá queda anotado en "
+                                   "💳 Cuentas corrientes → «📲 Cobrar lo vencido».")
+                if _fuera:
                     st.warning(f"⏰ {TEXTO_FUERA_DE_LA_VENTANA}")
                     if _chat_msj["canal"] == "whatsapp" and str(_chat_msj["externo"]).isdigit():
                         # Lo que le quiere decir va escrito: en WhatsApp, solo tocar enviar.

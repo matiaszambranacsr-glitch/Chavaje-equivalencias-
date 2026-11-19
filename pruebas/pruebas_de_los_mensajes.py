@@ -386,6 +386,17 @@ def probar():
         c.execute("UPDATE mecanicos SET recordado_en = datetime('now', '-8 days') WHERE id = ?",
                   (_debe_mas,))
         esperar("a la semana vuelve a tocar", _para_recordar()[0], ("Taller Que Debe Más", True, 8))
+        # En 💬 Mensajes: el chat de la que debe vencido trae su recordatorio; el de la que debe
+        # sin vencer, no; por Instagram tampoco (el «número» no es un teléfono).
+        ns["guardar_telefono_de_la_cuenta"](_al_dia, "11 4444-3333")
+        esperar("el chat de una cuenta que debe, pero sin vencer: sin recordatorio",
+                ns["recordatorio_del_chat"]({"canal": "whatsapp", "externo": "5491144443333"}), None)
+        esperar("el de la que debe vencido, con el suyo",
+                ns["recordatorio_del_chat"]({"canal": "whatsapp", "externo": "5491155556666"}),
+                (_cuenta_juan, ns["mensaje_de_lo_vencido"]("Taller De Juan", 1000, 1000)))
+        esperar("por Instagram, no", ns["recordatorio_del_chat"](
+            {"canal": "instagram", "externo": "5491155556666"}), None)
+        ns["guardar_telefono_de_la_cuenta"](_al_dia, "")
         for _nivel in ("mecanico", ""):
             try:
                 _g["_nivel_de_quien_esta_adentro"] = lambda _n=_nivel: _n
@@ -529,12 +540,37 @@ def probar():
                 [("https://graph.facebook.com/v26.0/NUM1/messages", "Lo tengo, ¿te lo separo?")])
         esperar("y la caja queda vacía para la próxima",
                 at.text_area(key=f"msj_respuesta_{_juan['id']}").value, "")
+        # LA CUENTA QUE DEBE Y ESCRIBE: «💳 Recordarle lo vencido» pone el recordatorio en la
+        # caja (sin borrar lo escrito, y una sola vez); mandado desde acá queda anotado solo.
+        ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "11 5555-6666")
+        c.execute("UPDATE mecanicos SET recordado_en = NULL WHERE id = ?", (_cuenta_juan,))
+        ns["conn"].commit()
+        at.session_state[f"msj_respuesta_{_juan['id']}"] = "Sí, lo tengo."
+        at.run()
+        _recordar = [b for b in at.button if b.key == f"msj_recordar_{_juan['id']}"]
+        cierto("el chat de una cuenta que debe vencido tiene «💳 Recordarle lo vencido»", _recordar)
+        if _recordar:
+            _recordar[0].click().run()
+            at.button(key=f"msj_recordar_{_juan['id']}").click().run()
+            _texto_rec = ns["mensaje_de_lo_vencido"]("Taller De Juan", 1000, 1000)
+            esperar("lo pone en la respuesta, después de lo escrito y una sola vez",
+                    at.text_area(key=f"msj_respuesta_{_juan['id']}").value,
+                    "Sí, lo tengo.\n\n" + _texto_rec)
+            meta.pedidos.clear()
+            [b for b in at.button if b.label == "📤 Enviar"][0].click().run()
+            esperar("se manda y queda anotado como recordado",
+                    (len(meta.pedidos), [x["recordado_hace"] for x in ns["cuentas_para_recordar"]()
+                                         if x["ID"] == _cuenta_juan]), (1, [0]))
+        ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "")
+        at.run()
+        cierto("si no es una cuenta, no está el botón",
+               not [b for b in at.button if b.key == f"msj_recordar_{_juan['id']}"])
         # Lo que mandó Ana, en la lista de Ana, dice «Vos:».
         del at.session_state["msj_chat_abierto"]
         at.run()
         _juan_lbl = [b.label for b in at.button if b.key == f"msj_chat_{_juan['id']}"]
         cierto("lo que mandó Ana, en su lista, dice «Vos:»",
-               _juan_lbl and "Vos: Lo tengo" in _juan_lbl[0], _juan_lbl)
+               _juan_lbl and "Vos: Sí, lo tengo" in _juan_lbl[0], _juan_lbl)
         at.button(key=f"msj_chat_{_juan['id']}").click().run()
         # DEL CHAT A LA COTIZACIÓN, Y DE VUELTA. «📋 Cotizar estos códigos» los suma a la lista
         # de WhatsApp (el que no está, se avisa) y lleva ahí.

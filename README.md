@@ -7756,6 +7756,14 @@ abrirlo, cada cuenta que debe vencido con:
 Primero las que toca recordar (🔴: nunca, o hace una semana o más), las que más deben primero;
 se muestran 30 de una vez. El asistente, en «¿qué está esperando?», dice a cuántas toca.
 
+**Y cuando la cuenta que debe escribe por 💬 Mensajes** (con su WhatsApp anotado), el chat
+tiene **«💳 Recordarle lo vencido»**: pone el recordatorio en la respuesta, después de lo que
+ya estaba escrito y una sola vez —«Sí, lo tengo. Hola Taller García! … ¿Cuándo podés pasar a
+regularizarlo?»—. Es el mejor momento: el chat está abierto y la respuesta es gratis. Mandado
+desde la página queda anotado solo, como con «✅ Ya se lo recordé» (`recordatorio_del_chat()`
+y `anotar_si_le_recordamos()`, en `logica/mensajes.py`). Pasadas las 24 horas, lo pone en
+la caja de «📱 Abrir este chat en WhatsApp» (ahí no se sabe si se mandó: se anota a mano).
+
 ## 📦 Avisarle al que esperaba algo que ahora hay
 
 En 📊 Estadísticas → 📌 Para pedir → 📞 Consultas de clientes, la lista de los que preguntaron
