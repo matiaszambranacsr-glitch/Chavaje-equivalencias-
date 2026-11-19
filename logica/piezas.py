@@ -582,7 +582,7 @@ def _etiquetas_de_medidas():
 def historial_de_medidas(producto_id, tope=50):
     """Los cambios de medidas de un producto, del más nuevo al más viejo: a mano y los que
     escribió el lector de descripciones."""
-    c.execute("""SELECT substr(datetime(fecha, '-3 hours'), 1, 16) AS fecha, campo, antes, despues, usuario, motivo
+    c.execute("""SELECT substr(fecha, 1, 16) AS fecha, campo, antes, despues, usuario, motivo
                  FROM historial_de_medidas WHERE producto_id = ?
                  ORDER BY fecha DESC, id DESC LIMIT ?""", (producto_id, tope))
     etiquetas = _etiquetas_de_medidas()

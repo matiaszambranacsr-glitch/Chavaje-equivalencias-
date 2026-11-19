@@ -1402,8 +1402,7 @@ def listar_usuarios():
     c.execute("""SELECT id AS "ID", nombre AS "Nombre", rol AS "Rol",
                  CASE WHEN COALESCE(solo_deposito, 0) = 1 THEN '📦 Sí' ELSE '' END
                      AS "Del depósito",
-                 CASE WHEN activo=1 THEN 'Sí' ELSE 'No' END AS "Activo",
-                 substr(datetime(creado_en, '-3 hours'), 1, 16) AS "Creado"
+                 CASE WHEN activo=1 THEN 'Sí' ELSE 'No' END AS "Activo", creado_en AS "Creado"
                  FROM usuarios ORDER BY nombre""")
     return filas_a_listas(c)
 

@@ -736,35 +736,43 @@ def probar(L):
     _prod_ll = c.lastrowid
     ns["anotar_consulta_cliente"]("Ruiz", "11 5555-1234", producto_id=_prod_ll, codigo="LL100",
                                   descripcion="FILTRO")
-    # La fecha de la consulta, en la hora de acá: guardada en UTC, la de las 22:30 de acá es la
-    # 01:30 del día siguiente, y así se mostraba.
+    # LAS FECHAS, COMO SE VEN EN LA PANTALLA (no como las devuelve la función). Todo lo cargado a
+    # las 22:30 de acá (01:30 UTC del día siguiente) tiene que verse 22:30 de ese día. En
+    # noviembre de 2026 se «arreglaron» quince consultas convirtiéndolas en el SQL, y como la tabla
+    # ya las convierte, en pantalla quedaban seis horas atrás: estas pruebas miraban la función y
+    # no lo vieron. Ahora pasan por filas_legibles(), lo mismo que hace st.dataframe.
+    _en_pantalla = lambda filas, col: [x[col] for x in ns["filas_legibles"](filas)]
     c.execute("UPDATE consultas_cliente SET fecha = '2026-11-18 01:30:00' WHERE codigo_buscado = 'LL100'")
-    esperar("la fecha de la consulta, en la hora de acá (no la del servidor)",
-            [x["Cuándo"] for x in ns["consultas_de_clientes"]() if x["Pidió"] == "LL100"],
-            ["2026-11-17 22:30"])
+    esperar("la fecha de la consulta, en pantalla, en la hora de acá (una sola vez)",
+            _en_pantalla([x for x in ns["consultas_de_clientes"]() if x["Pidió"] == "LL100"],
+                         "Cuándo"), ["17/11/2026 22:30"])
     c.execute("UPDATE consultas_cliente SET fecha = datetime('now') WHERE codigo_buscado = 'LL100'")
-    # Lo mismo el historial de precios de un producto y el de piezas de un auto: lo cargado a las
-    # 22:30 de acá (01:30 UTC del día siguiente) se mostraba con la hora y el día del servidor.
     c.execute("INSERT INTO historial_precios (producto_id, precio, fecha) "
               "VALUES (?, 999, '2026-11-18 01:30:00')", (_prod_ll,))
     c.execute("INSERT INTO vehiculos (patente) VALUES ('AH 300 NN')")
     _auto_noche = c.lastrowid
     c.execute("INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, fecha_instalacion) "
               "VALUES (?, 'Filtro de noche', '2026-11-18 01:30:00')", (_auto_noche,))
-    esperar("el historial de precios y el de piezas, en la hora de acá",
-            ([x["Fecha"] for x in ns["historial_precio_producto"](_prod_ll)],
-             [x["Fecha"] for x in ns["listar_historial_vehiculo"](_auto_noche)]),
-            (["2026-11-17 22:30"], ["2026-11-17"]))
-    # Y el estado de cuenta de un taller (el de su portal y el de Administrar).
+    esperar("el historial de precios y el de piezas, en pantalla, en la hora de acá",
+            (_en_pantalla(ns["historial_precio_producto"](_prod_ll), "Fecha"),
+             _en_pantalla(ns["listar_historial_vehiculo"](_auto_noche), "Fecha")),
+            (["17/11/2026 22:30"], ["17/11/2026 22:30"]))
+    # El estado de cuenta de un taller: en la tabla, y en el elegible de «anular un movimiento»
+    # de Administrar, que es un texto y no pasa por la tabla.
     _cuenta_noche = ns["crear_mecanico"]("Taller De Noche")
     c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, fecha, concepto, importe, anulado) "
               "VALUES (?, '2026-11-18 01:30:00', 'venta de noche', 100, 0)", (_cuenta_noche,))
-    esperar("el estado de cuenta, en la hora de acá",
-            [m["Fecha"] for m in ns["movimientos_de_cuenta"](_cuenta_noche)], ["17/11/2026 22:30"])
-    esperar("cuándo se cambió cada pieza (lo ve el dueño del auto), el día de acá",
-            [p["Cuándo"] for p in ns["estado_de_cada_pieza"](dict(c.execute(
-                "SELECT * FROM vehiculos WHERE id = ?", (_auto_noche,)).fetchone()))],
-            ["2026-11-17"])
+    _movs_noche = ns["movimientos_de_cuenta"](_cuenta_noche)
+    esperar("el estado de cuenta, en la tabla y en el texto, en la hora de acá",
+            (_en_pantalla(_movs_noche, "Fecha"), [m["Fecha"] for m in _movs_noche]),
+            (["17/11/2026 22:30"], ["17/11/2026 22:30"]))
+    # El día de cada pieza (lo ve también el dueño del auto): una fecha sola no la corre la
+    # tabla, así que tiene que salir ya con el día de acá.
+    _piezas_noche = ns["estado_de_cada_pieza"](dict(c.execute(
+        "SELECT * FROM vehiculos WHERE id = ?", (_auto_noche,)).fetchone()))
+    esperar("cuándo se cambió cada pieza: el día de acá, también en pantalla",
+            ([p["Cuándo"] for p in _piezas_noche], _en_pantalla(_piezas_noche, "Cuándo")),
+            (["2026-11-17"], ["17/11/2026"]))
     c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_prod_ll,))
     c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_auto_noche,))
     c.execute("DELETE FROM vehiculos WHERE id = ?", (_auto_noche,))

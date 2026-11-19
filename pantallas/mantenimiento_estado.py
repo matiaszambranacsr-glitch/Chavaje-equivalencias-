@@ -205,7 +205,8 @@ if pagina == PAGINAS[3]:
                 # el rótulo, el selector volvía a la primera, y «Deshacer» iba contra otra lista
                 # (lo mismo que pasaba en «Lista a revisar»).
                 etiquetas_imp = {
-                    i["_lote"]: (f"{i['Marca']} · {i['Archivo']} · {i['Fecha']} "
+                    # La fecha, en la hora de acá: en un texto no la pasa la tabla.
+                    i["_lote"]: (f"{i['Marca']} · {i['Archivo']} · {fecha_legible(i['Fecha'])} "
                                  f"({i['Vínculos vivos']} vivos, {i['Sin revisar']} sin revisar)")
                     for i in importaciones if (i["Vínculos vivos"] or i["Sin revisar"])
                 }
@@ -391,7 +392,8 @@ if pagina == PAGINAS[3]:
                     icono = iconos_tipo.get(item["Tipo"], "🗑️")
                     colp1.write(
                         f"{icono} {item['Tipo'].capitalize()}: **{item['Detalle']}** — "
-                        f"eliminado por {item['Eliminado por'] or 'alguien'} el {item['Fecha']}"
+                        f"eliminado por {item['Eliminado por'] or 'alguien'} el "
+                        f"{fecha_legible(item['Fecha'])}"
                     )
                     colp2.button("↩️ Restaurar", key=f"restaurar_papelera_{item['ID']}",
                                   on_click=cb_restaurar_papelera, args=(item["ID"],))

@@ -7735,6 +7735,46 @@ cambiado— y **«✅ Ya le avisé»**: queda la fecha en la lista y sale del av
 campanita); si a los 3 días no vino, vuelve a aparecer (`DIAS_PARA_VOLVER_A_AVISAR`, en
 `logica/mostrador.py`).
 
+## 🕘 Las fechas en la hora de acá: las de los textos, y una corrección de más que se deshizo
+
+La app guarda todo en UTC y muestra la hora de acá. **Las tablas lo hacen solas**: `st.dataframe`
+pasa por `filas_legibles()` toda fecha «2026-11-18 01:30» que recibe (ver «LAS TABLAS, COMO SE
+LEEN ACÁ» en `logica/negocio.py`). Lo que quedaba con la hora del servidor eran las fechas
+**fuera de una tabla**, y los **días** cortados a mano, que la tabla no corre:
+
+- el título de los presupuestos guardados en el portal del taller, la papelera («eliminado el…»),
+  la etiqueta para elegir qué importación deshacer, el elegible de «anular un movimiento» de una
+  cuenta corriente, el historial de una equivalencia cuando se copia como texto, la fecha del
+  mapeo de columnas recordado;
+- el día en que se cambió cada pieza de un auto (lo ve también el dueño en la página de su auto)
+  y el de una equivalencia aprobada (dos lugares): `(fecha)[:10]` es el día UTC, y lo cargado
+  después de las 21 decía el día siguiente. Ahora pasan por `dia_de_aca()` (`logica/base.py`).
+
+**Una corrección de más, deshecha.** En la primera vuelta se «arreglaron» además quince consultas
+convirtiendo la fecha en el SQL (`substr(datetime(col, '-3 hours'), 1, 16)`). Como la tabla ya la
+convierte, en pantalla esas quedaron **seis horas atrás**. Las pruebas miraban lo que devuelve la
+función y no lo que se ve, así que no lo detectaron; se encontró al día siguiente leyendo el código.
+Se volvió todo a la fecha guardada, y ahora:
+
+- las pruebas de las fechas (`pruebas_de_los_cambios.py`, 9h) miran **lo que sale en pantalla**,
+  pasando por `filas_legibles()` como la tabla: con la doble conversión, la consulta de las 22:30
+  dice 19:30 y la prueba falla;
+- el auditor marca una fecha con hora convertida en la consulta (la tabla la vuelve a correr), y
+  un día cortado a mano (`[:10]`) que no pase por `dia_de_aca()`; las fechas que vienen de afuera
+  (BCRA, cheques rechazados) se marcan con «# fecha de afuera».
+
+## 📦 Avisarle al que esperaba algo que ahora hay
+
+En 📊 Estadísticas → 📌 Para pedir → 📞 Consultas de clientes, la lista de los que preguntaron
+por algo que no había y ahora sí decía «es una venta a un llamado de distancia», pero no había
+cómo escribirles ni cómo anotar que ya se les escribió: dos empleados le avisaban, o ninguno.
+Ahora cada uno tiene **«📲 Avisarle»**, que abre WhatsApp a su número (con el 54 9: ver más
+arriba) con el mensaje escrito —«ya llegó LL100, que nos habías consultado. ¿Te lo guardamos?»,
+sin precio, porque el de la lista puede estar en otra escala y el que se le dijo puede haber
+cambiado— y **«✅ Ya le avisé»**: queda la fecha en la lista y sale del aviso del día (la
+campanita); si a los 3 días no vino, vuelve a aparecer (`DIAS_PARA_VOLVER_A_AVISAR`, en
+`logica/mostrador.py`).
+
 ## 🕘 Las fechas que quedaban con la hora del servidor
 
 La app guarda todo en UTC y muestra la hora de acá (ver «La hora de Argentina» más arriba), y el

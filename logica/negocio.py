@@ -998,10 +998,8 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
 
 
 def historial_precio_producto(producto_id, limite=50):
-    # La fecha, en la hora de acá: se guarda en UTC (ver «LA HORA DE ACÁ» en logica/base.py).
-    c.execute("""SELECT precio AS "Precio", substr(datetime(fecha, '-3 hours'), 1, 16) AS "Fecha"
-                 FROM historial_precios hp
-                 WHERE producto_id = ? ORDER BY hp.fecha DESC LIMIT ?""", (producto_id, limite))
+    c.execute("""SELECT precio AS "Precio", fecha AS "Fecha" FROM historial_precios
+                 WHERE producto_id = ? ORDER BY fecha DESC LIMIT ?""", (producto_id, limite))
     return filas_a_listas(c)
 
 
@@ -2555,8 +2553,7 @@ def listar_papelera():
     # Las filas viejas, de antes de que existiera la columna, se resuelven abriendo el JSON de
     # a una y solo esas.
     c.execute("""SELECT id AS "ID", tipo AS "Tipo", resumen, eliminado_por AS "Eliminado por",
-                 substr(datetime(eliminado_en, '-3 hours'), 1, 16) AS "Fecha"
-                 FROM papelera ORDER BY id DESC LIMIT 100""")
+                 eliminado_en AS "Fecha" FROM papelera ORDER BY id DESC LIMIT 100""")
     filas = []
     for row in c.fetchall():
         detalle = row["resumen"] or ""

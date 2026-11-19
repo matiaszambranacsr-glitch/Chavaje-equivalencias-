@@ -1558,8 +1558,8 @@ def movimientos_de_cuenta(mecanico_id, limite=None):
         if not f["anulado"]:
             saldo += f["importe"]
         filas.append({
-            # En la hora de acá: se guarda en UTC, y el estado de cuenta (el del taller en su
-            # portal y el de Administrar) mostraba la hora del servidor, tres horas adelantada.
+            # Ya en la hora de acá (se guarda en UTC). La tabla la pasaba sola, pero el elegible
+            # de «anular un movimiento» en Administrar la mostraba con la hora del servidor.
             "ID": f["id"], "Fecha": fecha_legible((f["fecha"] or "")[:16]),
             "Concepto": (f["concepto"] or "") + (" (ANULADO)" if f["anulado"] else ""),
             "Debe": f["importe"] if f["importe"] > 0 else None,

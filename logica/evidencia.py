@@ -1186,13 +1186,15 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
         (min(p["_a"], p["_b"]), max(p["_a"], p["_b"])) for p in pasos}
     _historial = []
     for _x, _y in sorted(_pares):
-        c.execute("""SELECT id, decision, motivo, revisado_por, substr(datetime(fecha, '-3 hours'), 1, 16) AS fecha,
+        c.execute("""SELECT id, decision, motivo, revisado_por, substr(fecha, 1, 16) AS fecha,
                             confianza, lote, version_reglas, como
                      FROM historial_de_revisiones
                      WHERE producto_a_id = ? AND producto_b_id = ?""", (_x, _y))
         for r in c.fetchall():
+            # Se ordena por la guardada; se muestra en la hora de acá (también va a un texto,
+            # el de la ficha para copiar, que no pasa por la tabla).
             _historial.append(((r["fecha"] or "", r["id"]), {
-                "Fecha": r["fecha"] or "",
+                "Fecha": fecha_legible(r["fecha"] or ""),
                 "Par": "A ↔ B" if {_x, _y} == {id_a, id_b} else f"paso {_x} ↔ {_y}",
                 "Decisión": ("✅ aprobada" if r["decision"] == "ok" else "🚫 rechazada"
                              if r["decision"] == "rechazada" else r["decision"])

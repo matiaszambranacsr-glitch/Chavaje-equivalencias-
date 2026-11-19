@@ -956,7 +956,7 @@ def ventas_contra_la_recomendacion(dias=90):
         salida["contra_y_devueltas"] += volvio
         if len(salida["ejemplos"]) < 20:
             salida["ejemplos"].append({
-                "Fecha": fecha_legible((r["fecha"] or "")[:16]), "Quién": r["usuario"] or "",
+                "Fecha": (r["fecha"] or "")[:16], "Quién": r["usuario"] or "",
                 "Pidieron": r["pedido"] or "", "Se llevó": f"{r['marca']} {r['vendido']}",
                 "La app recomendaba": evidencia.split(VENDIDA_OTRA_QUE_LA_RECOMENDADA, 1)[1]
                                       .split(" · ")[0],
@@ -999,7 +999,7 @@ def registro_de_errores(tope=50):
         motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
         c.execute(f"""-- FILA Y NO PAR: una fila por devolución; las subconsultas traen UN valor
                       -- (LIMIT 1), así que un vínculo anotado de ida y de vuelta no cuenta doble.
-                      SELECT substr(datetime(d.fecha, '-3 hours'), 1, 16) AS fecha, d.motivo, d.detalle,
+                      SELECT substr(d.fecha, 1, 16) AS fecha, d.motivo, d.detalle,
                              d.codigo_pedido_clean AS pedido, p.id AS vendido_id,
                              p.codigo_raw AS vendido, m.nombre AS marca,
                              (SELECT e.lote FROM equivalencias e JOIN productos q
@@ -1034,7 +1034,7 @@ def registro_de_errores(tope=50):
         anotar_error("registro_de_errores", _err)
     # Lo aprobado y después rechazado, del historial.
     c.execute("""SELECT h.producto_a_id AS a, h.producto_b_id AS b, h.decision, h.motivo,
-                        substr(datetime(h.fecha, '-3 hours'), 1, 16) AS fecha, h.lote, h.por_que
+                        substr(h.fecha, 1, 16) AS fecha, h.lote, h.por_que
                  FROM historial_de_revisiones h ORDER BY h.producto_a_id, h.producto_b_id,
                                                           h.fecha, h.id""")
     previa = {}
@@ -2069,10 +2069,9 @@ def vendido_con_lo_que_despues_se_rechazo(limite=200):
     se invalida, identificar las ventas potencialmente afectadas»). En la base real del 25/9 no
     hay ventas anotadas todavía: es para cuando se usen."""
     try:
-        c.execute("""SELECT substr(datetime(v.fecha, '-3 hours'), 1, 16) AS "Vendido el", m.nombre || ' ' || p.codigo_raw AS "Se llevó",
+        c.execute("""SELECT v.fecha AS "Vendido el", m.nombre || ' ' || p.codigo_raw AS "Se llevó",
                             COALESCE(NULLIF(v.termino_pedido, ''), v.codigo_pedido_clean) AS "Pidió",
-                            COALESCE(v.usuario, '') AS "Vendió",
-                            substr(datetime(r.fecha, '-3 hours'), 1, 16) AS "Rechazada el",
+                            COALESCE(v.usuario, '') AS "Vendió", r.fecha AS "Rechazada el",
                             COALESCE(r.motivo, '') AS "_motivo"
                      FROM ventas_registradas v
                      JOIN productos p ON p.id = v.producto_id

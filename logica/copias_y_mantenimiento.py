@@ -974,10 +974,8 @@ APROBADOS_POR_MINUTO_EN_BLOQUE = 200
 def pares_aprobados_sin_mirarlos():
     """Los pares (a, b), a < b, cuya última decisión es «aprobada» y se tomó en bloque: en un
     minuto en que la misma persona aprobó APROBADOS_POR_MINUTO_EN_BLOQUE o más."""
-    # El minuto en la hora de acá: para agrupar da lo mismo, y así no queda ninguna fecha
-    # guardada sin pasar (ver «La hora de acá» en auditar.py).
     c.execute("""SELECT producto_a_id AS a, producto_b_id AS b, revisado_por AS quien,
-                        SUBSTR(datetime(fecha, '-3 hours'), 1, 16) AS minuto
+                        SUBSTR(fecha, 1, 16) AS minuto
                  FROM equivalencias_revisadas
                  WHERE decision = 'ok' AND producto_a_id < producto_b_id""")
     filas = c.fetchall()

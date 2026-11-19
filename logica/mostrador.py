@@ -249,7 +249,7 @@ def consultas_de_clientes(estado="activa", limite=-1):     # -1: todas (SQLite)
                             cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
                             cc.cantidad AS "Cant.", cc.precio_dicho AS "Precio dicho",
                             cc.nota AS "Nota", cc.atendio AS "Atendió",
-                            substr(datetime(cc.fecha, '-3 hours'), 1, 16) AS "Cuándo",
+                            substr(cc.fecha, 1, 16) AS "Cuándo",
                             CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días",
                             p.stock AS "Stock hoy", p.precio AS "Precio hoy"
                      FROM consultas_cliente cc
@@ -288,7 +288,7 @@ def historial_de_un_cliente(texto):
         c.execute(f"""SELECT cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
                             cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
                             cc.cantidad AS "Cant.", cc.precio_dicho AS "Le dijimos",
-                            cc.estado AS "Qué pasó", substr(datetime(cc.fecha, '-3 hours'), 1, 16) AS "Cuándo",
+                            cc.estado AS "Qué pasó", substr(cc.fecha, 1, 16) AS "Cuándo",
                             p.precio AS "Precio hoy", p.stock AS "Stock hoy"
                      FROM consultas_cliente cc
                      LEFT JOIN productos p ON p.id = cc.producto_id
@@ -466,7 +466,7 @@ def reservas_activas(limite=-1):
         c.execute("""SELECT r.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción", r.cantidad AS "Apartadas",
                             p.stock AS "Stock total", r.cliente AS "Cliente",
-                            r.reservado_por AS "Quién", substr(datetime(r.fecha, '-3 hours'), 1, 16) AS "Desde",
+                            r.reservado_por AS "Quién", substr(r.fecha, 1, 16) AS "Desde",
                             CAST(julianday('now') - julianday(r.fecha) AS INTEGER) AS "Días"
                      FROM reservas_stock r
                      JOIN productos p ON p.id = r.producto_id

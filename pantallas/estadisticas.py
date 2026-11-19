@@ -2831,8 +2831,7 @@ a traer solas desde Administrar → Mantenimiento.
 
         st.markdown("---")
         st.markdown("**🛒 Últimas ventas marcadas**")
-        c.execute("""SELECT substr(datetime(v.fecha, '-3 hours'), 1, 16) AS "Fecha",
-                            v.termino_pedido AS "Pidieron",
+        c.execute("""SELECT v.fecha AS "Fecha", v.termino_pedido AS "Pidieron",
                             p.codigo_raw AS "Se llevaron", m.nombre AS "Marca", v.usuario AS "Empleado"
                      FROM ventas_registradas v
                      JOIN productos p ON p.id = v.producto_id

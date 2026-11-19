@@ -491,7 +491,7 @@ def listar_historial_vehiculo(vehiculo_id):
     c.execute("""SELECT id AS "ID", descripcion_pieza AS "Pieza", marca_pieza AS "Marca",
                  codigo_pieza AS "Código", km_instalacion AS "Km instalación",
                  vida_util_km AS "Vida útil (km)", vida_util_meses AS "Cada (meses)",
-                 date(fecha_instalacion, '-3 hours') AS "Fecha", nota AS "Nota"
+                 fecha_instalacion AS "Fecha", nota AS "Nota"
                  FROM historial_piezas WHERE vehiculo_id = ? ORDER BY fecha_instalacion DESC""", (vehiculo_id,))
     return filas_a_listas(c)
 

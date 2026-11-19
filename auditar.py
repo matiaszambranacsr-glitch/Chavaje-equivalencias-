@@ -2603,21 +2603,25 @@ _DIA_UTC_DE_UNA_COLUMNA = re.compile(
     r"\b(?:date\(\s*|substr\(\s*)(?:\w+\.)?(?:fecha\w*|\w+_en|cuando|momento)\s*"
     r"(?:\)|,\s*1\s*,\s*10\s*\))", re.I)
 _DIA_UTC = re.compile(r"date\(\s*'now'\s*,\s*'localtime'\s*\)", re.I)
-# Y la fecha con la hora entera, substr(fecha, 1, 16): ocho pantallas la mostraban así —la consulta
-# de un cliente, una reserva, una importación, el historial de revisiones y de medidas—, tres
-# horas adelantada, y lo cargado después de las 21 con el día de mañana. Lo encontró una revisión
-# a mano en noviembre de 2026; esto no deja que vuelva.
-_FECHA_Y_HORA_SIN_CONVERTIR = re.compile(
-    r"\bsubstr\(\s*(?:\w+\.)?(?:fecha\w*|\w+_en|cuando|momento)\s*,\s*1\s*,\s*1[69]\s*\)", re.I)
+# Y LA FECHA CON HORA, CONVERTIDA DOS VECES. Las tablas (st.dataframe) ya pasan a la hora de acá
+# toda fecha «2026-11-18 01:30» que reciben (ver «LAS TABLAS, COMO SE LEEN ACÁ» en
+# logica/negocio.py). Convertida además en la consulta —substr(datetime(col, '-3 hours'), 1, 16)—
+# la tabla la corre otra vez: seis horas atrás. Pasó en noviembre de 2026 con quince consultas
+# «arregladas» de más (las pruebas miraban la función, no la pantalla). En una consulta la fecha
+# con hora va como está guardada; para un texto, fecha_legible() donde se muestra.
+_FECHA_CONVERTIDA_PARA_LA_TABLA = re.compile(
+    r"\bsubstr\(\s*datetime\(\s*[\w.]+\s*,\s*'-3 hours'\s*\)\s*,\s*1\s*,\s*1[69]\s*\)"
+    r"|\bdatetime\(\s*[\w.]+\s*,\s*'-3 hours'\s*\)\s+AS\b", re.I)
 _MODIFICADOR_DE_ACA = re.compile(r"'(-?\d+) hours'")
 for _n in ast.walk(ARBOL):
     if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
         if _HORA_SIN_CONVERTIR.search(_n.value):
             reportar("ERROR", _n.lineno, "una hora de la base sin pasar a la de acá: "
                                          "substr(datetime(col, '-3 hours'), 12, 5)")
-        if _FECHA_Y_HORA_SIN_CONVERTIR.search(_n.value):
-            reportar("ERROR", _n.lineno, "una fecha y hora de la base sin pasar a la de acá: "
-                                         "substr(datetime(col, '-3 hours'), 1, 16)")
+        if _FECHA_CONVERTIDA_PARA_LA_TABLA.search(_n.value):
+            reportar("ERROR", _n.lineno, "fecha y hora pasada a la de acá en la consulta: la tabla "
+                                         "la vuelve a correr (6 horas). Dejala como está "
+                                         "guardada; para un texto, fecha_legible()")
         if _DIA_UTC.search(_n.value):
             reportar("ERROR", _n.lineno, "date('now', 'localtime') es el día UTC: el de acá es "
                                          "date('now', '-3 hours'); una marca interna, date('now')")
@@ -2631,12 +2635,13 @@ for _n in ast.walk(ARBOL):
     # (las funciones de abajo ya la pasan a la de acá, o leen la fecha como es)
     _YA_EN_LA_HORA_DE_ACA = ("fecha_legible", "a_la_hora_de_aca", "hora_corta_aca", "strptime",
                              "_fecha_de", "dia_de_aca")
-    # Lo mismo cortado a mano en Python: (fila["fecha"] or "")[:16] mostraba el estado de cuenta
-    # de los talleres con la hora del servidor. Una fecha guardada cortada a 10, 16 o 19 letras
-    # tiene que pasar por fecha_legible(), a_la_hora_de_aca(), hora_corta_aca() o strptime.
+    # EL DÍA DE UNA FECHA GUARDADA, CORTADO A MANO EN PYTHON: (fila["fecha"] or "")[:10] es el día
+    # UTC, y una fecha sola no la corre nadie (ni la tabla): lo cambiado en un auto después de las
+    # 21 decía el día siguiente, también en la página del dueño. Va por dia_de_aca() (o
+    # fecha_legible() para mostrarla entera). Las que vienen de afuera, «# fecha de afuera».
     if (isinstance(_n, ast.Subscript) and isinstance(_n.slice, ast.Slice)
             and _n.slice.lower is None and isinstance(_n.slice.upper, ast.Constant)
-            and _n.slice.upper.value in (10, 16, 19)
+            and _n.slice.upper.value == 10
             and any(isinstance(_k, ast.Constant) and isinstance(_k.value, str)
                     and re.fullmatch(r"fecha\w*|\w+_en|cuando|momento", _k.value)
                     for _k in ast.walk(_n.value))
@@ -2647,8 +2652,8 @@ for _n in ast.walk(ARBOL):
             # Una fecha que viene de afuera (el BCRA, los cheques rechazados) ya es un día: se
             # marca en el renglón con «# fecha de afuera».
             and "fecha de afuera" not in SRC.splitlines()[_n.lineno - 1]):
-        reportar("REVISAR", _n.lineno, "una fecha guardada cortada a mano: si es para mostrar, "
-                                       "fecha_legible(); si es para decidir el día, la de acá")
+        reportar("REVISAR", _n.lineno, "el día de una fecha guardada cortado a mano es el día "
+                                       "UTC: dia_de_aca() (o fecha_legible())")
     if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) == "today"
             and getattr(_n.func.value, "id", None) == "date"):
         reportar("ERROR", _n.lineno, "date.today() es el día UTC: usar hoy_aca()")
