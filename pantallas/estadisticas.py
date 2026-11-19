@@ -1293,11 +1293,18 @@ a traer solas desde Administrar → Mantenimiento.
             # entero, con la cantidad adentro: cada decisión la cambiaba, Streamlit no encontraba
             # lo elegido entre las opciones y volvía a la primera lista. Con las 10 listas de la
             # base real, aprobar un par en «⚡ Revisar de a uno» te mandaba a otra lista.
+            #
+            # Y LA CANTIDAD, AFUERA DEL RÓTULO. Con el nombre como valor no alcanzaba: en el
+            # navegador, si el rótulo de lo elegido cambia, el toque siguiente vuelve el
+            # selector a la primera opción (Streamlit 1.65; la prueba sin navegador no lo ve,
+            # se encontró con la barra de arriba, ver cuenta_en_la_barra()). Seguía pasando.
             opciones_lotes = {l["lote"]: l for l in lotes_pendientes}
             _lote_elegido = st.selectbox(
-                "Lista a revisar:", list(opciones_lotes), key="lote_en_revision",
-                format_func=lambda x: f"{x} — {opciones_lotes[x]['cantidad']} vínculo(s)")
+                "Lista a revisar:", list(opciones_lotes), key="lote_en_revision")
             lote_info = opciones_lotes[_lote_elegido]
+            st.caption(f"{miles(lote_info['cantidad'])} vínculo(s) por revisar en esta lista "
+                       f"(hay {miles(len(opciones_lotes))} lista(s) con pendientes, las que más "
+                       "tienen primero).")
             # Una tanda automática que trajo demasiado de una vez: ver anomalia_de_la_tanda().
             _anomalia = anomalia_de_la_tanda(lote_info["lote"])
             if _anomalia:
@@ -1855,14 +1862,16 @@ a traer solas desde Administrar → Mantenimiento.
                     _clave_sel_g = f"grupo_muestra_{_lote_m}"
                     if st.session_state.get(_clave_sel_g) not in _por_grupo:
                         st.session_state.pop(_clave_sel_g, None)
+                    # Y la cantidad, afuera del rótulo: si el rótulo cambia, en el navegador el
+                    # toque siguiente vuelve a la primera opción (ver «Lista a revisar», arriba).
                     _elegido_g = st.selectbox(
                         "Grupo:", list(_por_grupo), key=_clave_sel_g,
                         format_func=lambda g: (f"{g[0]} ↔ {g[1]}"
                                                + {"alta": " · confianza alta",
-                                                  "media": " · confianza media"}.get(g[2], "")
-                                               + f" — {miles(len(_por_grupo[g]))} limpias"))
+                                                  "media": " · confianza media"}.get(g[2], "")))
                     _ma_g, _mb_g, _fr_g = _elegido_g
                     _filas_g = _por_grupo[_elegido_g]
+                    st.caption(f"{miles(len(_filas_g))} limpias en este grupo.")
                     _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g, _fr_g)
                     if _fr_g:
                         st.caption(
@@ -2083,11 +2092,12 @@ a traer solas desde Administrar → Mantenimiento.
                     _clave_sel_mot = f"motivo_elegido_{_lote_m}"
                     if st.session_state.get(_clave_sel_mot) not in _por_motivo_g:
                         st.session_state.pop(_clave_sel_mot, None)
+                    # La cantidad, afuera del rótulo (ver «Lista a revisar», arriba).
                     _motivo_g = st.selectbox(
                         "Motivo:", list(_por_motivo_g), key=_clave_sel_mot,
-                        format_func=lambda m: f"{m} — {miles(len(_por_motivo_g[m][1]))} "
-                                              f"({_etiqueta_rec[_por_motivo_g[m][0]]})")
+                        format_func=lambda m: f"{m} ({_etiqueta_rec[_por_motivo_g[m][0]]})")
                     _rec_g, _filas_mot = _por_motivo_g[_motivo_g]
+                    st.caption(f"{miles(len(_filas_mot))} con este motivo.")
                     if _rec_g == "descartar":
                         import random as _random
                         _ejemplos = _random.Random(_motivo_g).sample(_filas_mot, min(8, len(_filas_mot)))

@@ -2245,6 +2245,7 @@ if pagina == PAGINAS[0]:
                         st.session_state.pop("filtro_rubro_texto", None)
                     _rubro_txt = st.selectbox(
                         "Rubro:", _opciones_rub, key="filtro_rubro_texto",
+                        # rótulo fijo: cambia con otra búsqueda, y entonces volver a «Todos» es lo esperable
                         format_func=lambda r: (f"Todos ({len(res_texto)})" if r == "Todos"
                                                else f"{r} ({_rubros_txt[r]})"))
                     if _rubro_txt != "Todos":
@@ -2259,6 +2260,7 @@ if pagina == PAGINAS[0]:
                         st.session_state.pop("filtro_marca_texto", None)
                     _marca_txt = st.selectbox(
                         "Marca:", _opciones_mt, key="filtro_marca_texto",
+                        # rótulo fijo: cambia con otra búsqueda u otro rubro; volver a «Todas» es lo esperable
                         format_func=lambda m: (f"Todas ({len(_res_vista)})" if m == "Todas"
                                                else f"{m} ({_marcas_txt[m]})"))
                     if _marca_txt != "Todas":

@@ -121,7 +121,8 @@ if pagina == PAGINAS[10]:
                 _por_id = {v["id"]: v for v in _encontradas}
                 _vsel = st.selectbox(
                     "Venta:", list(_por_id), key="venta_dev_sel",
-                    format_func=lambda i: (f"#{i} — {fecha_legible(_por_id[i]['fecha'][:16])[:16]}"
+                    format_func=lambda i: (  # rótulo fijo: fecha, cliente y total de la venta
+                                           f"#{i} — {fecha_legible(_por_id[i]['fecha'][:16])[:16]}"
                                            f" — {_por_id[i]['cliente'] or _por_id[i]['patente'] or 'sin nombre'}"
                                            f" — ${miles(_por_id[i]['total'] or 0, 0)}"))
                 _v = _por_id[_vsel]
@@ -137,11 +138,16 @@ if pagina == PAGINAS[10]:
                 else:
                     with st.form("form_devolver"):
                         _d1, _d2 = cols([3, 1])
+                        # Lo que ya volvió está en la tabla de arriba, no en el rótulo: «(quedan
+                        # 2)» cambiaba con cada devolución, y en el navegador un rótulo que cambia
+                        # vuelve el selector a la primera opción en el toque siguiente (ver
+                        # cuenta_en_la_barra()).
                         _it_dev = _d1.selectbox(
                             "Qué vuelve:", list(_devolvibles),
-                            format_func=lambda i: (f"{_devolvibles[i]['marca']} "
-                                                   f"{_devolvibles[i]['codigo']} (quedan "
-                                                   f"{_devolvibles[i]['cantidad'] - _devolvibles[i]['devuelto']})"))
+                            format_func=lambda i: (  # rótulo fijo: lo que se llevó
+                                                   f"{_devolvibles[i]['marca']} "
+                                                   f"{_devolvibles[i]['codigo']} (se llevó "
+                                                   f"{_devolvibles[i]['cantidad']})"))
                         _cant_dev = _d2.number_input("Cuántos:", min_value=1, value=1, step=1)
                         _mot_dev = st.selectbox("¿Por qué volvió?", list(MOTIVOS_DE_DEVOLUCION),
                                                 format_func=MOTIVOS_DE_DEVOLUCION.get)
@@ -195,7 +201,8 @@ if pagina == PAGINAS[10]:
                 _et1, _et2 = cols([3, 1])
                 _pid_et = _et1.selectbox(
                     "Producto:", list(_prods), key="dvl_etiqueta_producto",
-                    format_func=lambda i: (f"{_prods[i]['marca']} {_prods[i]['codigo_raw']} — "
+                    format_func=lambda i: (  # rótulo fijo: imprimir etiquetas no mueve el stock
+                                           f"{_prods[i]['marca']} {_prods[i]['codigo_raw']} — "
                                            f"{(_prods[i]['descripcion'] or '')[:40]}"
                                            + (f" · stock {_prods[i]['stock']}"
                                               if _prods[i]["stock"] is not None else "")))

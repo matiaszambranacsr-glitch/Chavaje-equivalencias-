@@ -501,13 +501,16 @@ if pagina == PAGINAS[3]:
                         _por_motivo = collections.Counter(x.get("_motivo") or "Otros motivos"
                                                           for x in dudosas)
                         if len(_por_motivo) > 1:
-                            _todos = f"Todos ({miles(len(dudosas))})"
+                            # Las cantidades, afuera: cambian al resolver dudosas, y en el
+                            # navegador un rótulo que cambia vuelve el selector a «Todos» en el
+                            # toque siguiente (ver cuenta_en_la_barra()).
+                            _todos = "Todos"
                             _motivo = st.selectbox(
                                 "Cuáles mirar:",
                                 [_todos] + [m for m, _n in _por_motivo.most_common()],
-                                format_func=lambda m: m if m.startswith("Todos")
-                                else f"{m} ({miles(_por_motivo[m])})",
                                 key="dudosas_por_motivo")
+                            st.caption(f"{miles(len(dudosas) if _motivo == _todos else _por_motivo[_motivo])} "
+                                       f"de {miles(len(dudosas))} dudosos.")
                             if _motivo != _todos:
                                 dudosas = [x for x in dudosas
                                            if (x.get("_motivo") or "Otros motivos") == _motivo]

@@ -311,7 +311,8 @@ if pagina == PAGINAS[11]:
                         # Sin la forma de pago en el nombre: el navegador no le cambia el texto
                         # a la opción elegida, y después de corregirla seguía diciendo la vieja
                         # (se vio en una captura). Va abajo, al día.
-                        format_func=lambda i: (f"#{i} · {_cobradas[i]['hora']} · "
+                        format_func=lambda i: (  # rótulo fijo: corregir no cambia hora ni total
+                                               f"#{i} · {_cobradas[i]['hora']} · "
                                                f"${miles(_cobradas[i]['total'] or 0, 0)}"
                                                + (f" · {_cobradas[i]['cuenta'] or _cobradas[i]['cliente']}"
                                                   if _cobradas[i]["cuenta"] or _cobradas[i]["cliente"]
@@ -382,7 +383,7 @@ if pagina == PAGINAS[11]:
                         _fb = _b1.selectbox(
                             "Comprobante para bajar:", list(_autorizadas_dia),
                             key="factura_para_bajar", label_visibility="collapsed",
-                            format_func=lambda i: (
+                            format_func=lambda i: (  # rótulo fijo: el comprobante y su total
                                 nombre_del_comprobante(_autorizadas_dia[i]["tipo"],
                                                        _autorizadas_dia[i]["punto_de_venta"],
                                                        _autorizadas_dia[i]["numero"])
@@ -394,11 +395,13 @@ if pagina == PAGINAS[11]:
                                       f"{_autorizadas_dia[_fb]['numero']:08d}.pdf",
                             mime="application/pdf", key="factura_bajar_pdf", width="stretch")
                 if _cobradas and (configuracion_de_arca() or _facturas_dia):
+                    # Sin «🧾 Factura …» en el rótulo: aparecía al hacerla, y en el navegador un
+                    # rótulo que cambia vuelve el selector a la primera venta en el toque
+                    # siguiente (ver cuenta_en_la_barra()). Lo dice abajo mostrar_la_factura_de().
                     _fv = st.selectbox("Factura de la venta:", list(_cobradas), key="factura_de_la_venta",
-                                       format_func=lambda i: (f"#{i} · {_cobradas[i]['hora']} · "
-                                                              f"${miles(_cobradas[i]['total'] or 0, 0)}"
-                                                              + (f" · 🧾 {_facturadas[i]}"
-                                                                 if i in _facturadas else "")))
+                                       format_func=lambda i: (  # rótulo fijo: hora y total
+                                           f"#{i} · {_cobradas[i]['hora']} · "
+                                           f"${miles(_cobradas[i]['total'] or 0, 0)}"))
                     mostrar_la_factura_de(_fv, f"cierre_{_fv}")
                     _vig = factura_vigente_de(_fv)
                     if _vig and _vig["estado"] == "autorizada" and configuracion_de_arca():

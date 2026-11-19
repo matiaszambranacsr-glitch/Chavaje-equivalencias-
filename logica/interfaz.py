@@ -436,6 +436,21 @@ def rayitas_de_la_barra(paginas):
     return f"<style>{estilo}</style>"
 
 
+def cuenta_en_la_barra(paginas, pagina, cuantos):
+    """El «· 3» de los chats sin leer en la pastilla de «💬 Mensajes», puesto con CSS, o "".
+
+    Iba en el nombre de la opción (format_func del st.radio de la barra), y al leer el chat el
+    nombre cambiaba de «💬 Mensajes · 1» a «💬 Mensajes»: el navegador se quedaba sin ninguna
+    pantalla marcada y el toque siguiente volvía a 🧾 Ventas. Se abría un chat sin leer, se
+    tocaba una respuesta rápida y la app saltaba a Ventas (se vio en un navegador de verdad;
+    la prueba sin navegador no lo ve). Las opciones de la barra no cambian nunca; esto sí."""
+    if not cuantos or pagina not in paginas:
+        return ""
+    return (f'<style>.st-key-nav_principal [role="radiogroup"] > '
+            f':nth-child({paginas.index(pagina) + 1}) [data-testid="stMarkdownContainer"] '
+            f'p::after {{ content: " · {miles(cuantos)}"; font-weight: 700; }}</style>')
+
+
 def ir_a_donde_dice_el_aviso(donde):
     """Lleva a donde dice una miga («📍 Estadísticas → 📌 Para pedir»). Va como on_click.
 
@@ -585,8 +600,10 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-19c"
+VERSION_DE_LO_NUEVO = "2026-11-19d"
 LO_NUEVO = (
+    ("🧭 Revisando equivalencias, aprobar ya no te manda a otra lista (ni en los grupos), y en 💬 Mensajes lo escrito ya no se borra al tocar una respuesta rápida.",
+     "📊 Estadísticas → 🔗 Equivalencias sugeridas"),
     ("📲 «Cobrar lo vencido»: las cuentas que deben vencido, cada una con su WhatsApp ya escrito "
      "para recordárselo y «✅ Ya se lo recordé», para no escribirle dos veces al mismo.",
      "🗂️ Administrar → 💳 Cuentas corrientes"),

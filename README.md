@@ -7618,7 +7618,9 @@ barra; no la ven el invitado, el taller ni los del depósito):
   lo último del cliente aunque alguien ya los haya leído. Filtros «Todos / 🔴 Sin leer / ⏳ Sin
   contestar» y un buscador por nombre, número o lo que escribió.
 - **La pastilla de la barra dice cuántos hay sin leer** («💬 Mensajes · 3») en cualquier pantalla, y
-  **cuando llega uno salta un cartel** con quién y qué escribió, una sola vez.
+  **cuando llega uno salta un cartel** con quién y qué escribió, una sola vez. El «· 3» se pone
+  con CSS (`cuenta_en_la_barra()`), no en el nombre de la opción: ver «🧭 Un rótulo que cambia
+  te manda a otro lado», más abajo.
 - Al tocar un chat, la conversación (queda leída para todos) y la caja para contestar, con
   **respuestas rápidas** («Sí, lo tenemos», «¿Me pasás marca, modelo y año?»…). La lista y la
   conversación se ponen al día solas cada 20 segundos; la caja para escribir no se toca, así lo
@@ -7737,6 +7739,29 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
   vencido)»** (se compara por los últimos 8 números, como el resto de la app).
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
+
+## 🧭 Un rótulo que cambia te manda a otro lado (y lo escrito en un chat que se perdía)
+
+Probando 💬 Mensajes en un navegador de verdad aparecieron dos errores que las pruebas sin
+navegador no ven:
+
+- **Abrir un chat sin leer y tocar cualquier cosa te mandaba a 🧾 Ventas.** La pastilla decía
+  «💬 Mensajes · 1» y, al leer el chat, pasaba a «💬 Mensajes». En Streamlit 1.65, si el rótulo
+  de un `st.radio` o un `st.selectbox` cambia, el navegador se queda sin la opción elegida y el
+  toque siguiente vuelve a la primera. Ahora el «· 1» se pone con CSS y el nombre no cambia
+  nunca. **Lo mismo pasaba en otros cuatro lugares**, donde el rótulo llevaba una cantidad que
+  cambia al usarlo: «Lista a revisar» de 🔗 Equivalencias sugeridas (cada aprobación te mandaba
+  a otra lista: un comentario lo daba por arreglado, y en el navegador seguía), «Grupo» y
+  «Motivo» de la revisión por grupos, «Cuáles mirar» de los dudosos en Limpiar, y «Factura de la
+  venta» en la caja (el «🧾 Factura …» aparecía en el rótulo al hacerla). La cantidad pasó a un
+  texto al lado. `auditar.py` ahora avisa de una cuenta en el rótulo de un `st.radio` o un
+  `st.selectbox` (o `# rótulo fijo` si no cambia mientras se está ahí); `st.pills` y
+  `st.segmented_control` no tienen el problema.
+- **Lo escrito en la respuesta se borraba al tocar una respuesta rápida.** La caja estaba en un
+  formulario, y lo escrito no le llegaba a la app hasta «📤 Enviar»: «Hola! Te cuento:» +
+  «¡Hola! ¿En qué te ayudo?» quedaba solo en la frase. Ahora la caja está suelta.
+
+Los dos los controla `pruebas/navegador.py` (paso 7b), que corre GitHub en cada subida.
 
 ## 📲 Cobrar lo vencido: el recordatorio por WhatsApp, cuenta por cuenta
 

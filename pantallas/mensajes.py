@@ -291,13 +291,17 @@ if pagina == PAGINAS[12]:
                                          key=f"{_clave_resp}_rapida", on_change=_msj_rapida,
                                          args=(_clave_resp, f"{_clave_resp}_rapida"),
                                          label_visibility="collapsed")
-                    with st.form(key=f"form_{_clave_resp}", border=False):
-                        st.text_area("Tu respuesta:", key=_clave_resp, height=90,
-                                     max_chars=LARGO_MAXIMO_POR_CANAL.get(_chat_msj["canal"], 1000),
-                                     placeholder="Escribí la respuesta y tocá 📤 Enviar")
-                        st.form_submit_button("📤 Enviar", type="primary", width="stretch",
-                                              on_click=_msj_enviar,
-                                              args=(_abierto_msj, _clave_resp))
+                    # SIN FORMULARIO: adentro de uno, lo escrito no le llega a la app hasta
+                    # «📤 Enviar», y una respuesta rápida o «💳 Recordarle lo vencido» tocados
+                    # en el medio lo borraban (se escribía «Hola! Te cuento:», se tocaba «¡Hola!
+                    # ¿En qué te ayudo?» y quedaba solo eso; se vio en un navegador de verdad).
+                    # Suelta, lo escrito viaja apenas se toca otra cosa.
+                    st.text_area("Tu respuesta:", key=_clave_resp, height=90,
+                                 max_chars=LARGO_MAXIMO_POR_CANAL.get(_chat_msj["canal"], 1000),
+                                 placeholder="Escribí la respuesta y tocá 📤 Enviar")
+                    st.button("📤 Enviar", key=f"msj_enviar_{_abierto_msj}", type="primary",
+                              width="stretch", on_click=_msj_enviar,
+                              args=(_abierto_msj, _clave_resp))
                 st.button("Marcar como no leído", key=f"msj_no_leido_{_abierto_msj}",
                           on_click=_msj_no_leido, args=(_abierto_msj,))
                 # BORRAR EL CHAT: el cliente que pide que se borren sus datos, o publicidad. Solo

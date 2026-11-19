@@ -57,6 +57,9 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
   «ℹ️ Cómo funciona» por pantalla (ver «LA AYUDA DE CADA PANTALLA» en `logica/interfaz.py`).
 - Una sección nueva en `logica/` va también en el mapa del docstring de `app.py`.
 - Números para la pantalla con `miles()` (punto de miles), nunca `f"{x:,}"`.
+- Un `st.radio`/`st.selectbox` no lleva cuentas que cambien en el rótulo (`format_func`): en el
+  navegador, si el rótulo cambia, el toque siguiente vuelve a la primera opción (así la barra
+  mandaba a Ventas). La cuenta va en un `st.caption` al lado, o `# rótulo fijo` si no cambia.
 
 ## Cómo se trabaja
 

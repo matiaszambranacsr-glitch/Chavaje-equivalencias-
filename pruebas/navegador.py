@@ -50,8 +50,17 @@ marca = c.lastrowid
 for codigo, desc in (("F100", "FILTRO DE ACEITE GOL"), ("F200", "FILTRO DE AIRE GOL")):
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
               "stock) VALUES (?, ?, ?, ?, 1000, 5)", (codigo, codigo, desc, marca))
+# Un chat de WhatsApp con un mensaje recién llegado, para contestarlo (ver el paso 7b).
+ns["guardar_mensaje_de_afuera"]({"canal": "whatsapp", "chat": "5491145678901",
+                                 "nombre": "Cliente Del Navegador", "id": "nav-1",
+                                 "texto": "hola, tenés el F100?", "entra": True, "cuando": None})
 conn.commit()
 ns["crear_usuario"]("navegador", sys.argv[3], "admin")
+# WhatsApp «conectado» con datos inventados, para que esté la caja de la respuesta. Nunca sale
+# nada: la prueba no toca «📤 Enviar», y las tareas de fondo están apagadas.
+os.makedirs(".streamlit", exist_ok=True)
+with open(os.path.join(".streamlit", "secrets.toml"), "w") as f:
+    f.write('[mensajes]\nwhatsapp_token = "inventado-para-la-prueba"\nwhatsapp_numero_id = "0"\n')
 """
 
 
@@ -232,6 +241,42 @@ def probar(url, clave, carpeta):
                 if not _hasta(lambda: pagina.locator(
                         ".st-key-asistente_minimizado").count() == 1):
                     fallas.append("Escape no minimiza el asistente")
+
+        # 7b. 💬 MENSAJES, dos cosas que la prueba sin navegador no ve:
+        #  · Abrir un chat sin leer cambia la cuenta de la pastilla («· 1»). Iba en el nombre de
+        #    la opción, y el navegador se quedaba sin ninguna pantalla marcada: el toque
+        #    siguiente volvía a 🧾 Ventas (ver cuenta_en_la_barra()).
+        #  · Lo escrito en la respuesta no se pierde al tocar una respuesta rápida. La caja
+        #    estaba en un formulario y lo escrito no llegaba hasta «📤 Enviar»: «Hola! Te
+        #    cuento:» + «¡Hola! ¿En qué te ayudo?» quedaba en la frase sola.
+        _marcada = """() => { const i = document.querySelector('.st-key-nav_principal input:checked');
+            return i ? i.closest('label').innerText : null; }"""
+        _ir(pagina, "Mensajes")
+        _cuenta = pagina.evaluate("""() => { const p = [...document.querySelectorAll(
+            '.st-key-nav_principal label p')].find(p => p.innerText.includes('Mensajes'));
+            return p ? getComputedStyle(p, '::after').content : null; }""")
+        if '· 1' not in str(_cuenta):
+            fallas.append(f"la pastilla de 💬 Mensajes no dice «· 1» sin leer: {_cuenta!r}")
+        pagina.get_by_role("button", name="Cliente Del Navegador").first.click()
+        _esperar(pagina, 2)
+        respuesta = pagina.locator('textarea[aria-label="Tu respuesta:"]')
+        if not _hasta(lambda: "Mensajes" in str(pagina.evaluate(_marcada))):
+            fallas.append("al abrir un chat sin leer, la barra queda sin pantalla marcada: "
+                          f"{pagina.evaluate(_marcada)!r}")
+        if not _hasta(lambda: respuesta.count() == 1):
+            fallas.append("en 💬 Mensajes, al abrir el chat no está la caja de la respuesta")
+        else:
+            respuesta.click()
+            respuesta.type("Hola! Te cuento:", delay=15)
+            pagina.locator('[class*="st-key-msj_respuesta_"][class*="_rapida"] button').first.click()
+            _esperar(pagina, 1)
+            if not respuesta.count():
+                fallas.append("en 💬 Mensajes, tocar una respuesta rápida saca de la pantalla: "
+                              f"quedó en {pagina.evaluate(_marcada)!r}")
+            elif not _hasta(lambda: respuesta.input_value().startswith("Hola! Te cuento: ")
+                            and len(respuesta.input_value()) > len("Hola! Te cuento: ")):
+                fallas.append("en 💬 Mensajes, tocar una respuesta rápida borra lo escrito: "
+                              f"quedó {respuesta.input_value()!r}")
 
         # 8. EN UN TELÉFONO, sin contraseña, que es como lo abre un cliente. Un teléfono
         # simulado de verdad (táctil): achicando la ventana de la computadora lo del celular no

@@ -496,6 +496,7 @@ if pagina == PAGINAS[3]:
                         _por_familia = {f["familia"]: f for f in _sin_nombre}
                         _fam_elegida = st.selectbox(
                             "Familia:", list(_por_familia), key="familias_elegida",
+                            # rótulo fijo: al ponerle nombre, la familia entera sale de la lista
                             format_func=lambda x: (f"{x} — {miles(_por_familia[x]['sin_pieza'])} "
                                                    "sin decir qué pieza son"))
                         for _ej in _por_familia[_fam_elegida]["ejemplos"]:
@@ -1705,7 +1706,8 @@ if pagina == PAGINAS[3]:
                         "Tasa de referencia:", _claves_t,
                         index=(_claves_t.index(_cfg_mora["referencia"])
                                if _cfg_mora["referencia"] in _claves_t else 0),
-                        format_func=lambda k: (f"{_tasas[k]['nombre']} — "
+                        format_func=lambda k: (  # rótulo fijo: la tasa cambia al traerla de nuevo
+                                               f"{_tasas[k]['nombre']} — "
                                                f"{miles(_tasas[k]['tna'], 2)}% TNA"
                                                + (f" (al {_tasas[k]['fecha']})"
                                                   if _tasas[k].get("fecha") else "")),

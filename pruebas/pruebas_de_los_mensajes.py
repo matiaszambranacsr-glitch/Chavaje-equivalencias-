@@ -478,9 +478,12 @@ def probar():
         _entrar(at, "ana", "clave-ana-1")
         c.execute("UPDATE chats SET sin_leer = 2 WHERE externo = '5493415550000'")
         at.run()
-        esperar("al personal le dice cuántos sin leer, en la pastilla",
-                [o for o in at.radio(key="pagina_actual").options if "Mensajes" in o],
-                ["💬 Mensajes · 1"])
+        # Con CSS: el nombre de la opción no cambia nunca (si cambia, el navegador se queda sin
+        # pantalla marcada y el toque siguiente vuelve a Ventas: ver cuenta_en_la_barra()).
+        esperar("al personal le dice cuántos sin leer, en la pastilla (sin cambiarle el nombre)",
+                ([o for o in at.radio(key="pagina_actual").options if "Mensajes" in o],
+                 sum(m.value.count('content: " · 1"') for m in at.markdown)),
+                (["💬 Mensajes"], 1))
         # Llega uno nuevo mientras está en otra pantalla: salta el cartel.
         ns["guardar_mensaje_de_afuera"]({"canal": "whatsapp", "chat": "5491155556666",
                                          "nombre": "Juan Pérez", "id": "wamid.NUEVO",

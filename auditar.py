@@ -2662,6 +2662,32 @@ for _n in ast.walk(ARBOL):
             and getattr(_n.value.func.value, "id", None) == "datetime"):
         reportar("ERROR", _n.lineno, "la hora de ahora para mostrar va con ahora_aca(): "
                                      "datetime.now() es UTC")
+# UN RÓTULO QUE CAMBIA EN UN st.radio O UN st.selectbox. En el navegador (Streamlit 1.65), si
+# el rótulo de las opciones cambia mientras se está en la pantalla, el toque siguiente vuelve el
+# selector a la primera opción; la prueba sin navegador no lo ve. Pasó con «💬 Mensajes · 1» en
+# la barra (abrir un chat sin leer y tocar cualquier cosa mandaba a 🧾 Ventas) y con «Lista a
+# revisar: … — 12 vínculo(s)» (cada aprobación te mandaba a otra lista). Una cantidad va afuera
+# del rótulo, en un st.caption al lado; st.pills y st.segmented_control no tienen el problema.
+# Si la cuenta no puede cambiar mientras se está ahí, «# rótulo fijo» (con el porqué) en el
+# renglón del format_func.
+_CLAVES_QUE_CUENTAN = re.compile(r"cantidad|stock|sin_pieza|devuelto|quedan|total|saldo", re.I)
+for _n in ast.walk(ARBOL):
+    if not (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) in ("radio", "selectbox")):
+        continue
+    for _kw in _n.keywords:
+        if _kw.arg != "format_func" or not isinstance(_kw.value, ast.Lambda):
+            continue
+        _cuenta = any(
+            (isinstance(_x, ast.Call) and getattr(_x.func, "id", None) in ("miles", "len"))
+            or (isinstance(_x, ast.Constant) and isinstance(_x.value, str)
+                and _CLAVES_QUE_CUENTAN.fullmatch(_x.value))
+            for _x in ast.walk(_kw.value))
+        _renglones = SRC.splitlines()[_kw.value.lineno - 2:_kw.value.end_lineno]
+        if _cuenta and not any("rótulo fijo" in _r for _r in _renglones):
+            reportar("REVISAR", _kw.value.lineno,
+                     "una cuenta en el rótulo de un st.radio/st.selectbox: si cambia, en el "
+                     "navegador el toque siguiente vuelve a la primera opción. Va afuera (un "
+                     "st.caption), o «# rótulo fijo» si no cambia mientras se está ahí")
 _CARPETA_DE_LAS_PRUEBAS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pruebas")
 for _nombre in sorted(os.listdir(_CARPETA_DE_LAS_PRUEBAS)):
     if not _nombre.endswith(".py"):

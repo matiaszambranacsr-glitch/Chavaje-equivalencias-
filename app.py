@@ -586,17 +586,17 @@ recordar_lo_elegido_al_cambiar_de_pantalla()
 # El CSS los muestra como pastillas, en un solo renglón: en el celular se deslizan de costado
 # (ver «La navegación principal» en logica/base.py). Entre un grupo y otro va una rayita: ver
 # rayitas_de_la_barra() en logica/interfaz.py.
-_rayitas = rayitas_de_la_barra(_paginas_a_la_vista)
-if _rayitas:
-    st.markdown(_rayitas, unsafe_allow_html=True)
 # «💬 Mensajes · 3»: los chats sin leer, en la misma pastilla, para verlos desde cualquier
-# pantalla (el cartel salta una vez; esto queda hasta que alguien los abre).
+# pantalla (el cartel salta una vez; esto queda hasta que alguien los abre). Con CSS, no en el
+# nombre de la opción: ver cuenta_en_la_barra().
 _chats_sin_leer = cuantos_chats_sin_leer() if PAGINAS[12] in _paginas_a_la_vista else 0
+_estilo_de_la_barra = (rayitas_de_la_barra(_paginas_a_la_vista)
+                       + cuenta_en_la_barra(_paginas_a_la_vista, PAGINAS[12], _chats_sin_leer))
+if _estilo_de_la_barra:
+    st.markdown(_estilo_de_la_barra, unsafe_allow_html=True)
 with st.container(key="nav_principal"):
     st.radio("Sección:", _paginas_a_la_vista, key="pagina_actual", horizontal=True,
-             label_visibility="collapsed",
-             format_func=lambda p: (f"{p} · {miles(_chats_sin_leer)}"
-                                    if p == PAGINAS[12] and _chats_sin_leer else p))
+             label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
 
