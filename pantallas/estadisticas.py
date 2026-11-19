@@ -707,8 +707,14 @@ a traer solas desde Administrar → Mantenimiento.
                     # el link de abajo), y «MANN FILTER» se partiría en dos.
                     _id_marca = (re.sub(r"[^0-9A-Za-z_]", "_", marca)
                                  + "_" + hashlib.md5(marca.encode()).hexdigest()[:6])
+                    # Y con la huella del mensaje armado en la clave: con la clave fija, Streamlit
+                    # 1.65 se queda con el primer texto, y al marcar otro producto la caja (y el
+                    # pedido) seguía sin él. Así se renueva si cambian los productos y respeta
+                    # lo corregido mientras no cambien.
+                    _clave_msg = (f"msg_repo_{_id_marca}_"
+                                  + hashlib.md5(mensaje_reposicion.encode()).hexdigest()[:8])
                     _msg_final = st.text_area("Mensaje:", value=mensaje_reposicion, height=120,
-                                              key=f"msg_repo_{_id_marca}")
+                                              key=_clave_msg)
                     # Y a quién: el WhatsApp del proveedor de esa marca, anotado una vez (ver
                     # whatsapp_del_proveedor()). Se guarda al escribirlo.
                     _clave_tel_prov = f"wa_prov_{marca}"
@@ -725,7 +731,7 @@ a traer solas desde Administrar → Mantenimiento.
                                    if numero_para_whatsapp(_tel_prov)
                                    else f"📲 Abrir WhatsApp para {marca} (elegís a quién)",
                                    link_de_whatsapp(_tel_prov, _msg_final),
-                                   key=f"walink__msg_repo_{_id_marca}")
+                                   key=f"walink__{_clave_msg}")
 
         st.markdown("---")
         st.markdown("**📈 Cuánto te aumentó cada proveedor**")

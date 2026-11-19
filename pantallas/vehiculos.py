@@ -113,14 +113,23 @@ if pagina == PAGINAS[6]:
 
     # Si se leyó una cédula, precargar los campos ANTES de crear los widgets — si se hace
     # después de que ya se dibujaron en pantalla, Streamlit tira un error.
+    # LAS CLAVES DE LOS CAMPOS LLEVAN LA PATENTE. Con la clave fija, Streamlit 1.65 se queda con
+    # lo que el campo tenía: se buscaba otra patente y la ficha seguía diciendo la marca, el
+    # modelo, el año y el VIN del auto anterior (un Corsa 2008 aparecía «VW GOL 2012», con el
+    # chasis del Gol), y «💾 Guardar vehículo» se los grababa al otro. Cada auto, sus campos.
+    def _campo_del_auto(campo, patente):
+        return f"{campo}_{re.sub(r'[^A-Z0-9]', '', str(patente or '').upper()) or 'sin_patente'}"
+
     if "cedula_pendiente" in st.session_state:
         datos = st.session_state.pop("cedula_pendiente")
         if datos.get("patente"):
             st.session_state["patente_buscar"] = str(datos["patente"]).strip().upper()
-        st.session_state["form_marca_auto"] = datos.get("marca") or ""
-        st.session_state["form_modelo_auto"] = datos.get("modelo") or ""
-        st.session_state["form_anio_auto"] = str(datos.get("anio") or "")
-        st.session_state["form_motorizacion_auto"] = datos.get("motorizacion") or ""
+        _pat_cedula = st.session_state.get("patente_buscar") or ""
+        st.session_state[_campo_del_auto("form_marca_auto", _pat_cedula)] = datos.get("marca") or ""
+        st.session_state[_campo_del_auto("form_modelo_auto", _pat_cedula)] = datos.get("modelo") or ""
+        st.session_state[_campo_del_auto("form_anio_auto", _pat_cedula)] = str(datos.get("anio") or "")
+        st.session_state[_campo_del_auto("form_motorizacion_auto", _pat_cedula)] = (
+            datos.get("motorizacion") or "")
 
     # El VIN que se resolvió a patente en la vuelta anterior se vuelca ACÁ, antes de dibujar el
     # campo. Escribirlo después de dibujado —que es lo que se hacía— Streamlit no lo permite:
@@ -191,25 +200,25 @@ if pagina == PAGINAS[6]:
                 cliente_tel = cv2.text_input("Teléfono", value=(vehiculo or {}).get("cliente_telefono") or "")
                 cv3, cv4 = st.columns(2)
                 marca_auto = cv3.text_input("Marca del auto", value=(vehiculo or {}).get("marca_auto") or "",
-                                             key="form_marca_auto")
+                                             key=_campo_del_auto("form_marca_auto", patente_input))
                 modelo_auto = cv4.text_input("Modelo", value=(vehiculo or {}).get("modelo_auto") or "",
-                                              key="form_modelo_auto")
+                                              key=_campo_del_auto("form_modelo_auto", patente_input))
                 cv5, cv6, cv7 = cols(3)
                 # El año que sugiere la patente va de placeholder, no de valor: es una
                 # estimación y el que carga la ficha tiene que decidir si la toma.
                 anio_auto = cv5.text_input("Año", value=(vehiculo or {}).get("anio") or "",
-                                            key="form_anio_auto",
+                                            key=_campo_del_auto("form_anio_auto", patente_input),
                                             placeholder=(f"≈ {_anio_sugerido}" if _anio_sugerido
                                                           else "Ej: 2012"))
                 motorizacion_auto = cv6.text_input("Motorización", value=(vehiculo or {}).get("motorizacion") or "",
-                                                    key="form_motorizacion_auto")
+                                                    key=_campo_del_auto("form_motorizacion_auto", patente_input))
                 km_actual_input = cv7.number_input(
                     "Km actual", min_value=0, step=1000,
                     value=int((vehiculo or {}).get("km_actual") or 0)
                 )
                 numero_motor_auto = st.text_input(
                     "N° de motor (opcional)", value=(vehiculo or {}).get("numero_motor") or "",
-                    key="form_numero_motor",
+                    key=_campo_del_auto("form_numero_motor", patente_input),
                     placeholder="El grabado en el block, como esté",
                     help="Sirve cuando el auto tiene el motor cambiado: ahí el VIN lleva a los "
                          "repuestos equivocados y este número a los correctos. Se busca sin "
@@ -217,7 +226,7 @@ if pagina == PAGINAS[6]:
                 )
                 vin_auto = st.text_input(
                     "VIN / número de chasis (opcional)", value=(vehiculo or {}).get("vin") or "",
-                    key="form_vin_auto", max_chars=17,
+                    key=_campo_del_auto("form_vin_auto", patente_input), max_chars=17,
                     help="Cargarlo sirve para dos cosas: podés encontrar este auto por el chasis "
                          "además de por la patente, y la app aprende sola qué modelo corresponde "
                          "a ese patrón de VIN, así el próximo auto igual se completa solo."
@@ -266,7 +275,8 @@ if pagina == PAGINAS[6]:
                 )
                 nuevo_km_registro = st.number_input(
                     "Km de registro correcto", min_value=0, step=1000,
-                    value=int(km_registro or 0), key="corregir_km_registro"
+                    value=int(km_registro or 0),
+                    key=_campo_del_auto("corregir_km_registro", patente_input)
                 )
                 if st.button("💾 Corregir km de registro"):
                     actualizar_km_registro(vehiculo["id"], nuevo_km_registro or None)

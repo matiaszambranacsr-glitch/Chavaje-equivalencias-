@@ -600,8 +600,9 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-20"
+VERSION_DE_LO_NUEVO = "2026-11-20b"
 LO_NUEVO = (
+    ("🧷 Corregido: al buscar otra patente, la ficha del auto seguía con la marca, el modelo y el VIN del anterior (y guardar se los ponía al otro). Lo mismo las medidas de un producto, los alias de cobro y la fila de títulos al subir otra lista. Si guardaste una ficha estos días, conviene mirarla.", "🚗 Vehículos"),
     ("📲 El pedido al proveedor ahora va a su WhatsApp (se anota una vez por marca) y con el mensaje como lo dejaste, con tus cambios.", "📊 Estadísticas → 📌 Para pedir"),
     ("🧭 Revisando equivalencias, aprobar ya no te manda a otra lista (ni en los grupos), y en 💬 Mensajes lo escrito ya no se borra al tocar una respuesta rápida.",
      "📊 Estadísticas → 🔗 Equivalencias sugeridas"),

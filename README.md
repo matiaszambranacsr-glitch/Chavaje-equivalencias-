@@ -7740,6 +7740,35 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
 
+## 🧷 Cada campo con lo de lo elegido: la ficha del auto, las medidas, los alias, el Excel
+
+Con Streamlit 1.65, **un campo con clave fija se queda con lo que tenía aunque cambie lo que se
+le pasa para mostrar**. Se encontró probando en un navegador de verdad, y había lugares donde
+eso grababa datos en el lugar equivocado:
+
+- **🚗 La ficha del auto**: al buscar otra patente, la marca, el modelo, el año, la motorización,
+  el N° de motor y el VIN seguían siendo los del auto anterior (un Corsa 2008 aparecía «VW GOL
+  2012», con el chasis del Gol), y «💾 Guardar vehículo» —por ejemplo, para anotar los km— se
+  los grababa al otro. El nombre, el teléfono y los km sí cambiaban, así que no saltaba a la
+  vista. Lo mismo «Corregir km de registro».
+- **📐 Las medidas de un producto** (🗂️ Administrar → 📦 Productos): al elegir otro, los campos
+  seguían con las medidas y la ubicación del anterior, y «💾 Guardar» se las ponía al otro.
+- **Los alias de cobro** (💬 Mensajería y cobros): al elegir otro para editar, seguían el alias y
+  el CBU del anterior.
+- **📁 Cargar Excel**: subida una lista encima de otra, la «fila de los títulos» quedaba la de la
+  anterior; una lista sin tapa después de una con dos renglones de tapa se leía desde la fila 3
+  y sus dos primeros productos se perdían como títulos. La app ya borraba la clave al cambiar
+  de archivo, pero **borrar la clave no alcanza**: el navegador sigue mostrando el número viejo
+  y lo manda de vuelta.
+- **El pedido al proveedor** y **la cotización de 📋 Lista WhatsApp**: la caja del mensaje no se
+  renovaba al marcar otro producto, y el pedido salía incompleto.
+
+Ahora la clave lleva qué es lo elegido (la patente, el número del producto o del alias, la
+huella del archivo o del mensaje): cada cosa tiene sus campos. `auditar.py` avisa de un campo
+con clave fija cuyo valor sale de un registro (`fila["x"]`, `(auto or {}).get("x")`), salvo que
+diga `# valor fijo`. Lo controlan `pruebas/pruebas_de_los_campos.py` (nueva) y, lo del Excel,
+`pruebas/navegador.py` (7c).
+
 ## 📲 Lo recién escrito, en el link de WhatsApp; y el WhatsApp de cada proveedor
 
 **Un link no espera a que salgas de la caja.** Lo escrito le llega a la app recién al salir del

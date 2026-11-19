@@ -206,6 +206,7 @@ if pagina == PAGINAS[3]:
             _nombres_coef = [m["nombre"] for m in _marcas_coef]
             _marca_coef = st.selectbox(
                 "Marca:", _nombres_coef, key="marca_coeficiente",
+                # valor fijo: es la propuesta de entrada; después vale la marca que se eligió
                 index=_nombres_coef.index(_fuera_nombres[0]) if _fuera_nombres else 0)
             _id_coef = next(m["id"] for m in _marcas_coef if m["nombre"] == _marca_coef)
             _actual = coeficiente_de_lista(_id_coef)
@@ -641,19 +642,23 @@ if pagina == PAGINAS[3]:
                     "FROM productos WHERE id = ?", (id_medidas,)
                 )
                 actual = c.fetchone()
+                # LAS CLAVES LLEVAN EL NÚMERO DEL PRODUCTO. Con la clave fija, Streamlit 1.65 se
+                # queda con lo que el campo tenía: se elegía otro producto y los campos seguían
+                # con las medidas y la ubicación del anterior, y «💾 Guardar» se las grababa al
+                # otro. Cada producto, sus campos.
                 em1, em2, em3 = cols(3)
                 e_diam_int = em1.number_input("Diám. interno cara A (mm)", min_value=0.0, step=0.1,
-                                               value=float(actual["diametro_interno"] or 0), key="e_di")
+                                               value=float(actual["diametro_interno"] or 0), key=f"e_di_{id_medidas}")
                 e_diam_ext = em2.number_input("Diám. externo cara A (mm)", min_value=0.0, step=0.1,
-                                               value=float(actual["diametro_externo"] or 0), key="e_de")
+                                               value=float(actual["diametro_externo"] or 0), key=f"e_de_{id_medidas}")
                 e_ancho = em3.number_input("Ancho (mm)", min_value=0.0, step=0.1,
-                                            value=float(actual["ancho"] or 0), key="e_an")
+                                            value=float(actual["ancho"] or 0), key=f"e_an_{id_medidas}")
                 em4, em5, em6 = cols(3)
-                e_paso = em4.text_input("Paso de rosca", value=actual["paso_rosca"] or "", key="e_paso")
+                e_paso = em4.text_input("Paso de rosca", value=actual["paso_rosca"] or "", key=f"e_paso_{id_medidas}")
                 e_estrias = em5.number_input("Cantidad de estrías", min_value=0, step=1,
-                                              value=int(actual["cantidad_estrias"] or 0), key="e_estrias")
+                                              value=int(actual["cantidad_estrias"] or 0), key=f"e_estrias_{id_medidas}")
                 e_ubicacion = em6.text_input("Ubicación en depósito", value=actual["ubicacion"] or "",
-                                              placeholder="Ej: Pasillo 3, estante B", key="e_ubic")
+                                              placeholder="Ej: Pasillo 3, estante B", key=f"e_ubic_{id_medidas}")
 
                 st.markdown("**↔️ Segunda cara (opcional)**",
                             help="Para piezas con distinta medida de cada lado — retenes con labio "
@@ -661,28 +666,28 @@ if pagina == PAGINAS[3]:
                                  "diámetro de un lado y otro del otro, etc.")
                 eb1, eb2 = st.columns(2)
                 e_diam_int_b = eb1.number_input("Diám. interno cara B (mm)", min_value=0.0, step=0.1,
-                                                 value=float(actual["diametro_interno_cara_b"] or 0), key="e_di_b")
+                                                 value=float(actual["diametro_interno_cara_b"] or 0), key=f"e_di_b_{id_medidas}")
                 e_diam_ext_b = eb2.number_input("Diám. externo / labio exterior cara B (mm)", min_value=0.0, step=0.1,
-                                                 value=float(actual["diametro_externo_cara_b"] or 0), key="e_de_b")
+                                                 value=float(actual["diametro_externo_cara_b"] or 0), key=f"e_de_b_{id_medidas}")
 
                 st.markdown("**🔩 Homocinéticas**")
                 eh1, eh2 = st.columns(2)
                 e_estrias_int = eh1.number_input("Estrías internas", min_value=0, step=1,
-                                                  value=int(actual["estrias_internas"] or 0), key="e_estrias_int")
+                                                  value=int(actual["estrias_internas"] or 0), key=f"e_estrias_int_{id_medidas}")
                 e_estrias_ext = eh2.number_input("Estrías externas", min_value=0, step=1,
-                                                  value=int(actual["estrias_externas"] or 0), key="e_estrias_ext")
+                                                  value=int(actual["estrias_externas"] or 0), key=f"e_estrias_ext_{id_medidas}")
                 eh3, eh4 = st.columns(2)
                 e_seguro = eh3.text_input("Posición del seguro", value=actual["posicion_seguro"] or "",
-                                           placeholder="Ej: 1er ranura, a 12mm", key="e_seguro")
+                                           placeholder="Ej: 1er ranura, a 12mm", key=f"e_seguro_{id_medidas}")
                 abs_actual = "Cualquiera" if actual["tiene_abs"] is None else ("Sí" if actual["tiene_abs"] else "No")
                 e_abs = eh4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"],
-                                       index=["Cualquiera", "Sí", "No"].index(abs_actual), key="e_abs")
+                                       index=["Cualquiera", "Sí", "No"].index(abs_actual), key=f"e_abs_{id_medidas}")
                 eh5, eh6 = st.columns(2)
                 e_rosca_homo = eh5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1,
-                                                 value=float(actual["diametro_rosca_homocinetica"] or 0), key="e_rosca_homo")
+                                                 value=float(actual["diametro_rosca_homocinetica"] or 0), key=f"e_rosca_homo_{id_medidas}")
                 e_largo_total = eh6.number_input(
                     "Largo total (mm)", min_value=0.0, step=0.5,
-                    value=float(actual["largo_total"] or 0), key="e_largo_total",
+                    value=float(actual["largo_total"] or 0), key=f"e_largo_total_{id_medidas}",
                     help="De punta a punta. Es la medida que más rápido descarta: dos homocinéticas "
                          "con las mismas estrías y la misma copa pero distinto largo no entran en "
                          "el mismo auto."
@@ -695,10 +700,10 @@ if pagina == PAGINAS[3]:
                 )
                 eh7, eh8 = st.columns(2)
                 e_copa = eh7.number_input("Diám. copa — base (mm)", min_value=0.0, step=0.1,
-                                           value=float(actual["diametro_copa"] or 0), key="e_copa")
+                                           value=float(actual["diametro_copa"] or 0), key=f"e_copa_{id_medidas}")
                 e_copa_sup = eh8.number_input("Diám. copa — boca / superior (mm)", min_value=0.0, step=0.1,
                                                value=float(actual["diametro_copa_superior"] or 0),
-                                               key="e_copa_sup")
+                                               key=f"e_copa_sup_{id_medidas}")
 
                 # No es lo mismo corregir un dato mal cargado que anotar que la pieza cambió: queda
                 # en el historial de medidas. Ver MOTIVOS_DE_CAMBIO_DE_MEDIDA.
@@ -1063,16 +1068,25 @@ if pagina == PAGINAS[3]:
             nombre_buscar = alias_opcion_edit.replace(" (editar)", "")
             alias_actual = next(a for a in alias_cargados if a["Nombre"] == nombre_buscar)
 
+        # Las claves llevan el número del alias: con la clave fija, Streamlit 1.65 se quedaba con
+        # lo del primero que se abrió, y al elegir otro para editar los campos seguían con el
+        # alias y el CBU del anterior (y «Guardar» se los ponía al otro).
+        _de_alias = (alias_actual or {}).get("ID", "nuevo")
         cae1, cae2 = st.columns(2)
         nombre_alias_in = cae1.text_input("Nombre (ej: Mercado Pago, Banco Galicia)",
-                                           value=(alias_actual or {}).get("Nombre", ""), key="alias_nombre_in")
-        alias_in = cae2.text_input("Alias", value=(alias_actual or {}).get("Alias", ""), key="alias_alias_in")
+                                           value=(alias_actual or {}).get("Nombre", ""),
+                                           key=f"alias_nombre_in_{_de_alias}")
+        alias_in = cae2.text_input("Alias", value=(alias_actual or {}).get("Alias", ""),
+                                   key=f"alias_alias_in_{_de_alias}")
         cae3, cae4 = st.columns(2)
-        cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""), key="alias_cbu_in")
-        titular_in = cae4.text_input("Titular (opcional)", value=(alias_actual or {}).get("Titular", ""), key="alias_titular_in")
+        cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""),
+                                 key=f"alias_cbu_in_{_de_alias}")
+        titular_in = cae4.text_input("Titular (opcional)",
+                                     value=(alias_actual or {}).get("Titular", ""),
+                                     key=f"alias_titular_in_{_de_alias}")
         link_in = st.text_input(
             "Link de pago (opcional — lo que abre el QR):", value=(alias_actual or {}).get("Link", ""),
-            key="alias_link_in", placeholder="https://link.mercadopago.com.ar/...",
+            key=f"alias_link_in_{_de_alias}", placeholder="https://link.mercadopago.com.ar/...",
             help="El link para cobrar que te da Mercado Pago, MODO o tu banco. Va en el QR de la "
                  "cotización y en el mensaje: el cliente lo toca o lo escanea y le abre la página "
                  "para pagar.")

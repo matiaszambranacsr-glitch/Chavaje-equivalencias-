@@ -112,14 +112,19 @@ if pagina == PAGINAS[5]:
                        "los de las demás marcas, así que en el mensaje y en el PDF dicen "
                        "«precio a confirmar» hasta que se cargue el coeficiente (ver "
                        f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista).")
-        st.text_area("Vista previa del mensaje:", value=mensaje, height=300)
-
-        import urllib.parse
-        url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
+        # LO QUE SE MANDA ES LO QUE QUEDÓ ESCRITO: la caja se podía corregir, pero «📲 Abrir en
+        # WhatsApp» llevaba el mensaje armado, sin lo cambiado. La huella del mensaje en la
+        # clave renueva la caja si cambia la lista (con la clave fija Streamlit se queda con el
+        # primer texto), y «walink__» hace que el link lleve lo que dice la caja aunque no se
+        # haya salido de ella (ver AYUDAS_DEL_NAVEGADOR).
+        _clave_msg_wa = "wa_mensaje_" + hashlib.md5(mensaje.encode()).hexdigest()[:8]
+        _mensaje_final = st.text_area("Mensaje (lo podés corregir antes de mandarlo):",
+                                      value=mensaje, height=300, key=_clave_msg_wa) or mensaje
         col_wa, col_pdf = st.columns(2)
-        col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", width="stretch")
+        col_wa.link_button("📲 Abrir en WhatsApp", link_de_whatsapp("", _mensaje_final),
+                           type="primary", width="stretch", key=f"walink__{_clave_msg_wa}")
         # Si la pidió alguien por 💬 Mensajes hace un rato: mandársela a ese chat, sin el teléfono.
-        mostrar_boton_para_el_chat(mensaje, "wa_mandar_al_chat")
+        mostrar_boton_para_el_chat(_mensaje_final, "wa_mandar_al_chat")
         pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista_cotizar, incluir_precio,
                                    incluir_stock, alias_elegido, qr_real_para_pdf,
                                    marcar_a_confirmar)

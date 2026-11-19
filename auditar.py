@@ -2677,6 +2677,34 @@ for _n in ast.walk(ARBOL):
                      f"«{_js[_m.start():_m.start() + 20]}…» adentro de AYUDAS_DEL_NAVEGADOR: "
                      "Streamlit descarta el script entero (sin teclas ni click derecho)")
 
+# UN CAMPO CON CLAVE FIJA Y EL VALOR DE ALGO ELEGIDO. Con Streamlit 1.65 un campo con clave se
+# queda con lo que tenía aunque cambie el value= (o el index=): al buscar otra patente, la ficha
+# seguía con la marca, el modelo y el VIN del auto anterior, y «💾 Guardar» se los grababa al
+# otro (y lo mismo con las medidas de un producto y los datos de un alias). Borrar la clave
+# tampoco alcanza: el navegador sigue mostrando lo viejo. Si el valor sale de un registro
+# (fila["x"], (auto or {}).get("x")), la clave lleva qué registro es: f"campo_{id}". Si no
+# cambia mientras se está ahí, «# valor fijo» en el renglón.
+for _n in ast.walk(ARBOL):
+    if not (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) in (
+            "text_input", "text_area", "number_input", "checkbox", "toggle", "date_input",
+            "selectbox", "radio")):
+        continue
+    _kws = {_k.arg: _k.value for _k in _n.keywords}
+    _ini = _kws.get("value", _kws.get("index"))
+    if not (isinstance(_kws.get("key"), ast.Constant) and _ini is not None):
+        continue
+    _de_un_registro = any(
+        isinstance(_x, ast.Subscript) or (isinstance(_x, ast.Call)
+                                          and getattr(_x.func, "attr", None) == "get"
+                                          and not isinstance(_x.func.value, ast.Attribute))
+        for _x in ast.walk(_ini))
+    _renglones = SRC.splitlines()[_n.lineno - 1:_n.end_lineno]
+    if _de_un_registro and not any("valor fijo" in _r for _r in _renglones):
+        reportar("REVISAR", _n.lineno,
+                 f"«{_kws['key'].value}»: clave fija con el valor de algo elegido; con otra "
+                 "elección el campo queda con lo del anterior (Streamlit 1.65). La clave lleva "
+                 "qué es (f\"…_{id}\"), o «# valor fijo» si no cambia")
+
 # UN RÓTULO QUE CAMBIA EN UN st.radio O UN st.selectbox. En el navegador (Streamlit 1.65), si
 # el rótulo de las opciones cambia mientras se está en la pantalla, el toque siguiente vuelve el
 # selector a la primera opción; la prueba sin navegador no lo ve. Pasó con «💬 Mensajes · 1» en

@@ -65,6 +65,9 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
   descarta el script entero, sin aviso (se caen las teclas y el click derecho).
 - Un `st.link_button` que lleva lo escrito en una caja va con `key="walink__<clave de la caja>"`:
   si no, al tocarlo sin salir de la caja sale el texto de antes.
+- Un campo que muestra datos de algo elegido (un auto, un producto) lleva en la clave qué es:
+  `key=f"campo_{id}"`. Con la clave fija se queda con lo del anterior (y se graba en el otro);
+  borrar la clave no alcanza en el navegador. Si no cambia, `# valor fijo`.
 
 ## Cómo se trabaja
 

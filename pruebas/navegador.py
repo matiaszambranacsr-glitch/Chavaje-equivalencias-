@@ -301,6 +301,37 @@ def probar(url, clave, carpeta):
             if _url != "https://wa.me/5491145678901?text=te%20pido%204%20unidades":
                 fallas.append("el link de WhatsApp no lleva lo recién escrito: abrió " + _url)
 
+        # 7c. 📁 CARGAR EXCEL: la fila de los títulos es la de CADA archivo. Al cambiar de lista,
+        # la app borraba la clave del campo, pero el navegador seguía mostrando el número de la
+        # lista anterior y lo mandaba de vuelta: la segunda se importaba desde la fila de la
+        # primera y sus primeros productos se perdían como títulos. Ahora la clave lleva la
+        # huella del archivo. La prueba sin navegador no lo ve.
+        _con_tapa = os.path.join(carpeta, "lista_con_tapa.csv")
+        _sin_tapa = os.path.join(carpeta, "lista_sin_tapa.csv")
+        with open(_con_tapa, "w", encoding="utf-8") as f:
+            f.write("LISTA DE PRECIOS ZETA;;\nVigencia noviembre;;\nCodigo;Descripcion;Precio\n"
+                    + "".join(f"Z{i};FILTRO {i};{100 + i}\n" for i in range(1, 9)))
+        with open(_sin_tapa, "w", encoding="utf-8") as f:
+            f.write("Codigo;Descripcion;Precio\n"
+                    + "".join(f"Y{i};BUJIA {i};{200 + i}\n" for i in range(1, 9)))
+        _ir(pagina, "Cargar Excel")
+        _fila = pagina.locator('[class*="st-key-fila_encabezado"] input')
+        pagina.locator('[class*="st-key-_up_lista_"] input[type="file"]').set_input_files(_con_tapa)
+        if not _hasta(lambda: _fila.count() == 1, 15):
+            fallas.append("en 📁 Cargar Excel, al subir la lista no aparece la fila de los títulos")
+        else:
+            _fila_1 = _fila.input_value()
+            # La otra lista, subida directo encima (sin «🗑️ Usar otro archivo», que borra el
+            # campo y así lo limpiaba): es lo que pasaba.
+            pagina.locator('[class*="st-key-_up_lista_"] input[type="file"]').set_input_files(
+                _sin_tapa)
+            _hasta(lambda: _fila.count() == 1 and _fila.input_value() != _fila_1, 15)
+            _fila_2 = _fila.input_value() if _fila.count() else None
+            if (_fila_1, _fila_2) != ("3", "1"):
+                fallas.append("en 📁 Cargar Excel, la fila de los títulos no es la de cada lista: "
+                              f"con tapa {_fila_1}, la siguiente sin tapa {_fila_2} "
+                              "(tenía que ser 3 y 1)")
+
         # 8. EN UN TELÉFONO, sin contraseña, que es como lo abre un cliente. Un teléfono
         # simulado de verdad (táctil): achicando la ventana de la computadora lo del celular no
         # se aplica, y así se pasó por alto que la burbuja del asistente salía de 16 x 54

@@ -121,6 +121,13 @@ if pagina == PAGINAS[2]:
         # tapa dejaba «fila 3», la siguiente (sin tapa) se leía desde la fila 3, y sus dos
         # primeros productos se perdían como si fueran los títulos.
         _identidad = identidad_del_archivo(archivo)
+        # Y LAS CLAVES LLEVAN LA HUELLA DEL ARCHIVO. Borrar la clave (lo de abajo) no alcanza en
+        # el navegador: el campo sigue mostrando el número del archivo anterior y lo manda de
+        # vuelta en el toque siguiente (se probó en un navegador de verdad). Con otra clave, el
+        # campo es otro y arranca con lo que se detectó para este archivo.
+        _huella_archivo = (hashlib.md5(repr(_identidad).encode()).hexdigest()[:8]
+                           if _identidad is not None else "sin_archivo")
+        _clave_fila = f"fila_encabezado_{_huella_archivo}"
         if _identidad is not None and _identidad != st.session_state.get("_archivo_de_la_carga"):
             _habia_otro = st.session_state.get("_archivo_de_la_carga") is not None
             st.session_state["_archivo_de_la_carga"] = _identidad
@@ -157,7 +164,8 @@ if pagina == PAGINAS[2]:
                 indice_sug = [n for n, _ in hojas].index(sugerida)
                 elegida_lbl = st.selectbox(
                     f"El archivo tiene {len(hojas)} hojas — ¿cuál es la lista?",
-                    list(etiquetas_hojas.keys()), index=indice_sug, key="hoja_excel",
+                    list(etiquetas_hojas.keys()), index=indice_sug,
+                    key=f"hoja_excel_{_huella_archivo}",
                     help="Se propone la que más filas tiene."
                 )
                 hoja_elegida = etiquetas_hojas[elegida_lbl]
@@ -179,7 +187,7 @@ if pagina == PAGINAS[2]:
             header_row = st.number_input(
                 "Fila donde están los títulos de las columnas:",
                 min_value=1, max_value=max(len(todas_filas), 1), value=header_auto + 1,
-                step=1, key="fila_encabezado",
+                step=1, key=_clave_fila,
                 help="Se detecta sola. Corregila si la vista previa no muestra los títulos "
                      "correctos en la primera fila."
             ) - 1
@@ -710,7 +718,7 @@ if pagina == PAGINAS[2]:
         _importar_igual = True
         if _problemas_del_mapeo and not _graves:
             _importar_igual = st.checkbox("Revisé los avisos del mapeo y quiero importar igual",
-                                          key="importar_con_dudas")
+                                          key=f"importar_con_dudas_{_huella_archivo}")
         procesar = st.button("📥 Procesar e importar la lista", type="primary",
                              disabled=bool(_graves) or not _importar_igual)
         if _graves:
@@ -730,7 +738,7 @@ if pagina == PAGINAS[2]:
                     # La MISMA fila que se eligió arriba. Si acá se volviera a detectar por
                     # separado, la vista previa y la carga real podrían leer filas distintas y
                     # uno importaría algo diferente de lo que vio.
-                    header_row = max(0, st.session_state.get("fila_encabezado", 1) - 1)
+                    header_row = max(0, st.session_state.get(_clave_fila, 1) - 1)
 
                     # Releer completo (leer_excel con nrows=200 antes era solo para la vista previa)
                     # La MISMA hoja que se eligió arriba: si acá se releyera sin ese dato, se
