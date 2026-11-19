@@ -131,6 +131,7 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO — VISOR DE ESQUEMAS
         · EL TALLER ANOTA EN QUÉ AUTO LO PUSO
         · CUENTA CORRIENTE DE LOS TALLERES
+        · COBRAR LO VENCIDO: EL RECORDATORIO POR WHATSAPP
         · PASAR EL LÍMITE CON PERMISO
         · INTERÉS POR MORA (con la tasa del BCRA)
         · LA CONSULTA DEL CLIENTE: su auto, sin entrar a la app

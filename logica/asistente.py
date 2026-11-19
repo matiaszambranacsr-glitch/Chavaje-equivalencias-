@@ -623,6 +623,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Buscá la cuenta por una parte del nombre, el CUIT o el número. Ahí están sus "
      "«📒 Movimientos», «➕ Cargar a la cuenta» y «💵 Registrar un pago».",
      "💳 Cuentas corrientes", ""),
+    ("cobrar_vencido", "Cobrarles lo vencido a las cuentas (recordatorio por WhatsApp)",
+     "vencido vencidos vencida deudor deudores moroso morosos atrasado atrasados reclamar "
+     "recordar recordatorio recordarle deben debe whatsapp cuentas",
+     "Abrí «📲 Cobrar lo vencido»: están las cuentas que deben vencido, cada una con "
+     "«📲 Recordarle» (abre WhatsApp con el mensaje ya escrito, al número de la cuenta). "
+     "Después de mandarlo tocá «✅ Ya se lo recordé»: pasa al final por una semana.",
+     "💳 Cuentas corrientes", ""),
     ("limite", "Cambiar el límite, el descuento o el plazo de una cuenta",
      "limite credito tope descuento plazo dias vencimiento interes mora tasa bcra punitorio "
      "configurar cuenta",

@@ -1526,6 +1526,20 @@ if pagina == PAGINAS[3]:
                               for r in _resumen_cc], width="stretch", hide_index=True,
                              height=min(420, 38 * (len(_resumen_cc) + 1)))
 
+                # COBRAR LO VENCIDO (ver cuentas_para_recordar()): cada una con su WhatsApp ya
+                # escrito. Perezoso: arma los mensajes recién al abrirlo.
+                _vencidas_cc = [r["Vencido"] for r in _resumen_cc if (r["Vencido"] or 0) >= 1]
+                if _vencidas_cc:
+                    # El título va con la clave fija (exp_cobrar_vencido): cambia con la plata y
+                    # no se cierra por eso.
+                    _exp_cobrar = st.expander(
+                        f"📲 Cobrar lo vencido: \\${miles(sum(_vencidas_cc), 0)} de "
+                        f"{miles(len(_vencidas_cc))} cuenta(s), recordándoselo por WhatsApp",
+                        key="exp_cobrar_vencido", on_change="rerun")
+                    if _exp_cobrar.open:
+                        with _exp_cobrar:
+                            mostrar_cobrar_lo_vencido()
+
             # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta. Ver
             # mostrar_permisos_de_limite().
             mostrar_permisos_de_limite()
@@ -1616,7 +1630,7 @@ if pagina == PAGINAS[3]:
                             help="Antes de recibirlo: si está denunciado como robado, extraviado "
                                  "o adulterado. No dice si tiene fondos. Consulta oficial y "
                                  "gratuita.")
-                _bancos = bancos_del_bcra()
+                _bancos = bancos_del_bcra(esperar=False)
                 _vc1, _vc2 = st.columns([3, 2])
                 if _bancos:
                     _nombres_b = {f"{n} ({cod})": cod for cod, n in _bancos}

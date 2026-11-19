@@ -6930,6 +6930,7 @@ Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la
 - **«Qué hacer con lo que no se encontró»** se rehacía en cada toque. Ahora se recuerda mientras no se anote otra búsqueda ni cambie un producto o un vínculo.
 - **El historial de precios** tiene 71.813 renglones para 71.636 productos: casi todos tienen un solo precio. Las dos consultas que comparan precios ahora miran solo los 155 que tienen dos o más, y dan lo mismo (comparado fila por fila con la copia real; `pruebas_de_la_plata_y_el_stock.py` (8) arma un historial a mano y pasa con la versión vieja y la nueva).
 - **La lista de bancos del BCRA** para verificar un cheque se pide al abrir «💳 Cuentas corrientes». Si el BCRA no contestaba —está caído, o no le contesta a un servidor de afuera del país—, lo volvía a intentar en cada toque, esperando hasta 8 s. Las tasas del BCRA ya esperaban 30 minutos después de un fallo; los bancos ahora también, y si había una lista vieja queda esa. En la copia de la base real la lista no está: nunca se pudo traer. Mientras no esté, la pantalla pide el código del banco a mano, como antes.
+  Y desde noviembre de 2026 la pantalla **no la espera**: si hay que traerla, la trae un hilo aparte y se ve en el toque siguiente (`bancos_del_bcra(esperar=False)`). Con la espera de 30 minutos igual quedaba, una vez por mes, un toque de hasta 8 s: lo mostró la prueba de las dos mil cuentas, que a veces tardaba 12 s en vez de 4.
 - **La NHTSA**, igual: la lista de modelos de «🇺🇸 Campañas de seguridad…» se pide en cada toque con la sección abierta. Si no contestó, se recuerda 5 minutos.
 
 `pruebas_de_las_fuentes.py` controla las esperas: con la versión vieja, falla.
@@ -7736,6 +7737,24 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
   vencido)»** (se compara por los últimos 8 números, como el resto de la app).
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
+
+## 📲 Cobrar lo vencido: el recordatorio por WhatsApp, cuenta por cuenta
+
+Lo vencido se veía sumado arriba del resumen de las cuentas, pero para cobrarlo había que abrir
+cuenta por cuenta, buscar el teléfono y escribir el mensaje. Ahora, en 🗂️ Administrar → 💳
+Cuentas corrientes, debajo del resumen, está **«📲 Cobrar lo vencido: $X de N cuenta(s)»**. Al
+abrirlo, cada cuenta que debe vencido con:
+
+- **«📲 Recordarle»**: abre WhatsApp al número de la cuenta (ver arriba) con el mensaje escrito
+  —«Hola Taller García! Te escribimos de El Chavo. En tu cuenta corriente hay $185.000
+  vencidos (el saldo total es $200.000). ¿Cuándo podés pasar a regularizarlo? ¡Gracias!»—. La
+  que no tiene WhatsApp anotado dice «(elegís a quién)»: WhatsApp pregunta a quién mandarlo.
+- **«✅ Ya se lo recordé»**: el link no avisa si se mandó, así que se toca después. Queda la
+  fecha («Se le recordó hace 3 días»), una línea en el registro de cambios, y la cuenta pasa al
+  final de la lista por una semana (`DIAS_PARA_VOLVER_A_RECORDAR`, en `logica/mecanico.py`).
+
+Primero las que toca recordar (🔴: nunca, o hace una semana o más), las que más deben primero;
+se muestran 30 de una vez. El asistente, en «¿qué está esperando?», dice a cuántas toca.
 
 ## 📦 Avisarle al que esperaba algo que ahora hay
 

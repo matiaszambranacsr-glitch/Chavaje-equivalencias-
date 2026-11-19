@@ -1673,6 +1673,9 @@ def _esquema_gestion(c):
     # El WhatsApp de la cuenta (ver telefono_de_la_cuenta() en logica/mecanico.py).
     if "telefono" not in _cols_mecanicos:
         c.execute("ALTER TABLE mecanicos ADD COLUMN telefono TEXT")
+    # Cuándo se le recordó lo vencido por WhatsApp (ver cuentas_para_recordar()).
+    if "recordado_en" not in _cols_mecanicos:
+        c.execute("ALTER TABLE mecanicos ADD COLUMN recordado_en TEXT")
 
     # Presupuestos armados por mecánicos externos: repuestos elegidos + su propia mano de obra.
     c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_mecanico (

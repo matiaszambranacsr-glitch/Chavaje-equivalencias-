@@ -2155,7 +2155,7 @@ def cuit_valido(cuit):
     return limpio if verificador == int(limpio[10]) else None
 
 
-def bancos_del_bcra():
+def bancos_del_bcra(esperar=True):
     """[(código, nombre)] de las entidades que emiten cheques, según el BCRA. Se recuerda 30
     días en la configuración; [] si nunca se pudo traer.
 
@@ -2163,7 +2163,13 @@ def bancos_del_bcra():
     tasas_de_referencia()). Se pide al dibujar «💳 Cuentas corrientes», y sin la espera, con
     el BCRA caído o sin contestarle al servidor, cada toque en esa pantalla esperaba hasta 8 s.
     En la copia de la base real la lista no está: nunca se trajo. Mientras tanto la pantalla
-    pide el código del banco a mano."""
+    pide el código del banco a mano.
+
+    esperar=False (lo que usa la pantalla): si hay que traerla, la trae un hilo aparte y
+    devuelve la que hay (o []); la ve el toque siguiente. Con la espera de los reintentos
+    igual quedaba una vez por mes —y una cada MINUTOS_ANTES_DE_REINTENTAR con el BCRA caído—
+    un toque de hasta 8 s en Cuentas corrientes: se vio en la prueba de las dos mil cuentas,
+    que a veces tardaba 12 s en vez de 4."""
     try:
         guardado = json.loads(obtener_config("bancos_del_bcra", "") or "{}")
     except (ValueError, TypeError):
@@ -2179,7 +2185,9 @@ def bancos_del_bcra():
     fresco = ((traido is not None and traido < timedelta(days=30))
               or (intentado is not None
                   and intentado < timedelta(minutes=MINUTOS_ANTES_DE_REINTENTAR)))
-    if not fresco:
+    if not fresco and not esperar:
+        _traer_los_bancos_en_otro_hilo()
+    elif not fresco:
         estado, cuerpo = _pedir_al_bcra(URL_BCRA_BANCOS)
         bancos = []
         for b in ((cuerpo or {}).get("results") or []) if estado == 200 else []:
@@ -2194,6 +2202,24 @@ def bancos_del_bcra():
             guardado = dict(guardado, intentado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         guardar_config("bancos_del_bcra", json.dumps(guardado))
     return [tuple(b) for b in guardado.get("bancos") or []]
+
+
+def _traer_los_bancos_en_otro_hilo():
+    """bancos_del_bcra() por atrás, uno a la vez (como _traer_el_contexto_en_otro_hilo())."""
+    if os.environ.get("EQUIVALENCIAS_SIN_TAREAS_DE_FONDO") == "1":
+        return
+    candado = del_proceso("candado_de_los_bancos_del_bcra", threading.Lock)
+    if not candado.acquire(blocking=False):
+        return
+
+    def _traer():
+        try:
+            bancos_del_bcra(esperar=True)
+        except Exception as _err:          # nada de acá puede romper nada
+            anotar_error("bancos_del_bcra", _err)
+        finally:
+            candado.release()
+    threading.Thread(target=_traer, daemon=True, name="bancos_del_bcra").start()
 
 
 def consultar_cheque(codigo_entidad, numero):

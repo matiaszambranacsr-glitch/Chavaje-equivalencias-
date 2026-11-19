@@ -1763,6 +1763,114 @@ def anular_movimiento_de_cuenta(movimiento_id):
 
 
 # ============================================================
+# COBRAR LO VENCIDO: EL RECORDATORIO POR WHATSAPP
+# ============================================================
+# Lo vencido se veía sumado arriba del resumen de las cuentas, pero para cobrarlo había que abrir
+# cuenta por cuenta, buscar el teléfono en la agenda y escribir el mensaje: con cuarenta talleres
+# debiendo, no se hacía. Ahora sale la lista de las que deben vencido, cada una con su WhatsApp
+# ya escrito (al número de la cuenta, ver telefono_de_la_cuenta()), y cuándo se le recordó por
+# última vez: para no escribirle todos los días al mismo ni olvidarse del que debe hace meses.
+# Primero las que toca recordar (nunca, o hace una semana o más), las que más deben primero.
+DIAS_PARA_VOLVER_A_RECORDAR = 7
+
+
+def mensaje_de_lo_vencido(nombre, saldo, vencido):
+    """El recordatorio, como lo escribiría el que atiende: amable, con la plata y una pregunta
+    que pide respuesta (un «te recordamos» sin pregunta queda en visto)."""
+    nombre = str(nombre or "").strip()
+    texto = (f"Hola{(' ' + nombre) if nombre else ''}! Te escribimos de El Chavo. En tu cuenta "
+             f"corriente hay ${miles(vencido, 0)} vencidos")
+    if round(saldo or 0) > round(vencido or 0):
+        texto += f" (el saldo total es ${miles(saldo, 0)})"
+    return texto + ". ¿Cuándo podés pasar a regularizarlo? ¡Gracias!"
+
+
+def cuentas_para_recordar():
+    """Las cuentas con algo vencido: [dict] con ID, Taller, Vencido, Saldo, telefono (como está
+    anotado), recordado_hace (días, None si nunca), toca (si toca recordarle) y link (el
+    WhatsApp con el mensaje). Las que tocan primero; adentro, las que más deben vencido."""
+    vencidas = [r for r in resumen_de_cuentas() if (r["Vencido"] or 0) >= 1]
+    if not vencidas:
+        return []
+    # Todas de una vez y sin «IN (?, ?, …)»: con miles de cuentas debiendo, la lista de
+    # números se pasaría del tope de SQLite (ver «CON MILES DE CUENTAS» en logica/base.py).
+    datos = {f["id"]: f for f in c.execute(
+        """SELECT id, telefono,
+                  CAST(julianday('now') - julianday(recordado_en) AS INTEGER) AS hace
+           FROM mecanicos""").fetchall()}
+    salida = []
+    for r in vencidas:
+        f = datos.get(r["ID"])
+        hace = f["hace"] if f else None
+        telefono = str((f["telefono"] if f else "") or "")
+        salida.append({**r, "telefono": telefono, "recordado_hace": hace,
+                       "toca": hace is None or hace >= DIAS_PARA_VOLVER_A_RECORDAR,
+                       "tiene_whatsapp": bool(numero_para_whatsapp(telefono)),
+                       "link": link_de_whatsapp(telefono, mensaje_de_lo_vencido(
+                           r["Taller"], r["Saldo"], r["Vencido"]))})
+    salida.sort(key=lambda x: (not x["toca"], -x["Vencido"]))
+    return salida
+
+
+def marcar_recordatorio(mecanico_id):
+    """«✅ Ya se lo recordé»: queda la fecha (en UTC, como todo) y una línea en el registro."""
+    exigir_nivel("empleado", "anotar que se le recordó lo vencido a una cuenta")
+    with db_lock:
+        c.execute("UPDATE mecanicos SET recordado_en = datetime('now') WHERE id = ?",
+                  (int(mecanico_id),))
+        anotar_cambio("le recordó lo vencido", "cuenta", mecanico_id)
+        conn.commit()
+
+
+# Cuántas se muestran de una vez: las primeras son las que tocan y las que más deben; con
+# cientos debiendo, una lista más larga no se recorre.
+MAXIMO_DE_CUENTAS_PARA_RECORDAR = 30
+
+
+def _cuando_se_le_recordo(hace):
+    if hace is None:
+        return "Nunca se le recordó"
+    if hace == 0:
+        return "Se le recordó hoy"
+    return f"Se le recordó hace {miles(hace)} día(s)"
+
+
+def mostrar_cobrar_lo_vencido():
+    """En Cuentas corrientes, adentro de «📲 Cobrar lo vencido»: cada cuenta con su botón de
+    WhatsApp y el «✅ Ya se lo recordé». El link no avisa si se mandó (abre WhatsApp y nada
+    más): por eso el segundo botón, que se toca después de mandarlo."""
+    cuentas = cuentas_para_recordar()
+    if not cuentas:
+        st.caption("Ninguna cuenta debe nada vencido. 🎉")
+        return
+    tocan = sum(1 for x in cuentas if x["toca"])
+    sin_numero = sum(1 for x in cuentas if not x["tiene_whatsapp"])
+    st.caption(f"Toca recordarles a {miles(tocan)} de {miles(len(cuentas))} (nunca se les "
+               f"recordó, o hace {DIAS_PARA_VOLVER_A_RECORDAR} días o más), las que más deben "
+               "primero. Después de mandarlo, tocá «✅ Ya se lo recordé»."
+               + ((" 1 no tiene el WhatsApp anotado" if sin_numero == 1 else
+                   f" {miles(sin_numero)} no tienen el WhatsApp anotado")
+                  + ": se carga en la configuración de cada cuenta (📞), más abajo."
+                  if sin_numero else ""))
+    for x in cuentas[:MAXIMO_DE_CUENTAS_PARA_RECORDAR]:
+        with st.container(border=True, key=f"cc_cobrar_{x['ID']}"):
+            _c1, _c2, _c3 = st.columns([3, 2, 2], vertical_alignment="center")
+            _c1.markdown(f"{'🔴' if x['toca'] else '⚪'} **{texto_para_markdown(x['Taller'])}** "
+                         f"· vencido **\\${miles(x['Vencido'], 0)}**"
+                         + (f" de \\${miles(x['Saldo'], 0)}"
+                            if round(x["Saldo"]) > round(x["Vencido"]) else ""))
+            _c1.caption(_cuando_se_le_recordo(x["recordado_hace"])
+                        + ("" if x["tiene_whatsapp"] else " · sin WhatsApp anotado"))
+            _c2.link_button("📲 Recordarle" if x["tiene_whatsapp"]
+                            else "📲 Recordarle (elegís a quién)", x["link"], width="stretch")
+            _c3.button("✅ Ya se lo recordé", key=f"cc_recordado_{x['ID']}", width="stretch",
+                       on_click=marcar_recordatorio, args=(x["ID"],))
+    if len(cuentas) > MAXIMO_DE_CUENTAS_PARA_RECORDAR:
+        st.caption(f"Y {miles(len(cuentas) - MAXIMO_DE_CUENTAS_PARA_RECORDAR)} más: van "
+                   "apareciendo a medida que se les recuerda a estas.")
+
+
+# ============================================================
 # PASAR EL LÍMITE CON PERMISO
 # ============================================================
 # Lo pidió el dueño: cuando el límite de crédito frena una venta, el que atiende puede pedir

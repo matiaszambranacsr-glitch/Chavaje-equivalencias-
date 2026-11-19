@@ -67,6 +67,8 @@ ENTIENDE = (
     ("me escribieron por instagram como respondo", "como:contestar_mensaje"),
     ("como conecto el whatsapp y el facebook a la pagina", "como:conectar_canales"),
     ("como le mando la cotizacion al cliente que me pregunto por el chat", "como:cotizar_por_chat"),
+    ("como le reclamo a los que deben vencido", "como:cobrar_vencido"),
+    ("recordarle a los morosos por whatsapp", "como:cobrar_vencido"),
     ("cuanto me debe un cliente", "como:cuenta_corriente"),
     ("el taller de juan vino a pagar lo que debe", "como:cuenta_corriente"),
     ("cambiar el limite de credito", "como:limite"),

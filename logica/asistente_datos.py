@@ -27,7 +27,8 @@ mismo espacio de nombres que los otros archivos de logica/ (ver orden.py)."""
 FUNCIONES_QUE_PUEDE_USAR = (
     "resumen_de_la_caja", "ventas_a_cobrar", "pedidos_pendientes", "pendientes_por_pedido",
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
-    "autos_del_taller", "chats_sin_leer", "hoy_aca", "miles", "texto_para_markdown",
+    "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "hoy_aca", "miles",
+    "texto_para_markdown",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -225,9 +226,12 @@ def _dato_de_lo_pendiente(contexto):
             lineas.append(f"💬 **{miles(sin_leer)}** chat(s) de clientes sin leer.")
             botones += _asis_ir_a(_MENSAJES, contexto)
     if _ADMINISTRAR in visibles:
-        vencidas = [r for r in resumen_de_cuentas() if (r.get("Vencido") or 0) > 0]
+        vencidas = cuentas_para_recordar()
         if vencidas:
-            lineas.append(f"💳 **{miles(len(vencidas))}** cuenta(s) con saldo vencido.")
+            _tocan = sum(1 for r in vencidas if r["toca"])
+            lineas.append(f"💳 **{miles(len(vencidas))}** cuenta(s) con saldo vencido"
+                          + (f"; a {miles(_tocan)} toca recordárselo: «📲 Cobrar lo vencido», "
+                             "en 💳 Cuentas corrientes." if _tocan else "."))
     if _VEHICULOS in visibles:
         avisar_a = avisos_por_cliente(dias_de_aviso=30)
         if avisar_a:

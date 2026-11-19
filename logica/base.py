@@ -153,6 +153,7 @@ MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     "candado_de_la_tanda_de_fondo", "candado_de_las_tareas_del_dia",
     "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo",
     "candado_del_indice_de_busqueda", "candado_del_contexto_de_precios",
+    "candado_de_los_bancos_del_bcra",
     "candado_de_los_precios_dobles", "candado_de_los_precios_de_medida", "candado_de_arca",
     "copia_pedida_ya",
     "intentos_en_recuperacion",

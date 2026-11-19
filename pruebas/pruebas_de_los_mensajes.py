@@ -347,6 +347,56 @@ def probar():
             pass
         finally:
             _g["_nivel_de_quien_esta_adentro"] = _adentro
+        # COBRAR LO VENCIDO: la cuenta que debe vencido sale con su WhatsApp ya escrito; la que
+        # debe pero no vencido, no. «✅ Ya se lo recordé» la pasa al final por una semana.
+        esperar("el recordatorio, con el vencido y el total",
+                ns["mensaje_de_lo_vencido"]("Taller De Juan", 1500, 1000),
+                "Hola Taller De Juan! Te escribimos de El Chavo. En tu cuenta corriente hay "
+                "$1.000 vencidos (el saldo total es $1.500). ¿Cuándo podés pasar a "
+                "regularizarlo? ¡Gracias!")
+        _al_dia = ns["crear_mecanico"]("Taller Al Día")
+        c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, vence, anulado) "
+                  "VALUES (?, 'venta', 900, date('now', '+20 days'), 0)", (_al_dia,))
+        _debe_mas = ns["crear_mecanico"]("Taller Que Debe Más")
+        c.execute("INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, vence, anulado) "
+                  "VALUES (?, 'venta', 5000, date('now', '-10 days'), 0)", (_debe_mas,))
+        ns["conn"].commit()
+        _para_recordar = lambda: [(x["Taller"], x["toca"], x["recordado_hace"])
+                                  for x in ns["cuentas_para_recordar"]()]
+        esperar("las que deben vencido, la que más debe primero; la que está al día, no",
+                _para_recordar(), [("Taller Que Debe Más", True, None),
+                                   ("Taller De Juan", True, None)])
+        _juan_cobrar = [x for x in ns["cuentas_para_recordar"]() if x["ID"] == _cuenta_juan][0]
+        esperar("el recordatorio va al WhatsApp de la cuenta, ya escrito",
+                _juan_cobrar["link"], ns["link_de_whatsapp"]("11 5555-6666",
+                ns["mensaje_de_lo_vencido"]("Taller De Juan", 1000, 1000)))
+        cierto("y empieza con el número bien armado",
+               _juan_cobrar["link"].startswith("https://wa.me/5491155556666?text=Hola%20Taller"),
+               _juan_cobrar["link"][:60])
+        esperar("la que no tiene WhatsApp anotado: WhatsApp pregunta a quién",
+                [(x["tiene_whatsapp"], x["link"][:15]) for x in ns["cuentas_para_recordar"]()
+                 if x["ID"] == _debe_mas], [(False, "https://wa.me/?")])
+        ns["marcar_recordatorio"](_debe_mas)
+        esperar("ya se lo recordé: hoy, y pasa al final",
+                _para_recordar(), [("Taller De Juan", True, None),
+                                   ("Taller Que Debe Más", False, 0)])
+        cierto("queda en el registro de cambios",
+               c.execute("SELECT COUNT(*) FROM registro_de_cambios WHERE accion = "
+                         "'le recordó lo vencido'").fetchone()[0] == 1)
+        c.execute("UPDATE mecanicos SET recordado_en = datetime('now', '-8 days') WHERE id = ?",
+                  (_debe_mas,))
+        esperar("a la semana vuelve a tocar", _para_recordar()[0], ("Taller Que Debe Más", True, 8))
+        for _nivel in ("mecanico", ""):
+            try:
+                _g["_nivel_de_quien_esta_adentro"] = lambda _n=_nivel: _n
+                ns["marcar_recordatorio"](_cuenta_juan)
+                fallas.append(f"«{_nivel or 'invitado'}» pudo anotar un recordatorio")
+            except PermissionError:
+                pass
+            finally:
+                _g["_nivel_de_quien_esta_adentro"] = _adentro
+        c.execute("DELETE FROM movimientos_de_cuenta WHERE mecanico_id IN (?, ?)", (_al_dia, _debe_mas))
+        ns["conn"].commit()
         ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "")
         esperar("sin teléfono, ya no la reconoce", ns["cuenta_del_telefono"]("5491155556666"), None)
         esperar("las 24 horas", (ns["fuera_de_la_ventana"]({"ultimo_del_cliente_en": ns["_momento_utc"](None)}),
@@ -605,6 +655,26 @@ def probar():
         cierto("en el registro: que se borró, sin lo que decía",
                "borró un chat" in _registro and "hola" not in _registro, _registro)
         at.session_state["pagina_actual"] = ns["PAGINAS"][3]
+        at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
+        at.session_state["exp_conectar_canales"] = True
+        at.run()
+        # COBRAR LO VENCIDO en la pantalla: la cuenta de Juan, con su botón al WhatsApp de la
+        # cuenta y el «✅ Ya se lo recordé», que la anota.
+        ns["guardar_telefono_de_la_cuenta"](_cuenta_juan, "11 5555-6666")
+        at.session_state["sub_admin"] = ns["SUB_ADMIN"][6]
+        at.session_state["exp_cobrar_vencido"] = True
+        at.run()
+        _recordarle = [b.proto.url for b in at.get("link_button")
+                       if b.proto.label == "📲 Recordarle"]
+        cierto("en 💳 Cuentas corrientes: «📲 Recordarle», al WhatsApp de la cuenta",
+               any(u.startswith("https://wa.me/5491155556666?text=") for u in _recordarle),
+               (_recordarle, [e.value for e in at.exception]))
+        _ya = [b for b in at.button if b.key == f"cc_recordado_{_cuenta_juan}"]
+        cierto("y «✅ Ya se lo recordé»", _ya)
+        if _ya:
+            _ya[0].click().run()
+            esperar("que la anota", [x["recordado_hace"] for x in ns["cuentas_para_recordar"]()
+                                     if x["ID"] == _cuenta_juan], [0])
         at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
         at.session_state["exp_conectar_canales"] = True
         at.run()

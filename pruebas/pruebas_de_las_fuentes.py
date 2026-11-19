@@ -491,6 +491,35 @@ def probar(L):
                 [(7, "GALICIA")])
         esperar("bancos: y también espera", (g["bancos_del_bcra"](), len(_llamadas)),
                 ([(7, "GALICIA")], 2))
+        # La pantalla no espera: con el BCRA lento (acá, 3 s), vuelve en el acto con la lista que
+        # hay, y la nueva la trae un hilo aparte (en la prueba de las dos mil cuentas,
+        # «💳 Cuentas corrientes» a veces tardaba 12 s en vez de 4 por esto).
+        import threading
+        import time as _time
+        _ya_contesto = threading.Event()
+
+        def _bcra_lento(url, tiempo_maximo=8):
+            _time.sleep(3)
+            _ya_contesto.set()
+            return 200, {"results": [{"codigoEntidad": 11, "denominacion": "NACION"}]}
+        g["_pedir_al_bcra"] = _bcra_lento
+        g["guardar_config"]("bancos_del_bcra", json.dumps(
+            {"bancos": [[7, "GALICIA"]], "traido": "2020-01-01 00:00:00"}))
+        _antes_del_hilo = os.environ.pop("EQUIVALENCIAS_SIN_TAREAS_DE_FONDO", None)
+        try:
+            _inicio = _time.time()
+            _sin_esperar = g["bancos_del_bcra"](esperar=False)
+            esperar("bancos sin esperar: vuelve en el acto, con la que hay",
+                    (_sin_esperar, _time.time() - _inicio < 1), ([(7, "GALICIA")], True))
+            _ya_contesto.wait(10)
+            for _ in range(50):              # lo que tarda el hilo en guardarla
+                if g["bancos_del_bcra"](esperar=False) != [(7, "GALICIA")]:
+                    break
+                _time.sleep(0.1)
+            esperar("y el hilo trae la nueva", g["bancos_del_bcra"](esperar=False), [(11, "NACION")])
+        finally:
+            if _antes_del_hilo is not None:
+                os.environ["EQUIVALENCIAS_SIN_TAREAS_DE_FONDO"] = _antes_del_hilo
     finally:
         g["_pedir_al_bcra"] = _pedir_al_bcra_original
 
