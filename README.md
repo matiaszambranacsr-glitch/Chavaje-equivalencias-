@@ -7762,7 +7762,9 @@ Se volvió todo a la fecha guardada, y ahora:
 - **`pruebas/pruebas_de_las_horas.py` recorre todas las pantallas y solapas** con todas las fechas
   guardadas a las 22:30 de hoy (01:30 UTC de mañana) y falla si en algo que se ve —textos,
   botones, opciones, desplegables o tablas— aparece «01:30» (la hora del servidor) o «19:30»
-  (corrida dos veces) —también en cada grupo de 🧹 Mantenimiento y en la ficha de un auto—; y
+  (corrida dos veces) —también en cada grupo de 🧹 Mantenimiento y en la ficha de un auto, y en
+  las dos vistas, la del celular y la de la computadora (la prueba de las pantallas mira solo la
+  del celular), con lo que también salta una pantalla que se rompa en cualquiera de las dos—; y
   exige ver «22:30» en la Caja, Cuentas corrientes, Para pedir, la papelera y esa ficha, para no
   dar verde sin mirar nada. Con `--base <copia>` corre sobre la base real. Probada metiendo los
   dos errores a propósito: la doble conversión de las consultas y la hora de la caja sin pasar;

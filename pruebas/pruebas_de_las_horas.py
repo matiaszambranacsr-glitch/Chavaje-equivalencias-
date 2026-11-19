@@ -135,6 +135,11 @@ def probar():
                         f"{ns['PAGINAS'][3]} → {_mant} → {grupo}"))
     lugares.append((ns["PAGINAS"][6], {"patente_buscar": "AB999HH"},
                     f"{ns['PAGINAS'][6]} → AB 999 HH"))
+    # Dos pasadas: en el celular (lo que AppTest elige solo) y en la computadora. La prueba de
+    # las pantallas mira solo el celular; acá también se ve si algo se rompe en la otra vista.
+    _vistas = ns["VISTAS"]
+    lugares = [(p, {"modo_vista": _vistas[0], **e}, d) for p, e, d in lugares] + [
+        (p, {"modo_vista": _vistas[1], **e}, f"{d} (computadora)") for p, e, d in lugares]
     for pagina, estado, donde in lugares:
         at.session_state["pagina_actual"] = pagina
         for _clave, _valor in estado.items():
@@ -154,7 +159,8 @@ def probar():
               for donde, cosas in mal.items()]
     fallas += [f"{donde}: se rompió" for donde in rotas]
     fallas += [f"{donde}: no muestra la hora buena (22:30): la prueba no estaría mirando nada"
-               for donde in _TIENEN_QUE_MOSTRARLA if donde not in bien]
+               for donde in _TIENEN_QUE_MOSTRARLA
+               + tuple(f"{x} (computadora)" for x in _TIENEN_QUE_MOSTRARLA) if donde not in bien]
     return fallas, sorted(bien)
 
 
@@ -172,8 +178,9 @@ def main():
             print("   ✗", f[:300])
         if "-v" in sys.argv:
             print("   la muestran:", ", ".join(bien))
-        print(f"✅ horas: en ninguna pantalla con la hora del servidor ni corrida dos veces "
-              f"({len(bien)} muestran la de acá)" if not fallas else f"{len(fallas)} falla(s)")
+        print(f"✅ horas: en ninguna pantalla con la hora del servidor ni corrida dos veces, en el "
+              f"celular ni en la computadora ({len(bien)} muestran la de acá)"
+              if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
         os.chdir(RAIZ)
