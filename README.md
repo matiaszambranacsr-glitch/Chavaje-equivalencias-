@@ -7740,6 +7740,28 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
 
+## 📲 Lo recién escrito, en el link de WhatsApp; y el WhatsApp de cada proveedor
+
+**Un link no espera a que salgas de la caja.** Lo escrito le llega a la app recién al salir del
+campo; si se escribía «te pido 4 unidades» y se tocaba directo un «📲 …» (que es un link),
+WhatsApp se abría con el texto de antes. Pasaba en «✉️ Escribirle a un número nuevo», en el
+chat de más de 24 horas de 💬 Mensajes y en el pedido al proveedor. Ahora el script del
+navegador, al tocar un link con clave `walink__` + la clave de la caja, le pone lo que dice la
+caja en ese momento (ver `AYUDAS_DEL_NAVEGADOR`). Lo prueba `pruebas/navegador.py` (7b).
+
+**El pedido al proveedor** (📊 Estadísticas → 📌 Para pedir → «📲 Armar mensaje para el
+proveedor»): el botón mandaba el mensaje armado, y lo que se le corregía (las cantidades,
+«urgente») no viajaba; ahora va como quedó escrito. Y al lado del mensaje está **«WhatsApp del
+proveedor de MARCA»**: se anota una vez, queda guardado en la marca
+(`whatsapp_del_proveedor()`, en `logica/negocio.py`) y el botón pasa a ser «📲 Mandárselo por
+WhatsApp», directo a ese número. Lo anota cualquiera del personal y queda en el registro.
+
+**Un tropiezo que se evitó antes de subir**: un comentario del script que decía
+`walink__<clave de la caja>` hizo que Streamlit descartara el script entero —sin F1, F2, F9,
+F10, click derecho ni textos en castellano—, sin ningún error a la vista. Lo vio la prueba del
+navegador. `auditar.py` ahora no deja escribir nada parecido a una etiqueta (`<algo`) adentro de
+`AYUDAS_DEL_NAVEGADOR`, salvo `<script>`.
+
 ## 🧭 Un rótulo que cambia te manda a otro lado (y lo escrito en un chat que se perdía)
 
 Probando 💬 Mensajes en un navegador de verdad aparecieron dos errores que las pruebas sin
@@ -7754,9 +7776,11 @@ navegador no ven:
   a otra lista: un comentario lo daba por arreglado, y en el navegador seguía), «Grupo» y
   «Motivo» de la revisión por grupos, «Cuáles mirar» de los dudosos en Limpiar, y «Factura de la
   venta» en la caja (el «🧾 Factura …» aparecía en el rótulo al hacerla). La cantidad pasó a un
-  texto al lado. `auditar.py` ahora avisa de una cuenta en el rótulo de un `st.radio` o un
-  `st.selectbox` (o `# rótulo fijo` si no cambia mientras se está ahí); `st.pills` y
-  `st.segmented_control` no tienen el problema.
+  texto al lado. `auditar.py` ahora avisa de una cuenta en el rótulo de un `st.radio`, un
+  `st.selectbox` o un `st.multiselect` (o `# rótulo fijo` si no cambia mientras se está ahí);
+  `st.pills` y `st.segmented_control` no tienen el problema, y cambiar el **título** del campo
+  tampoco molesta a ninguno (se probó con todos). «Marcar para pedir», en 📌 Para pedir, llevaba
+  el «se acaba en» en el texto de cada opción: cambiaba con cada venta y borraba lo elegido.
 - **Lo escrito en la respuesta se borraba al tocar una respuesta rápida.** La caja estaba en un
   formulario, y lo escrito no le llegaba a la app hasta «📤 Enviar»: «Hola! Te cuento:» +
   «¡Hola! ¿En qué te ayudo?» quedaba solo en la frase. Ahora la caja está suelta.

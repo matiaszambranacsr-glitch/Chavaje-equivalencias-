@@ -660,6 +660,9 @@ def _esquema_catalogo(c):
     columnas_marcas = [f[1] for f in c.execute("PRAGMA table_info(marcas)").fetchall()]
     if "url_ficha_template" not in columnas_marcas:
         c.execute("ALTER TABLE marcas ADD COLUMN url_ficha_template TEXT")
+    # El WhatsApp de a quién se le compra esa marca (ver whatsapp_del_proveedor()).
+    if "whatsapp_proveedor" not in columnas_marcas:
+        c.execute("ALTER TABLE marcas ADD COLUMN whatsapp_proveedor TEXT")
 
     c.execute("""CREATE TABLE IF NOT EXISTS productos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

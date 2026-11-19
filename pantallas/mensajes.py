@@ -118,9 +118,12 @@ if pagina == PAGINAS[12]:
                     st.warning("No entiendo ese número: va con la característica, por ejemplo "
                                "11 4567-8901 o 0341 15 555-0000.")
                 else:
+                    # La clave «walink__…» le dice al navegador de qué caja tomar el texto al
+                    # tocarlo, aunque recién se haya escrito (ver AYUDAS_DEL_NAVEGADOR).
                     st.link_button("📱 Abrirlo en WhatsApp para mandarlo",
                                    link_de_whatsapp(_numero_nuevo, _texto_nuevo.strip()),
-                                   type="primary", width="stretch")
+                                   type="primary", width="stretch",
+                                   key="walink__msj_texto_nuevo")
                     st.caption(f"Va a +{numero_para_whatsapp(_numero_nuevo)}. Lo mandás vos desde "
                                "WhatsApp, gratis; cuando conteste, el chat aparece acá.")
 
@@ -277,7 +280,8 @@ if pagina == PAGINAS[12]:
                                        f"https://wa.me/{_chat_msj['externo']}"
                                        + (f"?text={quote(_texto_fuera.strip())}"
                                           if _texto_fuera.strip() else ""),
-                                       type="primary", width="stretch")
+                                       type="primary", width="stretch",
+                                       key=f"walink__msj_fuera_{_abierto_msj}")
                     else:
                         # Facebook e Instagram: se contesta desde la bandeja de Meta.
                         st.link_button("📱 Abrir la bandeja de Meta",

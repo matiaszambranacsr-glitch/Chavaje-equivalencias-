@@ -277,6 +277,29 @@ def probar(url, clave, carpeta):
                             and len(respuesta.input_value()) > len("Hola! Te cuento: ")):
                 fallas.append("en 💬 Mensajes, tocar una respuesta rápida borra lo escrito: "
                               f"quedó {respuesta.input_value()!r}")
+        #  · Y el link de WhatsApp lleva lo recién escrito aunque no se haya salido de la caja:
+        #    se escribía «te pido 4 unidades», se tocaba directo el link y WhatsApp se abría con
+        #    el texto de antes (ver «walink__» en AYUDAS_DEL_NAVEGADOR). Nada sale a internet.
+        pagina.context.route("https://wa.me/**", lambda r: r.fulfill(body="ok"))
+        pagina.locator(".st-key-exp_numero_nuevo summary").first.click()
+        _esperar(pagina, 1)
+        numero = pagina.locator(".st-key-msj_numero_nuevo input")
+        numero.fill("11 4567-8901")
+        numero.press("Enter")
+        _esperar(pagina, 2)
+        mensaje = pagina.locator(".st-key-msj_texto_nuevo textarea")
+        link = pagina.locator(".st-key-walink__msj_texto_nuevo a")
+        if not (mensaje.count() and _hasta(lambda: link.count() == 1)):
+            fallas.append("en «✉️ Escribirle a un número nuevo» no aparece el link de WhatsApp")
+        else:
+            mensaje.click()
+            mensaje.type("te pido 4 unidades", delay=10)
+            with pagina.context.expect_page() as nueva:
+                link.click()
+            _url = nueva.value.url
+            nueva.value.close()
+            if _url != "https://wa.me/5491145678901?text=te%20pido%204%20unidades":
+                fallas.append("el link de WhatsApp no lleva lo recién escrito: abrió " + _url)
 
         # 8. EN UN TELÉFONO, sin contraseña, que es como lo abre un cliente. Un teléfono
         # simulado de verdad (táctil): achicando la ventana de la computadora lo del celular no

@@ -605,10 +605,11 @@ a traer solas desde Administrar → Mantenimiento.
             if sin_stock:
                 st.error(f"🔴 {len(sin_stock)} producto(s) que se venden seguido están **en cero**.")
             st.dataframe(quitar_id(por_quebrar), width="stretch", hide_index=True)
-            # Por el producto, y el «se acaba en» solo se muestra: cambia con cada venta, y lo ya
-            # elegido se perdía (ver «Lista a revisar»).
-            etiquetas_q = {x["_id"]: f"{x['Código']} ({x['Marca']}) — {x['Se acaba en']}"
-                           for x in por_quebrar}
+            # Por el producto, y sin el «se acaba en», que cambia con cada venta y está en la
+            # tabla de arriba. Como texto de la opción tampoco alcanzaba: en el navegador, si el
+            # texto de las opciones cambia, el toque siguiente borra lo elegido (ver «Lista a
+            # revisar» y cuenta_en_la_barra()).
+            etiquetas_q = {x["_id"]: f"{x['Código']} ({x['Marca']})" for x in por_quebrar}
             elegidos_q = st.multiselect("Marcar para pedir:", list(etiquetas_q),
                                          key="quiebre_a_pedir", placeholder="Elegí uno o más",
                                          format_func=etiquetas_q.get)
@@ -700,9 +701,31 @@ a traer solas desde Administrar → Mantenimiento.
                     )
                 mensaje_reposicion = "\n".join(lineas_msg)
                 with st.expander(f"📨 {marca} ({len(items)} ítem(s))", key=f"exp_envio_{marca}"):
-                    st.text_area("Mensaje:", value=mensaje_reposicion, height=120, key=f"msg_repo_{marca}")
-                    url_wa_repo = "https://wa.me/?text=" + quote(mensaje_reposicion)
-                    st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
+                    # Lo que se manda es lo que quedó escrito: antes el botón llevaba el mensaje
+                    # armado, y lo que se le corregía (las cantidades, «urgente») no viajaba.
+                    # Claves sin espacios ni signos: el navegador busca la caja por su clave (ver
+                    # el link de abajo), y «MANN FILTER» se partiría en dos.
+                    _id_marca = (re.sub(r"[^0-9A-Za-z_]", "_", marca)
+                                 + "_" + hashlib.md5(marca.encode()).hexdigest()[:6])
+                    _msg_final = st.text_area("Mensaje:", value=mensaje_reposicion, height=120,
+                                              key=f"msg_repo_{_id_marca}")
+                    # Y a quién: el WhatsApp del proveedor de esa marca, anotado una vez (ver
+                    # whatsapp_del_proveedor()). Se guarda al escribirlo.
+                    _clave_tel_prov = f"wa_prov_{marca}"
+                    st.session_state.setdefault(_clave_tel_prov, whatsapp_del_proveedor(marca))
+                    _tel_prov = st.text_input(
+                        f"WhatsApp del proveedor de {marca}:", key=_clave_tel_prov,
+                        placeholder="Ej.: 11 4567-8901 (queda guardado para la próxima)",
+                        on_change=lambda _m=marca, _k=_clave_tel_prov: guardar_whatsapp_del_proveedor(
+                            _m, st.session_state.get(_k)))
+                    if _tel_prov.strip() and not numero_para_whatsapp(_tel_prov):
+                        st.warning("Ese número no sirve para WhatsApp: tiene que llevar la "
+                                   "característica (11, 351, 2214…).")
+                    st.link_button(f"📲 Mandárselo por WhatsApp ({marca})"
+                                   if numero_para_whatsapp(_tel_prov)
+                                   else f"📲 Abrir WhatsApp para {marca} (elegís a quién)",
+                                   link_de_whatsapp(_tel_prov, _msg_final),
+                                   key=f"walink__msg_repo_{_id_marca}")
 
         st.markdown("---")
         st.markdown("**📈 Cuánto te aumentó cada proveedor**")

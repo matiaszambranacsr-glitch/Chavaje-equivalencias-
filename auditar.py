@@ -2662,6 +2662,21 @@ for _n in ast.walk(ARBOL):
             and getattr(_n.value.func.value, "id", None) == "datetime"):
         reportar("ERROR", _n.lineno, "la hora de ahora para mostrar va con ahora_aca(): "
                                      "datetime.now() es UTC")
+# NADA PARECIDO A UNA ETIQUETA ADENTRO DEL SCRIPT DEL NAVEGADOR. Un comentario que decía
+# «walink__<clave de la caja>» hizo que Streamlit descartara el st.html entero, sin aviso: se
+# cayeron F1, F2, F9, F10, el click derecho y los textos en castellano (lo vio la prueba del
+# navegador antes de subir). Adentro de AYUDAS_DEL_NAVEGADOR, «<» solo en <script> y </script>;
+# para comparar, con espacio: «a < b».
+for _n in ast.walk(ARBOL):
+    if (isinstance(_n, ast.Assign) and any(getattr(_t, "id", None) == "AYUDAS_DEL_NAVEGADOR"
+                                           for _t in _n.targets)
+            and isinstance(_n.value, ast.Constant) and isinstance(_n.value.value, str)):
+        _js = _n.value.value.replace("<script>", "").replace("</script>", "")
+        for _m in re.finditer(r"<[^\s=]", _js):
+            reportar("ERROR", _n.lineno + _n.value.value[:_m.start()].count("\n"),
+                     f"«{_js[_m.start():_m.start() + 20]}…» adentro de AYUDAS_DEL_NAVEGADOR: "
+                     "Streamlit descarta el script entero (sin teclas ni click derecho)")
+
 # UN RÓTULO QUE CAMBIA EN UN st.radio O UN st.selectbox. En el navegador (Streamlit 1.65), si
 # el rótulo de las opciones cambia mientras se está en la pantalla, el toque siguiente vuelve el
 # selector a la primera opción; la prueba sin navegador no lo ve. Pasó con «💬 Mensajes · 1» en
@@ -2672,7 +2687,8 @@ for _n in ast.walk(ARBOL):
 # renglón del format_func.
 _CLAVES_QUE_CUENTAN = re.compile(r"cantidad|stock|sin_pieza|devuelto|quedan|total|saldo", re.I)
 for _n in ast.walk(ARBOL):
-    if not (isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) in ("radio", "selectbox")):
+    if not (isinstance(_n, ast.Call)
+            and getattr(_n.func, "attr", None) in ("radio", "selectbox", "multiselect")):
         continue
     for _kw in _n.keywords:
         if _kw.arg != "format_func" or not isinstance(_kw.value, ast.Lambda):

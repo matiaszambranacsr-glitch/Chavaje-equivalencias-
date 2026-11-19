@@ -2057,6 +2057,31 @@ def listar_pedidos_reposicion(estado="pendiente"):
     return filas_a_listas(c)
 
 
+# EL WHATSAPP DEL PROVEEDOR DE CADA MARCA. «📲 Armar mensaje para el proveedor» abría WhatsApp
+# sin destinatario: había que buscar al proveedor en la agenda cada vez. Se anota una vez, al
+# lado del mensaje, y queda para la próxima. Por marca, porque así se arma el pedido (dos marcas
+# del mismo distribuidor llevan el mismo número).
+def whatsapp_del_proveedor(marca):
+    fila = c.execute("SELECT whatsapp_proveedor FROM marcas WHERE nombre = ?",
+                     (str(marca or ""),)).fetchone()
+    return str(fila["whatsapp_proveedor"] or "") if fila else ""
+
+
+def guardar_whatsapp_del_proveedor(marca, telefono):
+    """Lo anota el personal. Vacío lo borra. Queda en el registro de cambios."""
+    exigir_nivel("empleado", "anotar el WhatsApp de un proveedor")
+    antes = whatsapp_del_proveedor(marca)
+    nuevo = str(telefono or "").strip()[:40]
+    if nuevo == antes:
+        return
+    with db_lock:
+        c.execute("UPDATE marcas SET whatsapp_proveedor = ? WHERE nombre = ?",
+                  (nuevo or None, str(marca or "")))
+        anotar_cambio("anotó el WhatsApp del proveedor", "marca", marca, antes=antes,
+                      despues=nuevo)
+        conn.commit()
+
+
 def marcar_pedido_resuelto(pedido_id):
     with db_lock:
         c.execute("UPDATE pedidos_reposicion SET estado = 'resuelto' WHERE id = ?", (pedido_id,))

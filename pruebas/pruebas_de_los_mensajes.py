@@ -717,6 +717,45 @@ def probar():
         at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
         at.session_state["exp_conectar_canales"] = True
         at.run()
+        # EL PEDIDO AL PROVEEDOR (📌 Para pedir): el WhatsApp del proveedor de la marca se anota
+        # una vez y queda; y el link lleva el mensaje como quedó escrito (antes llevaba el armado,
+        # sin lo que se le corregía).
+        c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('BOSCH PRUEBA', 'PROVEEDOR')")
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, stock) "
+                  "SELECT 'BP1', 'BP1', 'BUJIA', id, 0 FROM marcas WHERE nombre = 'BOSCH PRUEBA'")
+        ns["solicitar_reposicion"](c.lastrowid)
+        ns["conn"].commit()
+        _pedido = [p for p in ns["listar_pedidos_reposicion"]() if p["Codigo"] == "BP1"][0]
+        at.session_state["pagina_actual"] = ns["PAGINAS"][4]
+        at.session_state["sub_stats"] = ns["SUB_STATS"][5]
+        at.session_state[f"chk_pedido_{_pedido['ID']}"] = True
+        at.run()
+        _tel_prov = [t for t in at.text_input if str(t.key).startswith("wa_prov_")]
+        _msg_prov = [t for t in at.text_area if str(t.key).startswith("msg_repo_")]
+        cierto("en el pedido al proveedor: su WhatsApp y el mensaje", _tel_prov and _msg_prov,
+               ([e.value for e in at.exception], [t.key for t in at.text_input][-5:]))
+        if _tel_prov and _msg_prov:
+            _tel_prov[0].set_value("11 4444-5555").run()
+            esperar("el WhatsApp del proveedor queda guardado",
+                    ns["whatsapp_del_proveedor"]("BOSCH PRUEBA"), "11 4444-5555")
+            [t for t in at.text_area if str(t.key).startswith("msg_repo_")][0].set_value(
+                "Necesito 4 BP1, urgente").run()
+            _links_prov = [b.proto.url for b in at.get("link_button")
+                           if "Mandárselo por WhatsApp (BOSCH PRUEBA)" in b.proto.label]
+            esperar("el link va al proveedor, con el mensaje como quedó escrito", _links_prov,
+                    [ns["link_de_whatsapp"]("11 4444-5555", "Necesito 4 BP1, urgente")])
+        try:
+            _g["_nivel_de_quien_esta_adentro"] = lambda: "mecanico"
+            ns["guardar_whatsapp_del_proveedor"]("BOSCH PRUEBA", "11 0000-0000")
+            fallas.append("un taller pudo cambiar el WhatsApp de un proveedor")
+        except PermissionError:
+            pass
+        finally:
+            _g["_nivel_de_quien_esta_adentro"] = _adentro
+        at.session_state["pagina_actual"] = ns["PAGINAS"][3]
+        at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
+        at.session_state["exp_conectar_canales"] = True
+        at.run()
         _probar = [b for b in at.button if b.key == "probar_los_canales"]
         cierto("en Administrar está «🔌 Probar la conexión»", _probar, [b.key for b in at.button][:40])
         if _probar:

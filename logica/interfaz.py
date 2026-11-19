@@ -600,8 +600,9 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-19d"
+VERSION_DE_LO_NUEVO = "2026-11-20"
 LO_NUEVO = (
+    ("📲 El pedido al proveedor ahora va a su WhatsApp (se anota una vez por marca) y con el mensaje como lo dejaste, con tus cambios.", "📊 Estadísticas → 📌 Para pedir"),
     ("🧭 Revisando equivalencias, aprobar ya no te manda a otra lista (ni en los grupos), y en 💬 Mensajes lo escrito ya no se borra al tocar una respuesta rápida.",
      "📊 Estadísticas → 🔗 Equivalencias sugeridas"),
     ("📲 «Cobrar lo vencido»: las cuentas que deben vencido, cada una con su WhatsApp ya escrito "
@@ -1009,6 +1010,24 @@ AYUDAS_DEL_NAVEGADOR = r"""
   if (window.__ayudasDelChavo) { return; }
   window.__ayudasDelChavo = true;
   var doc = window.document;
+
+  // EL TEXTO RECIÉN ESCRITO, EN EL LINK DE WHATSAPP. Lo escrito en una caja le llega a la app
+  // recién al salir de ella, y un link no la hace esperar: se escribía «te pido 4 unidades», se
+  // tocaba directo «📲 …» y WhatsApp se abría con el texto de antes (se vio en un navegador de
+  // verdad). Un link con clave «walink__» más la clave de la caja toma, al tocarlo, lo que dice
+  // la caja en ese momento. Ver pantallas/mensajes.py y «📌 Para pedir».
+  doc.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest
+            && e.target.closest('[class*="st-key-walink__"] a[href]');
+    if (!a) { return; }
+    var cont = a.closest('[class*="st-key-walink__"]');
+    var m = /(?:^|\s)st-key-walink__(\S+)/.exec(cont.className);
+    var caja = m && doc.querySelector(".st-key-" + m[1] + " textarea, .st-key-" + m[1]
+                                      + " input");
+    if (!caja) { return; }
+    var texto = caja.value.trim();
+    a.href = a.href.split("?")[0] + (texto ? "?text=" + encodeURIComponent(texto) : "");
+  }, true);
 
   // LAS TECLAS. Streamlit atiende las de sus botones (shortcut=), salvo con el cursor en un
   // campo: escribías el descuento, apretabas F10 y no pasaba nada. Acá se atienden antes que
