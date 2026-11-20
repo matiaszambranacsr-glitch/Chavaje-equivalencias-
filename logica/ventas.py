@@ -1112,6 +1112,8 @@ def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
 # whatsapp_del_proveedor()) y en qué quedó cada reclamo. «Hubo que modificarla» no entra: la
 # pieza estaba bien.
 MOTIVOS_PARA_RECLAMAR = frozenset({"fallada", "transporte"})
+# Desde cuántos días sin reclamar lo dice la campanita: el proveedor no acepta cualquier fecha.
+DIAS_PARA_AVISAR_UNA_GARANTIA = 14
 ESTADOS_DEL_RECLAMO = {"": "⏳ Por reclamar", "reclamado": "📤 Reclamado",
                        "resuelto": "✅ Lo cambiaron o lo acreditaron",
                        "rechazado": "🚫 No lo reconocieron"}
@@ -1131,6 +1133,19 @@ def garantias(con_las_cerradas=False):
                   WHERE d.motivo IN ({','.join('?' * len(MOTIVOS_PARA_RECLAMAR))}){filtro}
                   ORDER BY d.fecha, d.id""", sorted(MOTIVOS_PARA_RECLAMAR))
     return [dict(f) for f in c.fetchall()]
+
+
+def garantias_sin_reclamar_hace(dias=DIAS_PARA_AVISAR_UNA_GARANTIA):
+    """Las que siguen por reclamar desde hace `dias` días o más (contados en la hora de acá)."""
+    salida = []
+    for g in garantias():
+        try:
+            hace = (hoy_aca() - date.fromisoformat(dia_de_aca(g["fecha"]))).days
+        except ValueError:
+            continue
+        if not g["reclamo"] and hace >= dias:
+            salida.append(g)
+    return salida
 
 
 def mensaje_de_garantia(marca, filas):

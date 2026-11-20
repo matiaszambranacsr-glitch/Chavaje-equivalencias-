@@ -7757,7 +7757,9 @@ Nadie le llevaba la cuenta, y lo que no se reclama a tiempo se pierde. Ahora, en
   reconocieron»**. Lo cerrado sale de la lista (con «Ver también los cerrados» se ve).
 
 «Hubo que modificarla» no entra: la pieza estaba bien. El asistente dice en «¿qué está
-esperando?» cuántas hay por reclamar. Ver «LAS GARANTÍAS» en `logica/ventas.py`.
+esperando?» cuántas hay por reclamar, y **la campanita avisa** lo que lleva dos semanas o más
+sin reclamar (`DIAS_PARA_AVISAR_UNA_GARANTIA`): el proveedor no acepta cualquier fecha. Ver
+«LAS GARANTÍAS» en `logica/ventas.py`.
 
 ## 🧷 Cada campo con lo de lo elegido: la ficha del auto, las medidas, los alias, el Excel
 

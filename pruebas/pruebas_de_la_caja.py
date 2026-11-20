@@ -480,8 +480,20 @@ def probar(L):
                      "ORDER BY id DESC LIMIT 1")
     esperar("lo de otra medida no se puede reclamar", ns["marcar_reclamo"]([_id_medida],
                                                                             "reclamado"), 0)
+    # Sin reclamar hace más de dos semanas: lo dice la campanita, y reclamado ya no.
+    _aviso_gar = lambda: [p["titulo"] for p in ns["diagnostico_de_salud"]()
+                          if "sin reclamarle al proveedor" in p["titulo"]]
+    esperar("recién devuelta, la campanita no dice nada", _aviso_gar(), [])
+    c.execute("UPDATE ventas_devoluciones SET fecha = datetime('now', '-20 days') WHERE id = ?",
+              (_gar[0]["id"],))
+    conn.commit()
+    ns["invalidar_salud"]()
+    esperar("a las dos semanas sin reclamar, sí", _aviso_gar(),
+            ["1 devolución(es) fallada(s) sin reclamarle al proveedor"])
     esperar("reclamado", (ns["marcar_reclamo"]([_gar[0]["id"]], "reclamado"),
                           [x["reclamo"] for x in ns["garantias"]()]), (1, ["reclamado"]))
+    ns["invalidar_salud"]()
+    esperar("y reclamada, la campanita ya no", _aviso_gar(), [])
     ns["marcar_reclamo"]([_gar[0]["id"]], "resuelto")
     esperar("resuelto: sale de la lista, y queda entre los cerrados",
             (ns["garantias"](), [x["reclamo"] for x in ns["garantias"](con_las_cerradas=True)

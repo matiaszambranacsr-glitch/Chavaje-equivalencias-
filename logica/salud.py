@@ -507,6 +507,20 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
 
+    # LO FALLADO SIN RECLAMAR (ver «LAS GARANTÍAS» en logica/ventas.py): el proveedor no acepta
+    # cualquier fecha, y lo que no se reclama a tiempo se pierde.
+    try:
+        _sin_reclamar = garantias_sin_reclamar_hace()
+        if _sin_reclamar:
+            sumar("medio", f"{len(_sin_reclamar)} devolución(es) fallada(s) sin reclamarle al "
+                           "proveedor",
+                  f"Hace {DIAS_PARA_AVISAR_UNA_GARANTIA} días o más que volvieron y nadie se las "
+                  "reclamó a la marca. El reclamo está escrito: tocar «📲 Reclamárselo por "
+                  "WhatsApp» y después «📤 Ya se lo reclamé».",
+                  miga_hasta("Garantías"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/garantias", _err)
+
     # LAS FACTURAS PENDIENTES (ver «LA FACTURA ELECTRÓNICA (ARCA)» en logica/facturas.py): no se
     # sabe si ARCA las hizo. Hasta consultarlas, esa venta no se puede volver a facturar.
     try:
