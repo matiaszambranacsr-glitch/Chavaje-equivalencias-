@@ -27,8 +27,8 @@ mismo espacio de nombres que los otros archivos de logica/ (ver orden.py)."""
 FUNCIONES_QUE_PUEDE_USAR = (
     "resumen_de_la_caja", "ventas_a_cobrar", "pedidos_pendientes", "pendientes_por_pedido",
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
-    "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "hoy_aca", "miles",
-    "texto_para_markdown",
+    "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "garantias", "hoy_aca",
+    "miles", "texto_para_markdown",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -72,6 +72,7 @@ _DATO_PENDIENTE = re.compile(
 # el dato a otra pantalla sin que se notara.
 _CAJA, _DEPOSITO, _ADMINISTRAR, _VEHICULOS = "💵 Caja", "📦 Depósito", "🗂️ Administrar", "🚗 Vehículos"
 _MENSAJES = "💬 Mensajes"
+_DEVOLUCIONES = "↩️ Devoluciones"
 
 
 def _asis_nombre(texto):
@@ -232,6 +233,12 @@ def _dato_de_lo_pendiente(contexto):
             lineas.append(f"💳 **{miles(len(vencidas))}** cuenta(s) con saldo vencido"
                           + (f"; a {miles(_tocan)} toca recordárselo: «📲 Cobrar lo vencido», "
                              "en 💳 Cuentas corrientes." if _tocan else "."))
+    if _DEVOLUCIONES in visibles:
+        _por_reclamar = [g for g in garantias() if not g["reclamo"]]
+        if _por_reclamar:
+            lineas.append(f"🔧 **{miles(len(_por_reclamar))}** devolución(es) falladas para "
+                          "reclamarle al proveedor: «🔧 Garantías», en ↩️ Devoluciones.")
+            botones += _asis_ir_a(_DEVOLUCIONES, contexto)
     if _VEHICULOS in visibles:
         avisar_a = avisos_por_cliente(dias_de_aviso=30)
         if avisar_a:

@@ -752,6 +752,34 @@ def probar():
             pass
         finally:
             _g["_nivel_de_quien_esta_adentro"] = _adentro
+        # LAS GARANTÍAS (↩️ Devoluciones → 🔧 Garantías): lo fallado de BOSCH PRUEBA, con el
+        # reclamo a su WhatsApp (el mismo número del pedido) y «📤 Ya se lo reclamé».
+        _p_gar = c.execute("SELECT id FROM productos WHERE codigo_clean = 'BP1'").fetchone()[0]
+        c.execute("UPDATE productos SET precio = 5000, stock = 5 WHERE id = ?", (_p_gar,))
+        ns["conn"].commit()
+        _v_gar, _ = ns["cerrar_venta"]([dict(ns["item_de_venta"](_p_gar, 1))], a_la_caja=True)
+        ns["cobrar_venta"](_v_gar, "Efectivo")
+        ns["devolver_de_una_venta"](c.execute("SELECT id FROM ventas_items WHERE venta_id = ?",
+                                              (_v_gar,)).fetchone()[0], 1, "fallada", "no enciende")
+        at.session_state["pagina_actual"] = ns["PAGINAS"][10]
+        at.session_state["sub_devoluciones"] = ns["SUB_DEVOLUCIONES"][3]
+        at.run()
+        _reclamo = [b.proto.url for b in at.get("link_button")
+                    if b.proto.label == "📲 Reclamárselo por WhatsApp"]
+        cierto("en 🔧 Garantías, el reclamo va al WhatsApp del proveedor, con lo que volvió",
+               len(_reclamo) == 1 and _reclamo[0].startswith("https://wa.me/5491144445555?text=")
+               and "no%20enciende" in _reclamo[0],
+               (_reclamo, [e.value for e in at.exception][:1]))
+        _ya_gar = [b for b in at.button if str(b.key).startswith("garantia_reclamada_")]
+        cierto("y «📤 Ya se lo reclamé»", _ya_gar)
+        if _ya_gar:
+            _ya_gar[0].click().run()
+            esperar("que lo anota", [g["reclamo"] for g in ns["garantias"]()
+                                     if g["codigo"] == "BP1"], ["reclamado"])
+            cierto("y quedan «✅ Lo cambiaron…» y «🚫 No lo reconocieron»",
+                   {b.label for b in at.button if str(b.key).startswith(("garantia_resuelta_",
+                                                                         "garantia_rechazada_"))}
+                   == {"✅ Lo cambiaron o lo acreditaron", "🚫 No lo reconocieron"})
         at.session_state["pagina_actual"] = ns["PAGINAS"][3]
         at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
         at.session_state["exp_conectar_canales"] = True

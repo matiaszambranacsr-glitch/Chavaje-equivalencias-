@@ -459,6 +459,43 @@ def probar(L):
             ns["hora_corta_aca"]("2026-03-11 01:30:00"), "10/03 22:30")
     for k in ("admin_nombre", "nivel_usuario"):
         st.session_state.pop(k, None)
+    # LAS GARANTÍAS: lo devuelto fallado (o dañado) queda para reclamarle al proveedor; lo que
+    # no le iba (otra medida), no. Por reclamar → reclamado → resuelto, y lo cerrado sale.
+    st.session_state["nivel_usuario"] = "operador"
+    v_gar, _ = ns["cerrar_venta"]([item("A1", 2)], a_la_caja=True)
+    ns["cobrar_venta"](v_gar, "Efectivo")
+    _it_gar = uno("SELECT id FROM ventas_items WHERE venta_id = ?", v_gar)
+    ns["devolver_de_una_venta"](_it_gar, 1, "fallada", "pierde aceite")
+    ns["devolver_de_una_venta"](_it_gar, 1, "medida")
+    _gar = ns["garantias"]()
+    esperar("para reclamar: lo fallado, no lo de otra medida",
+            [(x["codigo"], x["motivo"], x["detalle"], x["reclamo"]) for x in _gar],
+            [("A1", "fallada", "pierde aceite", "")])
+    _msj_gar = ns["mensaje_de_garantia"]("PRUEBA", _gar)
+    esperar("el reclamo dice qué volvió, qué tenía y pide respuesta",
+            ("1 × A1 (FILTRO): vino fallada, «pierde aceite»" in _msj_gar,
+             _msj_gar.endswith("¿Cómo hacemos para el cambio o la nota de crédito? ¡Gracias!")),
+            (True, True))
+    _id_medida = uno("SELECT id FROM ventas_devoluciones WHERE motivo = 'medida' "
+                     "ORDER BY id DESC LIMIT 1")
+    esperar("lo de otra medida no se puede reclamar", ns["marcar_reclamo"]([_id_medida],
+                                                                            "reclamado"), 0)
+    esperar("reclamado", (ns["marcar_reclamo"]([_gar[0]["id"]], "reclamado"),
+                          [x["reclamo"] for x in ns["garantias"]()]), (1, ["reclamado"]))
+    ns["marcar_reclamo"]([_gar[0]["id"]], "resuelto")
+    esperar("resuelto: sale de la lista, y queda entre los cerrados",
+            (ns["garantias"](), [x["reclamo"] for x in ns["garantias"](con_las_cerradas=True)
+                                 if x["id"] == _gar[0]["id"]]), ([], ["resuelto"]))
+    _claves_antes = g["hay_claves_configuradas"]
+    try:
+        g["hay_claves_configuradas"] = lambda: True
+        g["_nivel_de_quien_esta_adentro"] = lambda: "mecanico"
+        ns["marcar_reclamo"]([_gar[0]["id"]], "")
+        fallas.append("un taller pudo anotar un reclamo de garantía")
+    except PermissionError:
+        pass
+    finally:
+        g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = g_adentro, _claves_antes
     return fallas
 
 

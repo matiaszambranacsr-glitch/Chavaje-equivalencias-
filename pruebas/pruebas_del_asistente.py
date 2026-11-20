@@ -41,6 +41,8 @@ ENTIENDE = (
     ("imprimir el ticket", "como:comprobante"),
     ("armar un presupuesto", "como:presupuesto"),
     ("como hago una devolucion", "como:devolucion_cliente"),
+    ("como le reclamo la garantia al proveedor", "como:garantia_proveedor"),
+    ("vino fallada una bomba, como se la reclamo a la marca", "como:garantia_proveedor"),
     ("debolucion", "como:devolucion_cliente"),
     ("el cliente trajo de vuelta un repuesto", "como:devolucion_cliente"),
     ("devolver al deposito lo que no vendi", "como:devolucion_deposito"),

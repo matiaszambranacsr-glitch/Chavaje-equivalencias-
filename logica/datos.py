@@ -3071,6 +3071,15 @@ def _esquema_ventas(c):
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_devoluciones_dia "
               "ON ventas_devoluciones(fecha)")
+    # EL RECLAMO AL PROVEEDOR de lo que volvió fallado (ver «LAS GARANTÍAS» en logica/ventas.py):
+    # vacío es «por reclamar»; después «reclamado», «resuelto» o «rechazado».
+    _cols_dev = [f[1] for f in c.execute("PRAGMA table_info(ventas_devoluciones)").fetchall()]
+    if "reclamo" not in _cols_dev:
+        c.execute("ALTER TABLE ventas_devoluciones ADD COLUMN reclamo TEXT")
+    if "reclamo_en" not in _cols_dev:
+        c.execute("ALTER TABLE ventas_devoluciones ADD COLUMN reclamo_en TEXT")
+    if "reclamo_por" not in _cols_dev:
+        c.execute("ALTER TABLE ventas_devoluciones ADD COLUMN reclamo_por TEXT")
     # LO QUE QUEDA AFUERA (ver ese título en logica/deposito.py): de cada pedido entregado,
     # cuánto se vendió y cuánto volvió; cada vuelta al depósito, con quién la trajo y cómo se
     # identificó; qué unidades de una venta salieron de lo que el vendedor ya tenía del

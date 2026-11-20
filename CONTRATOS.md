@@ -328,6 +328,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | El comprobante de una venta, en texto y PDF, dice que no es factura | `texto_del_comprobante()`, `pdf_del_comprobante()` | `pruebas_de_las_ventas.py` (11) |
 | La ganancia usa el costo de cuando se vendió, y solo lo que tiene costo | `cierre_de_caja()`, `lo_mas_vendido()` | `pruebas_de_las_ventas.py` (10, 13) |
 | Lo que más se vende: sin anuladas, todos los días del período | `lo_mas_vendido()` | `pruebas_de_las_ventas.py` (13) |
+| Lo devuelto fallado o dañado queda para reclamarle al proveedor (lo que no le iba, no); por reclamar → reclamado → resuelto o rechazado, lo cerrado sale; lo anota solo el personal | `garantias()`, `mensaje_de_garantia()`, `marcar_reclamo()` | `pruebas_de_la_caja.py` (garantías), `pruebas_de_los_mensajes.py` (8) |
 | Devolver una cosa de una venta: el stock (salvo lo que no se puede volver a vender), la plata del cierre de ese día, lo aprendido si se vendió en lugar de otro código; una venta con devoluciones no se anula | `devolver_de_una_venta()`, `cierre_de_caja()`, `anular_venta()` | `pruebas_de_las_ventas.py` (14) |
 | Buscar una venta por número, cliente, patente o teléfono | `buscar_ventas()` | `pruebas_de_las_ventas.py` (14) |
 | El arqueo: lo contado contra el efectivo esperado | `arquear_la_caja()`, `efectivo_esperado()` | `pruebas_de_las_ventas.py` (15, 16) |

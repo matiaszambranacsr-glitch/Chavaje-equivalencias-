@@ -494,6 +494,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "cliente en la Lista WhatsApp: arma el mensaje con las marcas y los precios, y el PDF.",
      "📋 Lista WhatsApp", "empleado"),
     # ---- devoluciones ----
+    ("garantia_proveedor", "Reclamarle al proveedor lo que vino fallado (garantía)",
+     "reclamar reclamo reclamarle proveedor garantia garantias fallada fallado falladas "
+     "defectuosa defecto cambio acreditar nota credito marca",
+     "Abrí «🔧 Garantías»: lo que los clientes devolvieron fallado, por marca, con el reclamo "
+     "ya escrito para mandarle al proveedor por WhatsApp. Después de mandarlo, «📤 Ya se lo "
+     "reclamé»; cuando lo cambian o lo acreditan, «✅ Lo cambiaron o lo acreditaron».",
+     "🔧 Garantías", ""),
     ("devolucion_cliente", "Devolver algo que trajo un cliente",
      "devolucion devolver devuelve cliente trajo cambio cambiar garantia reintegro plata "
      "vuelta fallado",

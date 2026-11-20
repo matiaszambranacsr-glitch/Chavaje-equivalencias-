@@ -7740,6 +7740,25 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
 
+## 🔧 Garantías: lo que volvió fallado, para reclamarle al proveedor
+
+Lo que un cliente devuelve **fallado** o **dañado en el transporte** no vuelve al stock (ver
+`NO_VUELVE_AL_STOCK`), pero queda en el negocio y es plata: el proveedor lo cambia o lo acredita.
+Nadie le llevaba la cuenta, y lo que no se reclama a tiempo se pierde. Ahora, en ↩️ Devoluciones
+→ **🔧 Garantías**, queda **por marca**, lo más viejo primero, con:
+
+- la tabla de lo que volvió (cuándo, de qué venta, qué tenía y lo que dijo el cliente);
+- **el reclamo ya escrito** —«Tenemos para devolverte en garantía estas piezas de BOSCH: 1 ×
+  0986AF0059 (BOMBA DE COMBUSTIBLE): vino fallada, «no levanta presión» (devuelta el 07/11)… ¿Cómo
+  hacemos para el cambio o la nota de crédito?»—, que se puede corregir, y **«📲 Reclamárselo por
+  WhatsApp»** al número del proveedor de esa marca (el mismo de «📌 Para pedir», ver
+  `whatsapp_del_proveedor()`);
+- **«📤 Ya se lo reclamé»**, y después **«✅ Lo cambiaron o lo acreditaron»** o **«🚫 No lo
+  reconocieron»**. Lo cerrado sale de la lista (con «Ver también los cerrados» se ve).
+
+«Hubo que modificarla» no entra: la pieza estaba bien. El asistente dice en «¿qué está
+esperando?» cuántas hay por reclamar. Ver «LAS GARANTÍAS» en `logica/ventas.py`.
+
 ## 🧷 Cada campo con lo de lo elegido: la ficha del auto, las medidas, los alias, el Excel
 
 Con Streamlit 1.65, **un campo con clave fija se queda con lo que tenía aunque cambie lo que se

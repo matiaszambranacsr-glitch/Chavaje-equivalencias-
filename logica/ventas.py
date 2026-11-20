@@ -1103,6 +1103,75 @@ def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
 
 
 # ============================================================================================
+# LAS GARANTÍAS: LO FALLADO, PARA RECLAMARLE AL PROVEEDOR
+# ============================================================================================
+# Lo que el cliente devuelve fallado (o dañado en el transporte) no vuelve al stock (ver
+# NO_VUELVE_AL_STOCK), pero queda en el negocio y es plata: el proveedor lo cambia o lo
+# acredita. Nadie le llevaba la cuenta, y lo que no se reclama a tiempo se pierde. Acá queda
+# por marca, con el mensaje para el proveedor ya escrito (a su WhatsApp, ver
+# whatsapp_del_proveedor()) y en qué quedó cada reclamo. «Hubo que modificarla» no entra: la
+# pieza estaba bien.
+MOTIVOS_PARA_RECLAMAR = frozenset({"fallada", "transporte"})
+ESTADOS_DEL_RECLAMO = {"": "⏳ Por reclamar", "reclamado": "📤 Reclamado",
+                       "resuelto": "✅ Lo cambiaron o lo acreditaron",
+                       "rechazado": "🚫 No lo reconocieron"}
+
+
+def garantias(con_las_cerradas=False):
+    """Lo devuelto por fallado o dañado, lo más viejo primero: [dict] con id, fecha (como está
+    guardada), venta_id, marca, codigo, descripcion, cantidad, importe, motivo, detalle,
+    reclamo ("" si falta reclamarlo), reclamo_en. Sin las cerradas (resueltas o rechazadas),
+    salvo con_las_cerradas."""
+    filtro = "" if con_las_cerradas else \
+        " AND COALESCE(d.reclamo, '') NOT IN ('resuelto', 'rechazado')"
+    c.execute(f"""SELECT d.id, d.fecha, d.venta_id, vi.marca, vi.codigo, vi.descripcion,
+                         d.cantidad, d.importe, d.motivo, d.detalle,
+                         COALESCE(d.reclamo, '') AS reclamo, d.reclamo_en
+                  FROM ventas_devoluciones d JOIN ventas_items vi ON vi.id = d.venta_item_id
+                  WHERE d.motivo IN ({','.join('?' * len(MOTIVOS_PARA_RECLAMAR))}){filtro}
+                  ORDER BY d.fecha, d.id""", sorted(MOTIVOS_PARA_RECLAMAR))
+    return [dict(f) for f in c.fetchall()]
+
+
+def mensaje_de_garantia(marca, filas):
+    """El reclamo al proveedor, como lo escribiría el que atiende: qué volvió, cuándo se vendió
+    y qué tenía."""
+    renglones = [f"Hola! Te escribimos de El Chavo. Tenemos para devolverte en garantía estas "
+                 f"piezas de {marca}:"]
+    for f in filas:
+        que = MOTIVOS_DE_DEVOLUCION.get(f["motivo"], "").split(" ", 1)[-1].split(" (")[0]
+        renglones.append(f"- {f['cantidad']} × {f['codigo']}"
+                         + (f" ({str(f['descripcion'])[:40]})" if f.get("descripcion") else "")
+                         + f": {que.lower()}"
+                         + (f", «{str(f['detalle'])[:80]}»" if f.get("detalle") else "")
+                         + f" (devuelta el {dia_de_aca(f['fecha'])[8:10]}/"
+                           f"{dia_de_aca(f['fecha'])[5:7]})")
+    return "\n".join(renglones) + "\n¿Cómo hacemos para el cambio o la nota de crédito? ¡Gracias!"
+
+
+def marcar_reclamo(devolucion_ids, estado):
+    """Anota en qué quedó el reclamo de esas devoluciones (uno de ESTADOS_DEL_RECLAMO; "" vuelve
+    a «por reclamar»). Lo hace el personal; queda en el registro de cambios. Devuelve cuántas."""
+    exigir_nivel("empleado", "anotar un reclamo de garantía")
+    if estado not in ESTADOS_DEL_RECLAMO:
+        raise ValueError(f"Estado de reclamo desconocido: {estado}")
+    ids = [int(i) for i in devolucion_ids or []]
+    if not ids:
+        return 0
+    with db_lock:
+        c.execute(f"""UPDATE ventas_devoluciones SET reclamo = ?, reclamo_en = datetime('now'),
+                                                     reclamo_por = ?
+                      WHERE id IN ({','.join('?' * len(ids))})
+                        AND motivo IN ({','.join('?' * len(MOTIVOS_PARA_RECLAMAR))})""",
+                  [estado or None, obtener_usuario_actual(), *ids, *sorted(MOTIVOS_PARA_RECLAMAR)])
+        n = c.rowcount
+        anotar_cambio("anotó un reclamo de garantía", "devolución", ",".join(map(str, ids)),
+                      despues=ESTADOS_DEL_RECLAMO[estado])
+        conn.commit()
+    return n
+
+
+# ============================================================================================
 # LA CAJA APARTE
 # ============================================================================================
 # Lo pidió el dueño: «dividí la caja de las ventas: cada vez que se realiza una venta, al cajero

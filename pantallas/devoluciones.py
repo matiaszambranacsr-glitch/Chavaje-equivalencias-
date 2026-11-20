@@ -226,3 +226,79 @@ if pagina == PAGINAS[10]:
                 file_name="etiquetas_lo_que_esta_afuera.pdf", mime="application/pdf",
                 key="dvl_etiquetas_afuera",
                 help="Por si alguna se despegó o se entregó sin etiqueta.")
+
+    # ---------- LAS GARANTÍAS: ver «LAS GARANTÍAS» en logica/ventas.py ----------
+    if sub_dvl == SUB_DEVOLUCIONES[3]:
+        ayuda("Lo que un cliente devolvió fallado o dañado no vuelve al stock: se le reclama al "
+              "proveedor. Acá queda por marca, con el reclamo listo para mandarle por WhatsApp. "
+              "Después de mandarlo, «📤 Ya se lo reclamé»; cuando lo cambian o lo acreditan, "
+              "«✅ Lo cambiaron o lo acreditaron».")
+        _gar = garantias(con_las_cerradas=st.toggle("Ver también los cerrados",
+                                                    key="garantias_cerradas"))
+        if not _gar:
+            st.success("✅ No hay nada fallado para reclamar.")
+        else:
+            _por_marca_gar = {}
+            for _g in _gar:
+                _por_marca_gar.setdefault(_g["marca"] or "Sin marca", []).append(_g)
+            _sin_reclamar = [g for g in _gar if not g["reclamo"]]
+            st.caption(f"{miles(len(_sin_reclamar))} devolución(es) por reclamar, por "
+                       f"\\${miles(sum(g['importe'] for g in _sin_reclamar), 0)} (lo que se le "
+                       "devolvió al cliente). Lo más viejo primero: el proveedor no acepta "
+                       "cualquier fecha.")
+            for _marca_g, _filas_g in _por_marca_gar.items():
+                # Las claves sin espacios ni signos (el navegador busca la caja por su clave,
+                # ver «walink__» en AYUDAS_DEL_NAVEGADOR) y con la marca: cada una, lo suyo.
+                _id_g = (re.sub(r"[^0-9A-Za-z_]", "_", _marca_g)
+                         + "_" + hashlib.md5(_marca_g.encode()).hexdigest()[:6])
+                _pend_g = [f for f in _filas_g if not f["reclamo"]]
+                _recl_g = [f for f in _filas_g if f["reclamo"] == "reclamado"]
+                with st.container(border=True, key=f"garantia_{_id_g}"):
+                    st.markdown(f"**{texto_para_markdown(_marca_g)}**"
+                                + (f" · {miles(len(_pend_g))} por reclamar" if _pend_g else "")
+                                + (f" · {miles(len(_recl_g))} reclamada(s), esperando respuesta"
+                                   if _recl_g else ""))
+                    st.dataframe([{
+                        "Devuelta": f["fecha"], "Venta": f"#{f['venta_id']}",
+                        "Código": f["codigo"], "Descripción": (f["descripcion"] or "")[:40],
+                        "Cant.": f["cantidad"],
+                        "Qué tenía": MOTIVOS_DE_DEVOLUCION.get(f["motivo"], f["motivo"]),
+                        "Detalle": f["detalle"] or "",
+                        "Reclamo": ESTADOS_DEL_RECLAMO.get(f["reclamo"], f["reclamo"])
+                                   + (f" ({fecha_legible(f['reclamo_en'])})"
+                                      if f["reclamo"] and f["reclamo_en"] else "")}
+                        for f in _filas_g], width="stretch", hide_index=True)
+                    if _pend_g:
+                        # El reclamo, como el pedido al proveedor (ver «📌 Para pedir»): se
+                        # puede corregir, va lo corregido, y la caja se renueva si cambia lo que
+                        # hay que reclamar (la huella en la clave).
+                        _texto_g = mensaje_de_garantia(_marca_g, _pend_g)
+                        _clave_g = (f"garantia_msg_{_id_g}_"
+                                    + hashlib.md5(_texto_g.encode()).hexdigest()[:8])
+                        _msg_g = st.text_area("Reclamo:", value=_texto_g, height=130,
+                                              key=_clave_g) or _texto_g
+                        _clave_tel_g = f"wa_prov_gar_{_id_g}"
+                        st.session_state.setdefault(_clave_tel_g, whatsapp_del_proveedor(_marca_g))
+                        _tel_g = st.text_input(
+                            f"WhatsApp del proveedor de {_marca_g}:", key=_clave_tel_g,
+                            placeholder="Ej.: 11 4567-8901 (queda guardado para la próxima)",
+                            on_change=lambda _m=_marca_g, _k=_clave_tel_g:
+                                guardar_whatsapp_del_proveedor(_m, st.session_state.get(_k)))
+                        _g1, _g2 = st.columns(2)
+                        _g1.link_button(f"📲 Reclamárselo por WhatsApp"
+                                        if numero_para_whatsapp(_tel_g)
+                                        else "📲 Abrir WhatsApp (elegís a quién)",
+                                        link_de_whatsapp(_tel_g, _msg_g), width="stretch",
+                                        key=f"walink__{_clave_g}")
+                        _g2.button("📤 Ya se lo reclamé", key=f"garantia_reclamada_{_id_g}",
+                                   width="stretch", on_click=marcar_reclamo,
+                                   args=([f["id"] for f in _pend_g], "reclamado"))
+                    if _recl_g:
+                        _r1, _r2 = st.columns(2)
+                        _r1.button("✅ Lo cambiaron o lo acreditaron",
+                                   key=f"garantia_resuelta_{_id_g}", width="stretch",
+                                   on_click=marcar_reclamo,
+                                   args=([f["id"] for f in _recl_g], "resuelto"))
+                        _r2.button("🚫 No lo reconocieron", key=f"garantia_rechazada_{_id_g}",
+                                   width="stretch", on_click=marcar_reclamo,
+                                   args=([f["id"] for f in _recl_g], "rechazado"))

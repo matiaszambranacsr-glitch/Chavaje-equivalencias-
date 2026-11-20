@@ -193,7 +193,7 @@ SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "
            "📖 Códigos DTC", "🗺️ Esquemas", "🧮 Conversor de unidades"]
 # Las devoluciones, aparte de 🧾 Ventas y 📦 Depósito: con muchos pedidos, adentro de ellas
 # hacían la pantalla eterna (lo pidió el dueño).
-SUB_DEVOLUCIONES = ["📦 Al depósito", "🧾 De un cliente", "🏷️ Etiquetas"]
+SUB_DEVOLUCIONES = ["📦 Al depósito", "🧾 De un cliente", "🏷️ Etiquetas", "🔧 Garantías"]
 # El depósito, separado en lo de todos los días (buscar lo pedido) y el mapa: dónde está cada
 # cosa, ubicar lo que no tiene lugar y armar las estanterías.
 SUB_DEPOSITO = ["⏳ Para buscar", "🗺️ Mapa", "📍 Ubicar", "🏗️ Armar el depósito"]
@@ -246,6 +246,8 @@ PARA_QUE_SIRVE_LA_SOLAPA = {
                        "vender, y la plata sale de la caja de hoy.",
     "🏷️ Etiquetas": "Imprimir la etiqueta nuestra de un producto (también escaneando la caja) "
                    "o de lo que está afuera.",
+    "🔧 Garantías": "Lo que un cliente devolvió fallado, por marca, para reclamárselo al "
+                   "proveedor por WhatsApp y anotar en qué quedó.",
     "⏳ Para buscar": "Lo que pidió el mostrador, en el orden de cada piso, con dónde está cada "
                      "cosa resaltado en el mapa.",
     "🗺️ Mapa": "Dónde está un repuesto: escribí o escaneá el código y se resalta en el plano.",
@@ -600,8 +602,9 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-20b"
+VERSION_DE_LO_NUEVO = "2026-11-20c"
 LO_NUEVO = (
+    ("🔧 Garantías: lo que los clientes devolvieron fallado, por marca, con el reclamo para el proveedor ya escrito (por WhatsApp) y en qué quedó cada uno.", "↩️ Devoluciones → 🔧 Garantías"),
     ("🧷 Corregido: al buscar otra patente, la ficha del auto seguía con la marca, el modelo y el VIN del anterior (y guardar se los ponía al otro). Lo mismo las medidas de un producto, los alias de cobro y la fila de títulos al subir otra lista. Si guardaste una ficha estos días, conviene mirarla.", "🚗 Vehículos"),
     ("📲 El pedido al proveedor ahora va a su WhatsApp (se anota una vez por marca) y con el mensaje como lo dejaste, con tus cambios.", "📊 Estadísticas → 📌 Para pedir"),
     ("🧭 Revisando equivalencias, aprobar ya no te manda a otra lista (ni en los grupos), y en 💬 Mensajes lo escrito ya no se borra al tocar una respuesta rápida.",

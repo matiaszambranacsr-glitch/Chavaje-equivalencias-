@@ -145,6 +145,7 @@ específico, y las pantallas quedan todas al final:
     logica/ventas.py
         · VENTAS DEL MOSTRADOR
         · DEVOLVER ALGO DE UNA VENTA
+        · LAS GARANTÍAS: LO FALLADO, PARA RECLAMARLE AL PROVEEDOR
         · LA CAJA APARTE
         · LO QUE LE AVISA LA APP A QUIEN VENDE
         · LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR, A SALVO DE UNA RECARGA
