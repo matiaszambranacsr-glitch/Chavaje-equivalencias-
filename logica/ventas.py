@@ -1021,7 +1021,10 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
                   + ("" if al_stock or it["stock"] is None else
                      ", y no vuelve al stock: no se puede volver a vender")
                   + (". El vínculo con lo que se había pedido bajó a «muy débil»"
-                     if bajados else "") + ".")
+                     if bajados else "")
+                  # Que se sepa que queda para reclamar: si no, nadie entra a buscarlo.
+                  + (". Queda para reclamárselo al proveedor en ↩️ Devoluciones → 🔧 Garantías"
+                     if motivo in MOTIVOS_PARA_RECLAMAR else "") + ".")
 
 
 def arquear_la_caja(dia, efectivo_contado, nota=""):

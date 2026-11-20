@@ -465,8 +465,10 @@ def probar(L):
     v_gar, _ = ns["cerrar_venta"]([item("A1", 2)], a_la_caja=True)
     ns["cobrar_venta"](v_gar, "Efectivo")
     _it_gar = uno("SELECT id FROM ventas_items WHERE venta_id = ?", v_gar)
-    ns["devolver_de_una_venta"](_it_gar, 1, "fallada", "pierde aceite")
-    ns["devolver_de_una_venta"](_it_gar, 1, "medida")
+    _texto_fallada = ns["devolver_de_una_venta"](_it_gar, 1, "fallada", "pierde aceite")[1]
+    _texto_medida = ns["devolver_de_una_venta"](_it_gar, 1, "medida")[1]
+    esperar("el aviso de lo fallado dice que queda para reclamar; el de otra medida, no",
+            ("🔧 Garantías" in _texto_fallada, "🔧 Garantías" in _texto_medida), (True, False))
     _gar = ns["garantias"]()
     esperar("para reclamar: lo fallado, no lo de otra medida",
             [(x["codigo"], x["motivo"], x["detalle"], x["reclamo"]) for x in _gar],
