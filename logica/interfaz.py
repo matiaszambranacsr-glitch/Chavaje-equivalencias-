@@ -602,8 +602,9 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-20d"
+VERSION_DE_LO_NUEVO = "2026-11-22"
 LO_NUEVO = (
+    ("📊 «Resumen del día para el dueño»: lo vendido por forma de pago, lo devuelto, lo vencido y lo fallado por reclamar, escrito para mandar por WhatsApp al cerrar.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🔧 Garantías: lo que los clientes devolvieron fallado, por marca, con el reclamo para el proveedor ya escrito (por WhatsApp) y en qué quedó cada uno. La campanita avisa lo que pasa de dos semanas sin reclamar.", "↩️ Devoluciones → 🔧 Garantías"),
     ("🧷 Corregido: al buscar otra patente, la ficha del auto seguía con la marca, el modelo y el VIN del anterior (y guardar se los ponía al otro). Lo mismo las medidas de un producto, los alias de cobro y la fila de títulos al subir otra lista. Si guardaste una ficha estos días, conviene mirarla.", "🚗 Vehículos"),
     ("📲 El pedido al proveedor ahora va a su WhatsApp (se anota una vez por marca) y con el mensaje como lo dejaste, con tus cambios.", "📊 Estadísticas → 📌 Para pedir"),

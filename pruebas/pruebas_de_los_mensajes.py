@@ -780,6 +780,32 @@ def probar():
                    {b.label for b in at.button if str(b.key).startswith(("garantia_resuelta_",
                                                                          "garantia_rechazada_"))}
                    == {"✅ Lo cambiaron o lo acreditaron", "🚫 No lo reconocieron"})
+        # EL RESUMEN DEL DÍA PARA EL DUEÑO (💵 Caja → cierre): el administrador anota el WhatsApp
+        # del dueño una vez, y el resumen va ahí, escrito.
+        at.session_state["pagina_actual"] = "💵 Caja"
+        at.session_state["exp_ventas_cierre_caja_hoy"] = True
+        at.run()
+        _tel_duenio = [t for t in at.text_input if t.key == "wa_duenio"]
+        _caja_res = [t for t in at.text_area if str(t.key).startswith("resumen_dia_")]
+        cierto("en el cierre: el resumen y el WhatsApp del dueño", _tel_duenio and _caja_res,
+               [e.value for e in at.exception][:1])
+        if _tel_duenio and _caja_res:
+            _tel_duenio[0].set_value("11 4444-7777").run()
+            esperar("el WhatsApp del dueño queda guardado", ns["whatsapp_del_duenio"](),
+                    "11 4444-7777")
+            _al_duenio = [b.proto.url for b in at.get("link_button")
+                          if b.proto.label == "📲 Mandárselo por WhatsApp"
+                          and "5491144447777" in b.proto.url]
+            cierto("y el resumen va a su número, con lo vendido",
+                   len(_al_duenio) == 1 and "Vendido" in _al_duenio[0], _al_duenio)
+        try:
+            _g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+            ns["guardar_whatsapp_del_duenio"]("11 0000-0000")
+            fallas.append("un empleado pudo cambiar el WhatsApp del dueño")
+        except PermissionError:
+            pass
+        finally:
+            _g["_nivel_de_quien_esta_adentro"] = _adentro
         at.session_state["pagina_actual"] = ns["PAGINAS"][3]
         at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
         at.session_state["exp_conectar_canales"] = True

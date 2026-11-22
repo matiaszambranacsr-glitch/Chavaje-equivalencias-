@@ -7740,6 +7740,26 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
 
+## 📊 El resumen del día, al WhatsApp del dueño
+
+En 💵 Caja → «📋 Ventas y cierre de caja», **«📲 Resumen del día para el dueño»** arma el texto
+del día elegido, listo para mandar:
+
+```
+📊 Resumen del 22/11 — El Chavo
+💵 Vendido: $56.300 en 3 venta(s)
+   · Transferencia: $32.000
+   · Efectivo: $24.300
+↩️ Devuelto: … · ⏳ Quedó en la caja sin cobrar: … · 🚫 Anuladas: …
+👤 ana: $40.900 · matias: $15.400
+💳 Cuentas con vencido: … · 🔧 Garantías por reclamar al proveedor: …
+```
+
+La ganancia estimada va solo si lo arma un administrador (es el único que la ve). Se puede
+corregir antes de mandarlo. El **WhatsApp del dueño** lo anota un administrador ahí mismo, una
+vez (`whatsapp_del_duenio()`, en `logica/ventas.py`); con él, el botón es «📲 Mandárselo por
+WhatsApp». La cajera lo puede mandar al cerrar, sin tener que leerle los números a nadie.
+
 ## 🔧 Garantías: lo que volvió fallado, para reclamarle al proveedor
 
 Lo que un cliente devuelve **fallado** o **dañado en el transporte** no vuelve al stock (ver

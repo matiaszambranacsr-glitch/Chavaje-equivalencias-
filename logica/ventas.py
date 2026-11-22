@@ -213,6 +213,67 @@ def cierre_de_caja(dia=None):
             "total_a_cobrar": round(sum(v["total"] or 0 for v in a_cobrar), 2)}
 
 
+# EL RESUMEN DEL DÍA PARA EL DUEÑO. El cierre se ve en la pantalla, pero el dueño no siempre
+# está en el negocio a la hora de cerrar: preguntaba por WhatsApp «¿cómo vino el día?» y alguien
+# tenía que leerle los números. Va escrito, al WhatsApp del dueño (anotado una vez, ver
+# whatsapp_del_duenio()), con lo que importa al cerrar: lo vendido por forma de pago, lo
+# devuelto, lo que quedó en la caja sin cobrar, lo vencido de las cuentas y lo fallado por
+# reclamar. La ganancia, solo si lo arma un administrador (la ve solo él).
+CLAVE_DEL_WHATSAPP_DEL_DUENIO = "whatsapp_del_duenio"
+
+
+def whatsapp_del_duenio():
+    return obtener_config(CLAVE_DEL_WHATSAPP_DEL_DUENIO, "") or ""
+
+
+def guardar_whatsapp_del_duenio(telefono):
+    """Lo cambia el administrador: es adónde van los números del negocio."""
+    exigir_nivel("admin", "cambiar el WhatsApp del dueño")
+    nuevo = str(telefono or "").strip()[:40]
+    if nuevo != whatsapp_del_duenio():
+        guardar_config(CLAVE_DEL_WHATSAPP_DEL_DUENIO, nuevo)
+        anotar_cambio("cambió el WhatsApp del dueño", "configuración", "whatsapp_del_duenio",
+                      despues=nuevo)
+
+
+def resumen_del_dia(dia=None, con_ganancia=False):
+    """El texto del resumen de `dia` (hoy, si no se dice), listo para WhatsApp."""
+    caja = cierre_de_caja(dia)
+    fecha = date.fromisoformat(dia) if dia else hoy_aca()
+    plata = lambda x: f"${miles(x, 0)}"
+    renglones = [f"📊 Resumen del {fecha:%d/%m} — El Chavo",
+                 f"💵 Vendido: {plata(caja['total'])} en {miles(caja['ventas'])} venta(s)"]
+    renglones += [f"   · {forma}: {plata(total)}" for forma, _n, total in caja["por_forma"]]
+    if con_ganancia and caja["items_con_costo"]:
+        renglones.append(f"💰 Ganancia estimada: {plata(caja['ganancia'])}"
+                         + (f" (de {miles(caja['items_con_costo'])} de {miles(caja['items'])} "
+                            "cosas, las que tienen costo)"
+                            if caja["items_con_costo"] < caja["items"] else ""))
+    if caja["devoluciones"]:
+        renglones.append(f"↩️ Devuelto: {plata(caja['total_devuelto'])} "
+                         f"({miles(caja['devoluciones'])})")
+    if caja["a_cobrar"]:
+        renglones.append(f"⏳ Quedó en la caja sin cobrar: {plata(caja['total_a_cobrar'])} "
+                         f"({miles(caja['a_cobrar'])})")
+    if caja["anuladas"]:
+        renglones.append(f"🚫 Anuladas: {miles(caja['anuladas'])} "
+                         f"({plata(caja['total_anulado'])}, no cuentan)")
+    if len(caja["por_usuario"]) > 1:
+        renglones.append("👤 " + " · ".join(f"{u}: {plata(t)}" for u, _n, t in caja["por_usuario"]))
+    # Lo que está esperando, no solo de hoy: es lo que el dueño tiene que saber al cerrar.
+    try:
+        vencidas = cuentas_para_recordar()
+        if vencidas:
+            renglones.append(f"💳 Cuentas con vencido: {plata(sum(r['Vencido'] for r in vencidas))} "
+                             f"en {miles(len(vencidas))}")
+        por_reclamar = [g for g in garantias() if not g["reclamo"]]
+        if por_reclamar:
+            renglones.append(f"🔧 Garantías por reclamar al proveedor: {miles(len(por_reclamar))}")
+    except Exception as _err:          # el resumen sale igual, sin eso
+        anotar_error("resumen_del_dia", _err)
+    return "\n".join(renglones)
+
+
 def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=None,
                  a_la_caja=False):
     """Cierra la venta. Devuelve (venta_id, avisos). Ver «VENTAS DEL MOSTRADOR».

@@ -281,6 +281,32 @@ if pagina == PAGINAS[11]:
                                    file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
                                    mime="application/vnd.openxmlformats-officedocument."
                                         "spreadsheetml.sheet")
+                # EL RESUMEN PARA EL DUEÑO (ver resumen_del_dia()): escrito, a su WhatsApp. La
+                # caja del texto lleva la huella del resumen en la clave (se renueva si cambia el
+                # día o entra otra venta) y el link, «walink__» (lleva lo que se le corrigió).
+                with st.popover("📲 Resumen del día para el dueño", key="pop_resumen_dia",
+                                width="stretch"):
+                    _resumen = resumen_del_dia(_dia_txt, con_ganancia=es_admin())
+                    _clave_res = "resumen_dia_" + hashlib.md5(_resumen.encode()).hexdigest()[:8]
+                    _res_final = st.text_area("Resumen:", value=_resumen, height=220,
+                                              key=_clave_res) or _resumen
+                    if es_admin():
+                        st.session_state.setdefault("wa_duenio", whatsapp_del_duenio())
+                        _tel_duenio = st.text_input(
+                            "WhatsApp del dueño:", key="wa_duenio",
+                            placeholder="Ej.: 11 4567-8901 (queda guardado)",
+                            on_change=lambda: guardar_whatsapp_del_duenio(
+                                st.session_state.get("wa_duenio")))
+                    else:
+                        _tel_duenio = whatsapp_del_duenio()
+                        if not numero_para_whatsapp(_tel_duenio):
+                            st.caption("El WhatsApp del dueño lo anota un administrador, acá "
+                                       "mismo. Mientras tanto, WhatsApp pregunta a quién.")
+                    st.link_button("📲 Mandárselo por WhatsApp"
+                                   if numero_para_whatsapp(_tel_duenio)
+                                   else "📲 Abrir WhatsApp (elegís a quién)",
+                                   link_de_whatsapp(_tel_duenio, _res_final), width="stretch",
+                                   key=f"walink__{_clave_res}")
                 if _del_dia:
                     _cv1, _cv2 = cols([3, 1])
                     _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],

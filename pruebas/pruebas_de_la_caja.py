@@ -478,6 +478,21 @@ def probar(L):
             ("1 × A1 (FILTRO): vino fallada, «pierde aceite»" in _msj_gar,
              _msj_gar.endswith("¿Cómo hacemos para el cambio o la nota de crédito? ¡Gracias!")),
             (True, True))
+    # EL RESUMEN DEL DÍA PARA EL DUEÑO: lo vendido por forma de pago, lo devuelto y lo fallado
+    # por reclamar; la ganancia, solo si se pide (la arma un administrador).
+    _resumen = ns["resumen_del_dia"]()
+    _renglones = _resumen.split("\n")
+    esperar("el resumen del día: título, lo vendido y por forma de pago",
+            (_renglones[0].startswith("📊 Resumen del "), _renglones[1].startswith("💵 Vendido: $"),
+             any(r.startswith("   · Efectivo: $") for r in _renglones)), (True, True, True))
+    esperar("y lo devuelto y lo fallado por reclamar",
+            (any(r.startswith("↩️ Devuelto: $") for r in _renglones),
+             "🔧 Garantías por reclamar al proveedor: 1" in _renglones), (True, True))
+    c.execute("UPDATE ventas_items SET costo = precio / 2 WHERE costo IS NULL")
+    conn.commit()
+    esperar("la ganancia, solo si se pide",
+            ("Ganancia" in ns["resumen_del_dia"](),
+             "💰 Ganancia estimada: $" in ns["resumen_del_dia"](con_ganancia=True)), (False, True))
     _id_medida = uno("SELECT id FROM ventas_devoluciones WHERE motivo = 'medida' "
                      "ORDER BY id DESC LIMIT 1")
     esperar("lo de otra medida no se puede reclamar", ns["marcar_reclamo"]([_id_medida],
