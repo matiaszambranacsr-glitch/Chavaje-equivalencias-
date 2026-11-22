@@ -1083,6 +1083,14 @@ def pedidos_y_candidatos(texto):
 DESCARTAR_EL_PEDIDO = "descartar"
 
 
+def abrir_el_chat(chat_id):
+    """Lleva a 💬 Mensajes con ese chat abierto (va como on_click): «💬 Te contestó» de los
+    presupuestos para seguir."""
+    st.session_state["msj_chat_abierto"] = int(chat_id)
+    st.session_state["msj_chat_abierto_en"] = time.monotonic()
+    st.session_state["pagina_actual"] = PAGINAS[12]
+
+
 def buscar_el_pedido_a_mano(tipo, texto):
     """«🔍 Buscarlo a mano» de un pedido que no se encontró (va como on_click): el código, con
     sus equivalencias; la pieza, por descripción. Ya buscado en el 🔍 Buscador."""

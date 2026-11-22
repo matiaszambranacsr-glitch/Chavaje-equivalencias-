@@ -90,6 +90,33 @@ def probar():
     esperar("el link va a su WhatsApp", _p["link"].startswith("https://wa.me/5491145678901?text="),
             True)
 
+    # 2b. EL QUE YA CONTESTÓ POR EL CHAT no se pregunta: «💬 Te contestó: ver el chat». Se lo
+    # reconoce por el número, escrito distinto en el presupuesto y en el chat.
+    c.execute("INSERT INTO chats (canal, externo, nombre, ultimo_del_cliente_en) VALUES "
+              "('whatsapp', '5491145678901', 'Juan', datetime('now', '-1 day'))")
+    _chat = c.lastrowid
+    ns["conn"].commit()
+    _p = ns["presupuestos_para_seguir"]()[0]
+    esperar("escribió por el chat después del presupuesto: no toca preguntar, toca leerlo",
+            (_p["contesto"], _p["toca"]), (_chat, False))
+    at.session_state["exp_presupuestos_para_seguir"] = True
+    at.run()
+    _ver = [b for b in at.button if b.key == f"presu_chat_{_id}"]
+    cierto = (lambda que, ok: None if ok else fallas.append(que))
+    cierto("en la lista, «💬 Te contestó: ver el chat»", _ver)
+    if _ver:
+        _ver[0].click().run()
+        esperar("lleva a 💬 Mensajes con su chat abierto",
+                (at.session_state["pagina_actual"], at.session_state["msj_chat_abierto"]),
+                (ns["PAGINAS"][12], _chat))
+    # Lo que escribió antes del presupuesto no cuenta.
+    c.execute("UPDATE chats SET ultimo_del_cliente_en = datetime('now', '-3 days') WHERE id = ?",
+              (_chat,))
+    ns["conn"].commit()
+    esperar("lo que escribió antes del presupuesto no es una respuesta",
+            [(p["contesto"], p["toca"]) for p in ns["presupuestos_para_seguir"]()], [(None, True)])
+    at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+
     # 3. LA LISTA EN EL BUSCADOR: «📋 Presupuestos para seguir», con sus botones.
     at.session_state["carrito"] = {}
     at.session_state["exp_presupuestos_para_seguir"] = True

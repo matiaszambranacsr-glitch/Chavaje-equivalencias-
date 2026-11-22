@@ -605,7 +605,7 @@ def _clave_de_ayuda(texto):
 VERSION_DE_LO_NUEVO = "2026-11-22d"
 LO_NUEVO = (
     ("⏳ Lo que te piden por el chat y no hay: «⏳ Anotar que lo espera» lo deja en Consultas de clientes con su WhatsApp, y lo del catálogo sin stock sale con «📲 Avisarle» cuando entra. Lo que no está en el catálogo suma en «Búsquedas sin resultado», para ver qué traer.", "💬 Mensajes"),
-    ("📌 El presupuesto que le mandás a un chat de WhatsApp («💬 Mandárselo») queda solo en «📋 Presupuestos para seguir», para preguntarle si no contesta. Guardado dos veces, queda uno.", "🔍 Buscador"),
+    ("📌 El presupuesto que le mandás a un chat de WhatsApp («💬 Mandárselo») queda solo en «📋 Presupuestos para seguir», para preguntarle si no contesta. Y si ya te contestó por el chat, sale primero con «💬 Te contestó: ver el chat», en vez de preguntarle de nuevo.", "🔍 Buscador"),
     ("🧩 Lo que te piden al WhatsApp del teléfono, pegalo en «🧩 Pegar el pedido de un cliente»: lo separa igual que el chat, elegís o descartás cada cosa y arma el presupuesto. Si buscás una frase con varias cosas, ofrece separarla.", "🔍 Buscador"),
     ("🧩 En el chat, «Armar el presupuesto con lo que pide»: separa lo que escribió el cliente (las piezas con su auto, y los códigos), de cada una te muestra lo que hay para elegir o descartar, y con lo elegido arma el presupuesto, listo para mandárselo. Lo que no hay, «✍️ Decirle lo que no hay» se lo contesta.", "💬 Mensajes"),
     ("📋 Presupuestos para seguir: guardá el presupuesto que mandaste (📌, con el WhatsApp del cliente) y al día siguiente aparece para preguntarle si lo vio; si vuelve, se arma con los mismos precios.", "🔍 Buscador"),

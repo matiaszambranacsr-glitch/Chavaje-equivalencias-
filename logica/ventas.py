@@ -1714,9 +1714,21 @@ def guardar_presupuesto_para_seguir(cliente, telefono, carrito):
 
 def presupuestos_para_seguir():
     """Los que esperan respuesta, lo más viejo primero: [dict] con id, cliente, telefono, items,
-    total, creado_en (como está guardado), hace (días), toca (si toca preguntar) y link (su
-    WhatsApp con el mensaje). Los que tocan, primero."""
-    c.execute("""SELECT id, cliente, telefono, items, total, creado_en, usuario,
+    total, creado_en (como está guardado), hace (días), toca (si toca preguntar), link (su
+    WhatsApp con el mensaje) y contesto (el chat de 💬 Mensajes donde escribió después de
+    mandárselo, o None). Los que contestaron primero, después los que tocan.
+
+    EL QUE YA CONTESTÓ NO SE PREGUNTA: escribió por el chat después del presupuesto (o de la
+    última vez que se le preguntó), así que lo que toca es leerlo, no mandarle «¿lo pudiste
+    ver?» encima de su respuesta. Se reconoce por los últimos ocho dígitos del teléfono, como
+    en el resto de la app."""
+    chats = {}
+    for ch in c.execute("""SELECT id, externo, ultimo_del_cliente_en FROM chats
+                           WHERE canal = 'whatsapp' AND ultimo_del_cliente_en IS NOT NULL"""):
+        fin = re.sub(r"\D", "", str(ch["externo"]))[-8:]
+        if len(fin) == 8 and (fin not in chats or ch["ultimo_del_cliente_en"] > chats[fin][1]):
+            chats[fin] = (ch["id"], ch["ultimo_del_cliente_en"])
+    c.execute("""SELECT id, cliente, telefono, items, total, creado_en, usuario, preguntado_en,
                         CAST(julianday('now') - julianday(creado_en) AS INTEGER) AS hace,
                         CAST(julianday('now') - julianday(preguntado_en) AS INTEGER)
                             AS preguntado_hace
@@ -1725,11 +1737,16 @@ def presupuestos_para_seguir():
     for f in c.fetchall():
         p = dict(f)
         p["items"] = json.loads(p["items"] or "[]")
-        p["toca"] = (p["hace"] >= 1 and (p["preguntado_hace"] is None
-                                          or p["preguntado_hace"] >= DIAS_PARA_VOLVER_A_PREGUNTAR))
+        fin = re.sub(r"\D", "", str(p["telefono"] or ""))[-8:]
+        chat = chats.get(fin) if len(fin) == 8 else None
+        desde = max(str(p["creado_en"] or ""), str(p["preguntado_en"] or ""))
+        p["contesto"] = chat[0] if chat and str(chat[1]) > desde else None
+        p["toca"] = (not p["contesto"] and p["hace"] >= 1
+                     and (p["preguntado_hace"] is None
+                          or p["preguntado_hace"] >= DIAS_PARA_VOLVER_A_PREGUNTAR))
         p["link"] = link_de_whatsapp(p["telefono"], mensaje_de_seguimiento(p))
         salida.append(p)
-    salida.sort(key=lambda p: not p["toca"])
+    salida.sort(key=lambda p: (not p["contesto"], not p["toca"]))
     return salida
 
 
@@ -1825,13 +1842,15 @@ def mostrar_presupuestos_para_seguir():
     if not lista:
         st.caption("Ninguno esperando respuesta. 🎉")
         return
+    _contestaron = sum(1 for p in lista if p["contesto"])
     st.caption(f"Toca preguntarles a {miles(sum(1 for p in lista if p['toca']))} de "
                f"{miles(len(lista))} (los mandados hace un día o más; a los ya preguntados, de "
-               f"nuevo a los {DIAS_PARA_VOLVER_A_PREGUNTAR} días).")
+               f"nuevo a los {DIAS_PARA_VOLVER_A_PREGUNTAR} días)."
+               + (f" 💬 {miles(_contestaron)} te contestaron por el chat." if _contestaron else ""))
     for p in lista[:MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR]:
         with st.container(border=True, key=f"presu_seguir_{p['id']}"):
             _c1, _c2 = st.columns([3, 2], vertical_alignment="center")
-            _c1.markdown(f"{'🔴' if p['toca'] else '⚪'} "
+            _c1.markdown(f"{'💬' if p['contesto'] else '🔴' if p['toca'] else '⚪'} "
                          f"**{texto_para_markdown(p['cliente'] or 'Sin nombre')}** · "
                          + ("hoy" if not p["hace"] else f"hace {miles(p['hace'])} día(s)")
                          + f" · \\${miles(p['total'] or 0, 0)}")
@@ -1841,8 +1860,17 @@ def mostrar_presupuestos_para_seguir():
                         + (f" · lo armó {p['usuario']}" if p.get("usuario") else "")
                         + ("" if numero_para_whatsapp(p["telefono"]) else
                            " · sin WhatsApp anotado"))
-            _c2.link_button("📲 Preguntarle si lo vio" if numero_para_whatsapp(p["telefono"])
-                            else "📲 Preguntarle (elegís a quién)", p["link"], width="stretch")
+            if p["contesto"]:
+                _c2.button("💬 Te contestó: ver el chat", key=f"presu_chat_{p['id']}",
+                           type="primary", width="stretch", on_click=abrir_el_chat,
+                           args=(p["contesto"],),
+                           help="Escribió por el chat después del presupuesto: leelo antes de "
+                                "preguntarle.")
+            else:
+                _c2.link_button("📲 Preguntarle si lo vio"
+                                if numero_para_whatsapp(p["telefono"])
+                                else "📲 Preguntarle (elegís a quién)", p["link"],
+                                width="stretch")
             _b1, _b2, _b3 = st.columns(3)
             _b1.button("✅ Ya le pregunté", key=f"presu_preguntado_{p['id']}", width="stretch",
                        on_click=marcar_presupuesto, args=(p["id"], "preguntado"))

@@ -7799,6 +7799,12 @@ seguir»**, arriba en el Buscador (solo para el personal: guarda teléfonos de c
   BOSCH 0986… y 1 más, total $43.000). ¿Lo pudiste ver? Si querés, te lo guardamos.»;
 - **«✅ Ya le pregunté»** (deja de tocar unos días), **«🛒 Volvió: armarlo»** (lo vuelve a armar en
   el presupuesto, con los mismos precios, para pasarlo a una venta) y **«🗑️ No lo quiere»**.
+- 💬 **los que ya contestaron por el chat** (escribieron en 💬 Mensajes después del presupuesto o
+  de la última pregunta), primero y sin «📲 Preguntarle»: **«💬 Te contestó: ver el chat»** abre
+  su chat. Mandarle «¿lo pudiste ver?» encima de su respuesta queda mal. Se lo reconoce por los
+  últimos ocho dígitos del teléfono.
+- El que se manda a un chat de WhatsApp con «💬 Mandárselo» ya queda guardado solo, y guardar el
+  mismo dos veces deja uno.
 
 El asistente dice en «¿qué está esperando?» a cuántos toca preguntarles. Ver «LOS PRESUPUESTOS
 PARA SEGUIR» en `logica/ventas.py`; lo controla `pruebas/pruebas_de_los_presupuestos.py`.
