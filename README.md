@@ -7676,6 +7676,10 @@ seguirlo», y «💬 Mandárselo» lo devuelve a ese chat (`pedidos_del_mensaje(
   pieza tiene que estar en la descripción. Con la frase entera, «pastillas delanteras gol» traía
   «Tecla alza cristales delanteras Gol» (el buscador cuenta palabras). El lado solo ordena:
   primero lo que nombra el auto, después el lado pedido, después lo que hay en stock.
+- **Lo que no se encontró** tiene «🔍 Buscarlo a mano» (el código con sus equivalencias, la pieza
+  por descripción, ya buscados en el Buscador), y **«✍️ Decirle lo que no hay»** escribe en la
+  respuesta «De lo que me pediste, ahora no tengo bomba de nafta. ¿Querés que te lo consiga?»,
+  después de lo escrito y una sola vez (lo manda el que atiende).
 - **Lo que no dice el auto** se ofrece igual (muchas descripciones no lo dicen), con ⚠️ y sin
   venir elegido: hay que fijarse antes de ofrecerlo.
 - **«correa de alternador»** es una pieza, no dos; «AMORTIGUADORES» se busca como

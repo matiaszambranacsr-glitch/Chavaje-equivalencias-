@@ -19,8 +19,9 @@ if pagina == PAGINAS[12]:
         "**🧩 Armar el presupuesto con lo que pide**: separa lo último que escribió (las piezas "
         "con el auto que nombra, y los códigos) y de cada una te muestra lo que hay para elegir "
         "o descartar. Con lo elegido arma el presupuesto del Buscador, con su nombre y su "
-        "WhatsApp, listo para «💬 Mandárselo». Lo que no entiende, no lo inventa: lo buscás a "
-        "mano.\n\n"
+        "WhatsApp, listo para «💬 Mandárselo». Lo que no encuentra, no lo inventa: «🔍 Buscarlo "
+        "a mano» lo deja buscado, y «✍️ Decirle lo que no hay» se lo escribe en la respuesta."
+        "\n\n"
         "**Las 24 horas**: Meta deja contestar desde acá hasta 24 horas después del último "
         "mensaje del cliente; después hay que escribirle desde el teléfono. Fotos y audios se "
         "avisan, pero se miran en el teléfono.\n\n"
@@ -225,7 +226,7 @@ if pagina == PAGINAS[12]:
         # Las claves llevan la huella de lo leído: si escribe otra cosa, son pedidos nuevos y
         # no se quedan con lo elegido para los de antes.
         _huella = hashlib.md5(_leido.encode("utf-8")).hexdigest()[:8]
-        _elegidos = []
+        _elegidos, _no_hay = [], []
         for _n, (_ped, _cands) in enumerate(_pedidos):
             _clave = f"pedido_chat_{chat_id}_{_huella}_{_n}"
             # Sin negritas: el rótulo es también lo que lee el lector de pantalla, y ahí las
@@ -233,9 +234,14 @@ if pagina == PAGINAS[12]:
             _titulo = (f"{_n + 1}. {texto_para_markdown(_ped['texto'])}"
                        + (" (código)" if _ped["tipo"] == "codigo" else ""))
             if not _cands:
-                st.markdown(f"{_titulo} — no lo encontré en el catálogo"
-                            + (" con esas palabras" if _ped["tipo"] == "pieza" else "")
-                            + ": buscalo a mano en el 🔍 Buscador.")
+                _col_que, _col_boton = st.columns([5, 2], vertical_alignment="center")
+                _col_que.markdown(f"**{_titulo}** — no lo encontré en el catálogo"
+                                  + (" con esas palabras." if _ped["tipo"] == "pieza" else "."))
+                _col_boton.button("🔍 Buscarlo a mano", key=f"{_clave}_a_mano",
+                                  on_click=buscar_el_pedido_a_mano,
+                                  args=(_ped["tipo"], _ped["buscar"]), width="stretch",
+                                  help="Lo deja buscado en el 🔍 Buscador, para mirarlo vos.")
+                _no_hay.append(_ped["texto"])
                 continue
             _por_id = {x["ID"]: x for x in _cands}
             _primero = _cands[0]
@@ -261,6 +267,18 @@ if pagina == PAGINAS[12]:
                            + (f" · stock {miles(_elegido['Stock'])}"
                               if _elegido["Stock"] is not None else ""))
             _elegidos.append((_clave, f"{_clave}_cant"))
+        # Lo que no hay, contestado de un toque: a la caja de la respuesta (o a la de WhatsApp,
+        # pasadas las 24 horas), sin borrar lo escrito.
+        _chat_ped = el_chat(chat_id)
+        _caja_ped = ((f"msj_fuera_{chat_id}" if _chat_ped["canal"] == "whatsapp"
+                      and str(_chat_ped["externo"]).isdigit() else None)
+                     if fuera_de_la_ventana(_chat_ped) else f"msj_respuesta_{chat_id}")
+        if _no_hay and _caja_ped:
+            st.button("✍️ Decirle lo que no hay", key=f"msj_no_hay_{chat_id}",
+                      on_click=sumar_a_la_respuesta,
+                      args=(_caja_ped, mensaje_de_lo_que_no_hay(_no_hay)),
+                      help="Le escribe en la respuesta lo que no se encontró, y si querés "
+                           "que se lo consigas. Lo mandás vos.")
         if _elegidos:
             st.button("🛒 Armar el presupuesto con lo elegido", key=f"msj_armar_presu_{chat_id}",
                       type="primary", width="stretch", on_click=armar_el_presupuesto_del_chat,
@@ -315,12 +333,8 @@ if pagina == PAGINAS[12]:
                 _recordatorio = recordatorio_del_chat(_chat_msj)
                 _fuera = fuera_de_la_ventana(_chat_msj)
                 if _recordatorio:
-                    def _msj_poner_recordatorio(clave, texto):
-                        _antes = str(st.session_state.get(clave) or "").rstrip()
-                        if texto not in _antes:
-                            st.session_state[clave] = f"{_antes}\n\n{texto}".strip()
                     st.button("💳 Recordarle lo vencido", key=f"msj_recordar_{_abierto_msj}",
-                              on_click=_msj_poner_recordatorio,
+                              on_click=sumar_a_la_respuesta,
                               args=(f"msj_fuera_{_abierto_msj}" if _fuera else _clave_resp,
                                     _recordatorio[1]),
                               help="Pone en la respuesta el recordatorio de lo que debe "

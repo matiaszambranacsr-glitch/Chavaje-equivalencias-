@@ -703,8 +703,25 @@ def probar():
                 {k.split(". ", 1)[-1]: v.value for k, v in _sel.items()},
                 {"W712/80 (código)": _id_mann, "pastilla delantera": _ids_ped["PF1"],
                  "amortiguador trasero": _ids_ped["AM1"]})
-        cierto("lo que no está se dice: buscalo a mano",
-               any("bomba de nafta" in m.value and "buscalo a mano" in m.value for m in at.markdown))
+        cierto("lo que no está se dice, con «🔍 Buscarlo a mano»",
+               any("bomba de nafta" in m.value and "no lo encontré" in m.value for m in at.markdown)
+               and [b for b in at.button if str(b.key).endswith("_a_mano")])
+        # «✍️ Decirle lo que no hay»: a la respuesta, después de lo escrito y una sola vez.
+        at.session_state[f"msj_respuesta_{_juan['id']}"] = "Hola Juan!"
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.run()
+        for _vez in range(2):
+            at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+            at.button(key=f"msj_no_hay_{_juan['id']}").click().run()
+        esperar("«✍️ Decirle lo que no hay» lo pone en la respuesta",
+                at.text_area(key=f"msj_respuesta_{_juan['id']}").value,
+                "Hola Juan!\n\nDe lo que me pediste, ahora no tengo bomba de nafta. ¿Querés que te "
+                "lo consiga?")
+        at.session_state[f"msj_respuesta_{_juan['id']}"] = ""
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.run()
+        _sel = {s.label: s for s in at.selectbox if str(s.key).startswith(
+            f"pedido_chat_{_juan['id']}_")}
         _cant = [n for n in at.number_input if str(n.key).endswith("_cant")]
         esperar("con la cantidad que pidió", [n.value for n in _cant], [1, 1, 2])
         # El código lo descarta; lo demás va al presupuesto del Buscador. (AppTest cierra el
@@ -722,6 +739,15 @@ def probar():
         cierto("con «💬 Mandárselo» a ese chat",
                [b for b in at.button if b.key == "presupuesto_al_chat"])
         at.session_state["carrito"] = {}
+        # «🔍 Buscarlo a mano»: la pieza que no se encontró queda buscada por descripción.
+        at.session_state["pagina_actual"] = ns["PAGINAS"][12]
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.run()
+        [b for b in at.button if str(b.key).endswith("_a_mano")][0].click().run()
+        esperar("«🔍 Buscarlo a mano» la deja buscada por descripción en el Buscador",
+                (at.session_state["pagina_actual"], at.session_state["modo_busqueda"],
+                 at.text_input(key="texto_input").value),
+                (ns["PAGINAS"][0], "Descripción", "bomba nafta gol 1.6 2015"))
 
         # En la ficha del auto, un teléfono que no sirve para WhatsApp se dice (sin característica,
         # los avisos no sabrían a quién ir); uno que sirve, no.

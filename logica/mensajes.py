@@ -1080,6 +1080,35 @@ def pedidos_y_candidatos_del_chat(chat_id):
 DESCARTAR_EL_PEDIDO = "descartar"
 
 
+def buscar_el_pedido_a_mano(tipo, texto):
+    """«🔍 Buscarlo a mano» de un pedido que no se encontró (va como on_click): el código, con
+    sus equivalencias; la pieza, por descripción. Ya buscado en el 🔍 Buscador."""
+    if tipo == "codigo":
+        buscar_el_codigo_del_mensaje(texto)
+        return
+    st.session_state["_pasar_a_descripcion"] = str(texto).lower()
+    st.session_state["_sin_aviso_de_codigo"] = True
+    st.session_state["pagina_actual"] = PAGINAS[0]
+
+
+def mensaje_de_lo_que_no_hay(lo_que_falta):
+    """«De lo que me pediste, ahora no tengo bomba de nafta y W712/80. ¿Querés que te lo
+    consiga?»: para contestarle de un toque lo que no se encontró."""
+    falta = [str(x) for x in lo_que_falta if str(x).strip()]
+    if not falta:
+        return ""
+    lista = ", ".join(falta[:-1]) + (" y " if len(falta) > 1 else "") + falta[-1]
+    return f"De lo que me pediste, ahora no tengo {lista}. ¿Querés que te lo consiga?"
+
+
+def sumar_a_la_respuesta(clave, texto):
+    """(Va como on_click.) Suma `texto` a lo escrito en la caja `clave`, después de lo que hay
+    y una sola vez: «💳 Recordarle lo vencido», «✍️ Decirle lo que no hay»."""
+    antes = str(st.session_state.get(clave) or "").rstrip()
+    if texto and texto not in antes:
+        st.session_state[clave] = f"{antes}\n\n{texto}".strip()
+
+
 def armar_el_presupuesto_del_chat(chat_id, elegidos):
     """«🛒 Armar el presupuesto» (va como on_click): lo elegido de cada pedido va al presupuesto
     del 🔍 Buscador, con su cantidad; el chat queda en curso (para «💬 Mandárselo») y el cliente
