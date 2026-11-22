@@ -7740,6 +7740,24 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
 
+## 📋 Presupuestos para seguir: el que no contestó, a un mensaje de distancia
+
+Un presupuesto que se mandaba por WhatsApp y el cliente no contestaba se perdía: nadie se
+acordaba de preguntarle. Ahora, en el presupuesto del 🔍 Buscador, **«📌 Guardarlo para hacerle el
+seguimiento»** pide el nombre y el WhatsApp del cliente (si no hay nombre, el de la cuenta que se
+atiende) y lo guarda, con los precios que se le pasaron. Queda en **«📋 Presupuestos para
+seguir»**, arriba en el Buscador (solo para el personal: guarda teléfonos de clientes):
+
+- 🔴 los que toca preguntar —mandados hace un día o más; a los ya preguntados, de nuevo a los
+  `DIAS_PARA_VOLVER_A_PREGUNTAR` (3)—, con **«📲 Preguntarle si lo vio»** y el mensaje escrito:
+  «Hola Juan! Te escribimos de El Chavo por el presupuesto que te pasamos el 19/11 (MANN W712,
+  BOSCH 0986… y 1 más, total $43.000). ¿Lo pudiste ver? Si querés, te lo guardamos.»;
+- **«✅ Ya le pregunté»** (deja de tocar unos días), **«🛒 Volvió: armarlo»** (lo vuelve a armar en
+  el presupuesto, con los mismos precios, para pasarlo a una venta) y **«🗑️ No lo quiere»**.
+
+El asistente dice en «¿qué está esperando?» a cuántos toca preguntarles. Ver «LOS PRESUPUESTOS
+PARA SEGUIR» en `logica/ventas.py`; lo controla `pruebas/pruebas_de_los_presupuestos.py`.
+
 ## 📊 El resumen del día, al WhatsApp del dueño
 
 En 💵 Caja → «📋 Ventas y cierre de caja», **«📲 Resumen del día para el dueño»** arma el texto

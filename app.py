@@ -149,6 +149,7 @@ específico, y las pantallas quedan todas al final:
         · LA CAJA APARTE
         · LO QUE LE AVISA LA APP A QUIEN VENDE
         · LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR, A SALVO DE UNA RECARGA
+        · LOS PRESUPUESTOS PARA SEGUIR
         · QUE UNA VENTA NO SE GRABE POR ACCIDENTE
         · CORREGIR UN COBRO
     logica/facturas.py

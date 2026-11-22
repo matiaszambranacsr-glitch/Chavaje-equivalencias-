@@ -3190,6 +3190,19 @@ def _esquema_ventas(c):
         cliente TEXT,
         guardada TEXT DEFAULT (datetime('now', 'localtime'))
     )""")
+    # LOS PRESUPUESTOS PARA SEGUIR (ver esa sección en logica/ventas.py).
+    c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_para_seguir (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        creado_en TEXT DEFAULT (datetime('now')),
+        usuario TEXT,
+        cliente TEXT,
+        telefono TEXT,
+        items TEXT NOT NULL,
+        total REAL,
+        estado TEXT NOT NULL DEFAULT 'abierto',
+        preguntado_en TEXT,
+        cerrado_en TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_a_medio_armar (
         usuario TEXT PRIMARY KEY,
         items TEXT NOT NULL,

@@ -96,6 +96,17 @@ if pagina == PAGINAS[0]:
                     on_click=descartar_el_presupuesto_a_medio_armar,
                     help="Si empezás otro presupuesto sin recuperarlo, también se descarta.")
 
+    # LOS PRESUPUESTOS PARA SEGUIR (ver esa sección en logica/ventas.py): para el personal, y
+    # solo si hay alguno. Perezoso: arma los mensajes recién al abrirlo.
+    if es_operador_o_admin() and not solo_mirar():
+        _n_seguir = cuantos_presupuestos_para_seguir()
+        if _n_seguir:
+            _exp_seguir = st.expander(f"📋 Presupuestos para seguir ({miles(_n_seguir)})",
+                                      key="exp_presupuestos_para_seguir", on_change="rerun")
+            if _exp_seguir.open:
+                with _exp_seguir:
+                    mostrar_presupuestos_para_seguir()
+
     # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
     # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
     if st.session_state.get("carrito") and not solo_mirar():
@@ -168,6 +179,20 @@ if pagina == PAGINAS[0]:
                            help="Abre WhatsApp con el presupuesto escrito: elegís a quién.")
             # Si lo pidió alguien por 💬 Mensajes hace un rato: mandárselo a ese chat.
             mostrar_boton_para_el_chat(_texto, "presupuesto_al_chat")
+            # GUARDARLO PARA SEGUIRLO (ver «LOS PRESUPUESTOS PARA SEGUIR» en logica/ventas.py):
+            # con el nombre y el teléfono, queda en «📋 Presupuestos para seguir». Solo el
+            # personal: guarda el teléfono de un cliente.
+            if es_operador_o_admin():
+                with st.popover("📌 Guardarlo para hacerle el seguimiento",
+                                key="pop_presu_seguir", width="stretch"):
+                    st.text_input("Cliente:", key="presu_seguir_cliente",
+                                  placeholder=(cuenta_elegida() or {}).get("nombre")
+                                  or "Nombre del cliente")
+                    st.text_input("WhatsApp del cliente:", key="presu_seguir_tel",
+                                  placeholder="11 4567-8901")
+                    st.button("📌 Guardar para seguirlo", key="presu_seguir_guardar",
+                              type="primary", width="stretch",
+                              on_click=guardar_el_presupuesto_para_seguir)
             st.caption("O para copiar:")
             st.code(_texto, language=None)
             # Pedir todo junto al depósito, para la cuenta elegida arriba (o Mostrador). Lo

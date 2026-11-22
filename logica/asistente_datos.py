@@ -28,7 +28,7 @@ FUNCIONES_QUE_PUEDE_USAR = (
     "resumen_de_la_caja", "ventas_a_cobrar", "pedidos_pendientes", "pendientes_por_pedido",
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
     "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "garantias", "hoy_aca",
-    "miles", "texto_para_markdown",
+    "miles", "texto_para_markdown", "presupuestos_para_seguir",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -73,6 +73,7 @@ _DATO_PENDIENTE = re.compile(
 _CAJA, _DEPOSITO, _ADMINISTRAR, _VEHICULOS = "💵 Caja", "📦 Depósito", "🗂️ Administrar", "🚗 Vehículos"
 _MENSAJES = "💬 Mensajes"
 _DEVOLUCIONES = "↩️ Devoluciones"
+_BUSCADOR = "🔍 Buscador"
 
 
 def _asis_nombre(texto):
@@ -233,6 +234,16 @@ def _dato_de_lo_pendiente(contexto):
             lineas.append(f"💳 **{miles(len(vencidas))}** cuenta(s) con saldo vencido"
                           + (f"; a {miles(_tocan)} toca recordárselo: «📲 Cobrar lo vencido», "
                              "en 💳 Cuentas corrientes." if _tocan else "."))
+    # Guardan teléfonos de clientes: solo para el personal (el invitado y el taller no llegan
+    # acá, ver dato_del_momento(); va explícito igual).
+    if _BUSCADOR in visibles and contexto.get("nivel") in ("operador", "admin"):
+        _presus = presupuestos_para_seguir()
+        _tocan_p = sum(1 for p in _presus if p["toca"])
+        if _tocan_p:
+            lineas.append(f"📋 A **{miles(_tocan_p)}** cliente(s) les toca preguntarles por el "
+                          "presupuesto que se les mandó: «📋 Presupuestos para seguir», en el "
+                          "🔍 Buscador.")
+            botones += _asis_ir_a(_BUSCADOR, contexto)
     if _DEVOLUCIONES in visibles:
         _por_reclamar = [g for g in garantias() if not g["reclamo"]]
         if _por_reclamar:

@@ -1668,6 +1668,183 @@ def descartar_el_presupuesto_a_medio_armar():
 
 
 # ============================================================================================
+# LOS PRESUPUESTOS PARA SEGUIR
+# ============================================================================================
+# Un presupuesto que se manda por WhatsApp y el cliente no contesta se perdía: nadie se acordaba
+# de preguntarle, y era una venta a un mensaje de distancia. Ahora, al mandarlo, se guarda con el
+# nombre y el teléfono del cliente (📌 en el presupuesto del Buscador), y queda en «📋 Presupuestos
+# para seguir»: hace cuántos días, el «¿lo pudiste ver?» ya escrito para su WhatsApp, y en qué
+# quedó —volvió (se vuelve a armar, con los precios que se le pasaron) o no lo quiere—. Desde el
+# día siguiente toca preguntar; preguntado, vuelve a tocar a los DIAS_PARA_VOLVER_A_PREGUNTAR.
+DIAS_PARA_VOLVER_A_PREGUNTAR = 3
+ESTADOS_DEL_PRESUPUESTO = {"abierto": "⏳ Esperando respuesta", "volvio": "✅ Volvió",
+                           "no": "🗑️ No lo quiere"}
+
+
+def guardar_presupuesto_para_seguir(cliente, telefono, carrito):
+    """Guarda el presupuesto armado (el carrito del Buscador) para seguirlo. Devuelve su número.
+    Lo hace el personal: el que entra sin cuenta arma y manda, pero no deja datos guardados."""
+    exigir_nivel("empleado", "guardar un presupuesto para seguirlo")
+    items = [{"producto_id": pid, **{k: it.get(k) for k in CAMPOS_DEL_PRESUPUESTO_QUE_SE_GUARDAN}}
+             for pid, it in (carrito or {}).items()]
+    if not items:
+        raise ValueError("El presupuesto está vacío.")
+    total = round(sum((it.get("precio") or 0) * (it.get("cantidad") or 1) for it in items), 2)
+    with db_lock:
+        c.execute("""INSERT INTO presupuestos_para_seguir (usuario, cliente, telefono, items, total)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (obtener_usuario_actual(), str(cliente or "").strip()[:80] or None,
+                   str(telefono or "").strip()[:40] or None, json.dumps(items), total))
+        nuevo = c.lastrowid
+        conn.commit()
+    return nuevo
+
+
+def presupuestos_para_seguir():
+    """Los que esperan respuesta, lo más viejo primero: [dict] con id, cliente, telefono, items,
+    total, creado_en (como está guardado), hace (días), toca (si toca preguntar) y link (su
+    WhatsApp con el mensaje). Los que tocan, primero."""
+    c.execute("""SELECT id, cliente, telefono, items, total, creado_en, usuario,
+                        CAST(julianday('now') - julianday(creado_en) AS INTEGER) AS hace,
+                        CAST(julianday('now') - julianday(preguntado_en) AS INTEGER)
+                            AS preguntado_hace
+                 FROM presupuestos_para_seguir WHERE estado = 'abierto' ORDER BY creado_en, id""")
+    salida = []
+    for f in c.fetchall():
+        p = dict(f)
+        p["items"] = json.loads(p["items"] or "[]")
+        p["toca"] = (p["hace"] >= 1 and (p["preguntado_hace"] is None
+                                          or p["preguntado_hace"] >= DIAS_PARA_VOLVER_A_PREGUNTAR))
+        p["link"] = link_de_whatsapp(p["telefono"], mensaje_de_seguimiento(p))
+        salida.append(p)
+    salida.sort(key=lambda p: not p["toca"])
+    return salida
+
+
+def mensaje_de_seguimiento(presupuesto):
+    """El «¿lo pudiste ver?», con qué era: lo primero del presupuesto y el total."""
+    items = presupuesto.get("items") or []
+    que = ", ".join(f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip()
+                    for it in items[:2]) + (f" y {len(items) - 2} más" if len(items) > 2 else "")
+    nombre = str(presupuesto.get("cliente") or "").strip()
+    return (f"Hola{(' ' + nombre) if nombre else ''}! Te escribimos de El Chavo por el presupuesto "
+            f"que te pasamos el {dia_de_aca(presupuesto.get('creado_en'))[8:10]}/"
+            f"{dia_de_aca(presupuesto.get('creado_en'))[5:7]} ({que}, total "
+            f"${miles(presupuesto.get('total') or 0, 0)}). ¿Lo pudiste ver? Si querés, te lo "
+            "guardamos. ¡Gracias!")
+
+
+def marcar_presupuesto(presupuesto_id, que):
+    """«preguntado» (se le preguntó: vuelve a tocar en unos días), «volvio» o «no» (se cierra).
+    Lo hace el personal; queda en el registro de cambios."""
+    exigir_nivel("empleado", "anotar el seguimiento de un presupuesto")
+    if que not in ("preguntado", "volvio", "no"):
+        raise ValueError(f"Seguimiento desconocido: {que}")
+    with db_lock:
+        if que == "preguntado":
+            c.execute("UPDATE presupuestos_para_seguir SET preguntado_en = datetime('now') "
+                      "WHERE id = ?", (int(presupuesto_id),))
+        else:
+            c.execute("UPDATE presupuestos_para_seguir SET estado = ?, cerrado_en = datetime('now') "
+                      "WHERE id = ? AND estado = 'abierto'", (que, int(presupuesto_id)))
+        anotar_cambio(f"seguimiento del presupuesto: {que}", "presupuesto", presupuesto_id)
+        conn.commit()
+
+
+def volver_a_armar_el_presupuesto(presupuesto_id):
+    """«🛒 Volvió: armarlo» (va como on_click): vuelve al presupuesto del Buscador, con la
+    cantidad y el precio que se le pasaron, y el seguimiento se cierra como «volvió». Lo que ya
+    no está en el catálogo queda afuera, y se dice."""
+    fila = c.execute("SELECT items FROM presupuestos_para_seguir WHERE id = ?",
+                     (int(presupuesto_id),)).fetchone()
+    if not fila:
+        return
+    carrito = st.session_state.setdefault("carrito", {})
+    afuera = []
+    for it in json.loads(fila["items"] or "[]"):
+        pid = it.get("producto_id")
+        if not item_de_venta(pid):
+            afuera.append(f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip())
+            continue
+        carrito[pid] = {k: it.get(k) for k in CAMPOS_DEL_PRESUPUESTO_QUE_SE_GUARDAN}
+        carrito[pid]["cantidad"] = int(it.get("cantidad") or 1)
+        st.session_state.pop(f"cant_cart_{pid}", None)
+        st.session_state.pop(f"se_lleva_{pid}", None)
+    marcar_presupuesto(presupuesto_id, "volvio")
+    avisar("success", "🛒 El presupuesto volvió a armarse, con los precios que se le pasaron."
+                      + (f" Ya no están en el catálogo: {', '.join(afuera)}." if afuera else ""))
+
+
+def cuantos_presupuestos_para_seguir():
+    return c.execute("SELECT COUNT(*) FROM presupuestos_para_seguir "
+                     "WHERE estado = 'abierto'").fetchone()[0]
+
+
+def guardar_el_presupuesto_para_seguir():
+    """El «📌 Guardar» del presupuesto del Buscador (va como on_click): con el cliente y el
+    teléfono escritos (si no hay nombre, el de la cuenta que se atiende), y deja los campos
+    vacíos para el próximo."""
+    cuenta = cuenta_elegida()
+    cliente = (st.session_state.get("presu_seguir_cliente") or "").strip() or (
+        cuenta["nombre"] if cuenta else "")
+    problema = ""
+    try:
+        guardar_presupuesto_para_seguir(cliente, st.session_state.get("presu_seguir_tel"),
+                                        st.session_state.get("carrito"))
+    except (PermissionError, ValueError) as _err:
+        problema = el_error_en_castellano(_err)
+    if problema:
+        avisar("warning", problema)
+        return
+    st.session_state["presu_seguir_cliente"] = ""
+    st.session_state["presu_seguir_tel"] = ""
+    avisar("success", "📌 Guardado en «📋 Presupuestos para seguir»"
+                      + (f", para {cliente}" if cliente else "") + ". Si en un día no contestó, "
+                      "ahí está el mensaje para preguntarle.")
+
+
+# Cuántos se muestran de una vez: los que tocan primero.
+MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR = 30
+
+
+def mostrar_presupuestos_para_seguir():
+    """Adentro de «📋 Presupuestos para seguir», en el Buscador."""
+    lista = presupuestos_para_seguir()
+    if not lista:
+        st.caption("Ninguno esperando respuesta. 🎉")
+        return
+    st.caption(f"Toca preguntarles a {miles(sum(1 for p in lista if p['toca']))} de "
+               f"{miles(len(lista))} (los mandados hace un día o más; a los ya preguntados, de "
+               f"nuevo a los {DIAS_PARA_VOLVER_A_PREGUNTAR} días).")
+    for p in lista[:MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR]:
+        with st.container(border=True, key=f"presu_seguir_{p['id']}"):
+            _c1, _c2 = st.columns([3, 2], vertical_alignment="center")
+            _c1.markdown(f"{'🔴' if p['toca'] else '⚪'} "
+                         f"**{texto_para_markdown(p['cliente'] or 'Sin nombre')}** · "
+                         + ("hoy" if not p["hace"] else f"hace {miles(p['hace'])} día(s)")
+                         + f" · \\${miles(p['total'] or 0, 0)}")
+            _c1.caption(", ".join(f"{it.get('cantidad') or 1}× {it.get('marca') or ''} "
+                                  f"{it.get('codigo') or ''}" for it in p["items"][:4])
+                        + (f" y {len(p['items']) - 4} más" if len(p["items"]) > 4 else "")
+                        + (f" · lo armó {p['usuario']}" if p.get("usuario") else "")
+                        + ("" if numero_para_whatsapp(p["telefono"]) else
+                           " · sin WhatsApp anotado"))
+            _c2.link_button("📲 Preguntarle si lo vio" if numero_para_whatsapp(p["telefono"])
+                            else "📲 Preguntarle (elegís a quién)", p["link"], width="stretch")
+            _b1, _b2, _b3 = st.columns(3)
+            _b1.button("✅ Ya le pregunté", key=f"presu_preguntado_{p['id']}", width="stretch",
+                       on_click=marcar_presupuesto, args=(p["id"], "preguntado"))
+            _b2.button("🛒 Volvió: armarlo", key=f"presu_volvio_{p['id']}", width="stretch",
+                       on_click=volver_a_armar_el_presupuesto, args=(p["id"],),
+                       help="Vuelve al presupuesto de acá arriba, con los precios que se le "
+                            "pasaron, para pasarlo a una venta.")
+            _b3.button("🗑️ No lo quiere", key=f"presu_no_{p['id']}", width="stretch",
+                       on_click=marcar_presupuesto, args=(p["id"], "no"))
+    if len(lista) > MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR:
+        st.caption(f"Y {miles(len(lista) - MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR)} más.")
+
+
+# ============================================================================================
 # QUE UNA VENTA NO SE GRABE POR ACCIDENTE
 # ============================================================================================
 # Lo pidió el dueño: «que lo de ventas sea más seguro de que no se grabe por accidente una

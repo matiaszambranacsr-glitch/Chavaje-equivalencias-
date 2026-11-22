@@ -519,7 +519,9 @@ VALORES_PAREADOS = {
                # de los pedidos al depósito (ver ESTADOS_DEL_PEDIDO)
                "entregado", "no_hay", "cancelado",
                # de los permisos para pasar el límite (ver «PASAR EL LÍMITE CON PERMISO»)
-               "autorizada", "rechazada"},
+               "autorizada", "rechazada",
+               # de los presupuestos para seguir (ver ESTADOS_DEL_PRESUPUESTO)
+               "abierto", "volvio", "no"},
     # link_roto: la foto de internet que no bajó (ver bajar_fotos_pendientes()).
     # fallo: falló por la red tres días distintos y se dejó de intentar (ver _anotar_fallas()).
     "foto_busqueda_estado": {"sin_foto", "error", "link_roto", "fallo"},

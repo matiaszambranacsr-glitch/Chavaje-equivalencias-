@@ -494,6 +494,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "cliente en la Lista WhatsApp: arma el mensaje con las marcas y los precios, y el PDF.",
      "📋 Lista WhatsApp", "empleado"),
     # ---- devoluciones ----
+    ("seguir_presupuesto", "Hacerle el seguimiento a un presupuesto que se mandó",
+     "seguimiento seguir presupuesto presupuestos mande mandamos contesto contestaron respuesta "
+     "preguntar recordar cliente volvio guardar",
+     "En el presupuesto del Buscador, «📌 Guardarlo para hacerle el seguimiento», con el nombre "
+     "y el WhatsApp del cliente. Queda en «📋 Presupuestos para seguir» (arriba en el "
+     "Buscador): desde el día siguiente, «📲 Preguntarle si lo vio» con el mensaje escrito; si "
+     "vuelve, «🛒 Volvió: armarlo» lo arma de nuevo con los mismos precios.",
+     "🔍 Buscador", ""),
     ("garantia_proveedor", "Reclamarle al proveedor lo que vino fallado (garantía)",
      "reclamar reclamo reclamarle proveedor garantia garantias fallada fallado falladas "
      "defectuosa defecto cambio acreditar nota credito marca",
