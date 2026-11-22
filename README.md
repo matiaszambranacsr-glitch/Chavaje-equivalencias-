@@ -7667,7 +7667,7 @@ lado y su cantidad, cada código— y de cada uno muestra lo que hay en el catá
 «🗑️ Descartar este pedido». **«🛒 Armar el presupuesto con lo elegido»** lo lleva al presupuesto
 del Buscador con las cantidades, el nombre y el WhatsApp del cliente listos para «📌 Guardar para
 seguirlo», y «💬 Mandárselo» lo devuelve a ese chat (`pedidos_del_mensaje()`,
-`candidatos_del_pedido()` y `armar_el_presupuesto_del_chat()` en `logica/mensajes.py`).
+`candidatos_del_pedido()` y `armar_el_presupuesto_con_lo_pedido()` en `logica/mensajes.py`).
 
 - **Se lee acá, no afuera**: con el vocabulario de piezas de la app (`FAMILIAS_REPUESTO`), los
   modelos de auto y el buscador por descripción. Lo que escribió el cliente no va a ningún
@@ -7680,6 +7680,12 @@ seguirlo», y «💬 Mandárselo» lo devuelve a ese chat (`pedidos_del_mensaje(
   por descripción, ya buscados en el Buscador), y **«✍️ Decirle lo que no hay»** escribe en la
   respuesta «De lo que me pediste, ahora no tengo bomba de nafta. ¿Querés que te lo consiga?»,
   después de lo escrito y una sola vez (lo manda el que atiende).
+- **Lo que llegó al WhatsApp del teléfono** (mientras Meta no esté conectado, todo): en el
+  🔍 Buscador, **«🧩 Pegar el pedido de un cliente»** hace lo mismo con lo pegado
+  (`mostrar_los_pedidos()`, el mismo panel); lo que no hay queda escrito para copiarlo. Y si se
+  busca una frase con dos cosas o más en la caja de siempre, **«🧩 Son varias cosas:
+  separarlas»** la pasa ahí (buscada entera, el buscador cuenta palabras y mezcla todo). Lo pegado
+  se borra al salir, como lo demás del Buscador.
 - **Lo que no dice el auto** se ofrece igual (muchas descripciones no lo dicen), con ⚠️ y sin
   venir elegido: hay que fijarse antes de ofrecerlo.
 - **«correa de alternador»** es una pieza, no dos; «AMORTIGUADORES» se busca como

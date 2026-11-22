@@ -34,6 +34,9 @@ if pagina == PAGINAS[0]:
                 "código no está, ofrece los que se escriben casi igual, su familia, lo que lo "
                 "nombra y, si es de MANN, «🌐 Buscarlo en la ficha» del fabricante; si es de SKF, "
                 "«🌐 Ver qué pieza es» y sus medidas.\n\n"
+                "**Lo que te piden por WhatsApp**, pegalo en «🧩 Pegar el pedido de un "
+                "cliente»: lo separa en pedidos (cada pieza con su auto, cada código), de cada "
+                "uno elegís lo que va o lo descartás, y arma el presupuesto.\n\n"
                 "**Cada sección:**\n\n"
                 + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
                              if PARA_QUE_SIRVE.get(_p))
@@ -106,6 +109,21 @@ if pagina == PAGINAS[0]:
             if _exp_seguir.open:
                 with _exp_seguir:
                     mostrar_presupuestos_para_seguir()
+
+    # EL PEDIDO QUE LLEGÓ AL WHATSAPP DEL TELÉFONO: se pega y se separa en pedidos, como en el
+    # chat de 💬 Mensajes (ver «LO QUE PIDE EL CHAT, SEPARADO EN PEDIDOS» en logica/mensajes.py).
+    # Mientras Meta no esté conectado, los pedidos llegan todos ahí. Perezoso.
+    if es_operador_o_admin() and not solo_mirar():
+        _exp_pegado = st.expander("🧩 Pegar el pedido de un cliente", key="exp_pedido_pegado",
+                                  on_change="rerun")
+        if _exp_pegado.open:
+            with _exp_pegado:
+                _pegado = st.text_area(
+                    "Lo que te mandó:", key="pedido_pegado", height=90,
+                    placeholder="Ej: necesito pastillas delanteras y 2 amortiguadores traseros "
+                                "para un gol 2015 1.6, y el W712/80")
+                if _pegado.strip():
+                    mostrar_los_pedidos(_pegado.strip()[:2000], "pedido_pegado")
 
     # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
     # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
@@ -2148,6 +2166,14 @@ if pagina == PAGINAS[0]:
             st.session_state["_pasar_a_codigo"] = texto.strip()
             st.session_state.pop("ultima_busqueda_texto", None)
             st.rerun()
+        # Una frase con varias cosas («pastillas y discos para el gol, y el W712/80»), pegada
+        # en la caja de siempre: separarla en pedidos, en vez de buscarla entera.
+        if (texto.strip() and es_operador_o_admin() and not solo_mirar()
+                and len(pedidos_del_mensaje(texto[:2000])) >= 2):
+            st.button("🧩 Son varias cosas: separarlas", key="separar_lo_buscado",
+                      on_click=pasar_al_pedido_pegado, args=(texto,),
+                      help="Lo pasa a «🧩 Pegar el pedido de un cliente», arriba: cada cosa por "
+                           "separado, para elegir y armar el presupuesto.")
         _desde_codigos = st.session_state.pop("_buscar_texto_ya", False)
         if _desde_codigos and not st.session_state.pop("_sin_aviso_de_codigo", False):
             st.caption("🔤 Eso no es un código, así que se buscó en las descripciones y las "

@@ -604,6 +604,7 @@ def _clave_de_ayuda(texto):
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
 VERSION_DE_LO_NUEVO = "2026-11-22c"
 LO_NUEVO = (
+    ("🧩 Lo que te piden al WhatsApp del teléfono, pegalo en «🧩 Pegar el pedido de un cliente»: lo separa igual que el chat, elegís o descartás cada cosa y arma el presupuesto. Si buscás una frase con varias cosas, ofrece separarla.", "🔍 Buscador"),
     ("🧩 En el chat, «Armar el presupuesto con lo que pide»: separa lo que escribió el cliente (las piezas con su auto, y los códigos), de cada una te muestra lo que hay para elegir o descartar, y con lo elegido arma el presupuesto, listo para mandárselo. Lo que no hay, «✍️ Decirle lo que no hay» se lo contesta.", "💬 Mensajes"),
     ("📋 Presupuestos para seguir: guardá el presupuesto que mandaste (📌, con el WhatsApp del cliente) y al día siguiente aparece para preguntarle si lo vio; si vuelve, se arma con los mismos precios.", "🔍 Buscador"),
     ("📊 «Resumen del día para el dueño»: lo vendido por forma de pago, lo devuelto, lo vencido y lo fallado por reclamar, escrito para mandar por WhatsApp al cerrar.", "💵 Caja → 📋 Ventas y cierre de caja"),

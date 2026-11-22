@@ -217,75 +217,6 @@ if pagina == PAGINAS[12]:
                              help="Los suma a 📋 Lista WhatsApp; desde ahí se le manda la "
                                   "cotización a este chat con un toque.")
 
-    def _mostrar_pedidos_del_chat(chat_id):
-        _leido, _pedidos = pedidos_y_candidatos_del_chat(chat_id)
-        _autos = {p["auto"] for p, _ in _pedidos if p["auto"]}
-        st.caption("Lo que entendí de lo último que escribió"
-                   + (f", para **{texto_para_markdown(' / '.join(sorted(_autos)))}**" if _autos
-                      else "") + ". Elegí cuál va o descartalo.")
-        # Las claves llevan la huella de lo leído: si escribe otra cosa, son pedidos nuevos y
-        # no se quedan con lo elegido para los de antes.
-        _huella = hashlib.md5(_leido.encode("utf-8")).hexdigest()[:8]
-        _elegidos, _no_hay = [], []
-        for _n, (_ped, _cands) in enumerate(_pedidos):
-            _clave = f"pedido_chat_{chat_id}_{_huella}_{_n}"
-            # Sin negritas: el rótulo es también lo que lee el lector de pantalla, y ahí las
-            # «**» quedaban escritas.
-            _titulo = (f"{_n + 1}. {texto_para_markdown(_ped['texto'])}"
-                       + (" (código)" if _ped["tipo"] == "codigo" else ""))
-            if not _cands:
-                _col_que, _col_boton = st.columns([5, 2], vertical_alignment="center")
-                _col_que.markdown(f"**{_titulo}** — no lo encontré en el catálogo"
-                                  + (" con esas palabras." if _ped["tipo"] == "pieza" else "."))
-                _col_boton.button("🔍 Buscarlo a mano", key=f"{_clave}_a_mano",
-                                  on_click=buscar_el_pedido_a_mano,
-                                  args=(_ped["tipo"], _ped["buscar"]), width="stretch",
-                                  help="Lo deja buscado en el 🔍 Buscador, para mirarlo vos.")
-                _no_hay.append(_ped["texto"])
-                continue
-            _por_id = {x["ID"]: x for x in _cands}
-            _primero = _cands[0]
-            _col_que, _col_cant = st.columns([5, 1], vertical_alignment="bottom")
-            _opciones = list(_por_id) + [DESCARTAR_EL_PEDIDO]
-            _col_que.selectbox(
-                _titulo, _opciones, key=_clave, index=0 if _primero["para_el_auto"] else
-                len(_opciones) - 1,
-                # rótulo fijo: marca, código y descripción no cambian mientras se elige.
-                format_func=lambda x, d=_por_id: "🗑️ Descartar este pedido"
-                if x == DESCARTAR_EL_PEDIDO else (
-                    ("⚠️ " if not d[x]["para_el_auto"] else "")
-                    + f"{d[x]['Marca']} {d[x]['Codigo']} — "
-                      f"{str(d[x]['Descripcion'] or '')[:70]}"))
-            _col_cant.number_input("Cant.", 1, CANTIDAD_MAXIMA_POR_PEDIDO, _ped["cantidad"],
-                                   key=f"{_clave}_cant")
-            _elegido = _por_id.get(st.session_state.get(_clave))
-            if _elegido:
-                st.caption(("⚠️ La descripción no dice que sea para ese auto: fijate antes de "
-                            "ofrecerlo. · " if not _elegido["para_el_auto"] else "")
-                           + (f"\\${miles(_elegido['Precio'])}" if _elegido["Precio"]
-                              else "sin precio")
-                           + (f" · stock {miles(_elegido['Stock'])}"
-                              if _elegido["Stock"] is not None else ""))
-            _elegidos.append((_clave, f"{_clave}_cant"))
-        # Lo que no hay, contestado de un toque: a la caja de la respuesta (o a la de WhatsApp,
-        # pasadas las 24 horas), sin borrar lo escrito.
-        _chat_ped = el_chat(chat_id)
-        _caja_ped = ((f"msj_fuera_{chat_id}" if _chat_ped["canal"] == "whatsapp"
-                      and str(_chat_ped["externo"]).isdigit() else None)
-                     if fuera_de_la_ventana(_chat_ped) else f"msj_respuesta_{chat_id}")
-        if _no_hay and _caja_ped:
-            st.button("✍️ Decirle lo que no hay", key=f"msj_no_hay_{chat_id}",
-                      on_click=sumar_a_la_respuesta,
-                      args=(_caja_ped, mensaje_de_lo_que_no_hay(_no_hay)),
-                      help="Le escribe en la respuesta lo que no se encontró, y si querés "
-                           "que se lo consigas. Lo mandás vos.")
-        if _elegidos:
-            st.button("🛒 Armar el presupuesto con lo elegido", key=f"msj_armar_presu_{chat_id}",
-                      type="primary", width="stretch", on_click=armar_el_presupuesto_del_chat,
-                      args=(chat_id, _elegidos),
-                      help="Lo suma al presupuesto del 🔍 Buscador, con el nombre y el WhatsApp "
-                           "del cliente listos para guardarlo, y desde ahí «💬 Mandárselo».")
-
     # En la computadora, la lista a la izquierda y el chat a la derecha. En el celular, una
     # cosa por vez: la lista, y al tocar un chat, el chat con «← Volver».
     if es_celular():
@@ -389,7 +320,8 @@ if pagina == PAGINAS[12]:
                         key=f"exp_presu_chat_{_abierto_msj}", on_change="rerun")
                     if _exp_presu_chat.open:
                         with _exp_presu_chat:
-                            _mostrar_pedidos_del_chat(_abierto_msj)
+                            mostrar_los_pedidos(_pedido_msj, f"pedido_chat_{_abierto_msj}",
+                                                _abierto_msj)
                 st.button("Marcar como no leído", key=f"msj_no_leido_{_abierto_msj}",
                           on_click=_msj_no_leido, args=(_abierto_msj,))
                 # BORRAR EL CHAT: el cliente que pide que se borren sus datos, o publicidad. Solo

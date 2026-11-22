@@ -1067,12 +1067,11 @@ def lo_que_pidio_el_cliente(chat_id):
     return "\n".join(reversed(ultimos))
 
 
-def pedidos_y_candidatos_del_chat(chat_id):
-    """(lo leído, [(pedido, candidatos)]), recordado mientras no cambie lo escrito ni el
+def pedidos_y_candidatos(texto):
+    """[(pedido, candidatos)] de `texto`, recordado mientras no cambie lo escrito ni el
     catálogo: se dibuja en cada toque de la pantalla."""
-    texto = lo_que_pidio_el_cliente(chat_id)
-    return texto, recordado_mientras_no_cambie(
-        "_pedidos_del_chat", (texto, testigo_de_los_vinculos()),
+    return recordado_mientras_no_cambie(
+        "_pedidos_y_candidatos", (texto, testigo_de_los_vinculos()),
         lambda: [(p, candidatos_del_pedido(p)) for p in pedidos_del_mensaje(texto)], cuantos=6)
 
 
@@ -1109,16 +1108,16 @@ def sumar_a_la_respuesta(clave, texto):
         st.session_state[clave] = f"{antes}\n\n{texto}".strip()
 
 
-def armar_el_presupuesto_del_chat(chat_id, elegidos):
+def armar_el_presupuesto_con_lo_pedido(chat_id, elegidos):
     """«🛒 Armar el presupuesto» (va como on_click): lo elegido de cada pedido va al presupuesto
-    del 🔍 Buscador, con su cantidad; el chat queda en curso (para «💬 Mandárselo») y el cliente
-    y su WhatsApp, listos para «📌 Guardar para seguirlo».
+    del 🔍 Buscador, con su cantidad. Desde un chat (`chat_id`), el chat queda en curso (para
+    «💬 Mandárselo») y el cliente y su WhatsApp, listos para «📌 Guardar para seguirlo».
 
     `elegidos`: [(producto, cantidad)], cada uno el valor o la clave del campo que lo tiene. Con
     las claves se lee lo que quedó elegido al tocar: los args de un botón se arman en la pasada
     anterior."""
-    chat = el_chat(chat_id)
-    if not chat:
+    chat = el_chat(chat_id) if chat_id else None
+    if chat_id and not chat:
         return
 
     def valor(x):
@@ -1138,15 +1137,109 @@ def armar_el_presupuesto_del_chat(chat_id, elegidos):
     if not sumados:
         avisar("info", "No quedó nada elegido: todos los pedidos están descartados.")
         return
+    st.session_state["exp_presupuesto_armado_item_s"] = True
+    st.session_state["pagina_actual"] = PAGINAS[0]
+    if not chat:
+        avisar("success", f"🛒 {sumados} al presupuesto. Revisalo abajo.")
+        return
     st.session_state["msj_chat_abierto"] = chat_id
     st.session_state["msj_chat_abierto_en"] = time.monotonic()
     st.session_state["presu_seguir_cliente"] = nombre_del_chat(chat)
     st.session_state["presu_seguir_tel"] = (str(chat["externo"]) if chat["canal"] == "whatsapp"
                                             else "")
-    st.session_state["exp_presupuesto_armado_item_s"] = True
-    st.session_state["pagina_actual"] = PAGINAS[0]
     avisar("success", f"🛒 {sumados} al presupuesto, de lo que pidió {nombre_del_chat(chat)}. "
                       "Revisalo y «💬 Mandárselo».")
+
+
+def mostrar_los_pedidos(texto, base, chat_id=None):
+    """El panel de «🧩 Armar el presupuesto con lo que pide»: cada pedido de `texto` con lo que
+    hay para elegir o descartar, y «🛒 Armar el presupuesto con lo elegido». `base` va en las
+    claves; con `chat_id` (💬 Mensajes) lo que no hay se le contesta en ese chat, y sin él
+    (pegado en el 🔍 Buscador) queda escrito para copiarlo."""
+    _leido, _pedidos = texto, pedidos_y_candidatos(texto)
+    if not _pedidos:
+        st.caption("No encontré ninguna pieza ni ningún código en lo escrito.")
+        return
+    _autos = {p["auto"] for p, _ in _pedidos if p["auto"]}
+    st.caption(("Lo que entendí de lo último que escribió" if chat_id else
+                "Lo que entendí del pedido")
+               + (f", para **{texto_para_markdown(' / '.join(sorted(_autos)))}**" if _autos
+                  else "") + ". Elegí cuál va o descartalo.")
+    # Las claves llevan la huella de lo leído: si escribe otra cosa, son pedidos nuevos y
+    # no se quedan con lo elegido para los de antes.
+    _huella = hashlib.md5(_leido.encode("utf-8")).hexdigest()[:8]
+    _elegidos, _no_hay = [], []
+    for _n, (_ped, _cands) in enumerate(_pedidos):
+        _clave = f"{base}_{_huella}_{_n}"
+        # Sin negritas: el rótulo es también lo que lee el lector de pantalla, y ahí las
+        # «**» quedaban escritas.
+        _titulo = (f"{_n + 1}. {texto_para_markdown(_ped['texto'])}"
+                   + (" (código)" if _ped["tipo"] == "codigo" else ""))
+        if not _cands:
+            _col_que, _col_boton = st.columns([5, 2], vertical_alignment="center")
+            _col_que.markdown(f"**{_titulo}** — no lo encontré en el catálogo"
+                              + (" con esas palabras." if _ped["tipo"] == "pieza" else "."))
+            _col_boton.button("🔍 Buscarlo a mano", key=f"a_mano_{_clave}",
+                              on_click=buscar_el_pedido_a_mano,
+                              args=(_ped["tipo"], _ped["buscar"]), width="stretch",
+                              help="Lo deja buscado en el 🔍 Buscador, para mirarlo vos.")
+            _no_hay.append(_ped["texto"])
+            continue
+        _por_id = {x["ID"]: x for x in _cands}
+        _primero = _cands[0]
+        _col_que, _col_cant = st.columns([5, 1], vertical_alignment="bottom")
+        _opciones = list(_por_id) + [DESCARTAR_EL_PEDIDO]
+        _col_que.selectbox(
+            _titulo, _opciones, key=_clave, index=0 if _primero["para_el_auto"] else
+            len(_opciones) - 1,
+            # rótulo fijo: marca, código y descripción no cambian mientras se elige.
+            format_func=lambda x, d=_por_id: "🗑️ Descartar este pedido"
+            if x == DESCARTAR_EL_PEDIDO else (
+                ("⚠️ " if not d[x]["para_el_auto"] else "")
+                + f"{d[x]['Marca']} {d[x]['Codigo']} — "
+                  f"{str(d[x]['Descripcion'] or '')[:70]}"))
+        _col_cant.number_input("Cant.", 1, CANTIDAD_MAXIMA_POR_PEDIDO, _ped["cantidad"],
+                               key=f"{_clave}_cant")
+        _elegido = _por_id.get(st.session_state.get(_clave))
+        if _elegido:
+            st.caption(("⚠️ La descripción no dice que sea para ese auto: fijate antes de "
+                        "ofrecerlo. · " if not _elegido["para_el_auto"] else "")
+                       + (f"\\${miles(_elegido['Precio'])}" if _elegido["Precio"]
+                          else "sin precio")
+                       + (f" · stock {miles(_elegido['Stock'])}"
+                          if _elegido["Stock"] is not None else ""))
+        _elegidos.append((_clave, f"{_clave}_cant"))
+    # Lo que no hay, contestado de un toque: a la caja de la respuesta (o a la de WhatsApp,
+    # pasadas las 24 horas), sin borrar lo escrito. Pegado en el Buscador, para copiarlo.
+    _chat_ped = el_chat(chat_id) if chat_id else None
+    _caja_ped = None
+    if _chat_ped:
+        _caja_ped = ((f"msj_fuera_{chat_id}" if _chat_ped["canal"] == "whatsapp"
+                      and str(_chat_ped["externo"]).isdigit() else None)
+                     if fuera_de_la_ventana(_chat_ped) else f"msj_respuesta_{chat_id}")
+    elif _no_hay:
+        st.caption("Lo que no hay, para copiarlo y contestarle:")
+        st.code(mensaje_de_lo_que_no_hay(_no_hay), language=None, wrap_lines=True)
+    if _no_hay and _caja_ped:
+        st.button("✍️ Decirle lo que no hay", key=f"msj_no_hay_{chat_id}",
+                  on_click=sumar_a_la_respuesta,
+                  args=(_caja_ped, mensaje_de_lo_que_no_hay(_no_hay)),
+                  help="Le escribe en la respuesta lo que no se encontró, y si querés "
+                       "que se lo consigas. Lo mandás vos.")
+    if _elegidos:
+        st.button("🛒 Armar el presupuesto con lo elegido", key=f"armar_{base}",
+                  type="primary", width="stretch", on_click=armar_el_presupuesto_con_lo_pedido,
+                  args=(chat_id, _elegidos),
+                  help="Lo suma al presupuesto del 🔍 Buscador, con las cantidades"
+                       + (", y el nombre y el WhatsApp del cliente listos para guardarlo; "
+                          "desde ahí «💬 Mandárselo»." if chat_id else "."))
+
+
+def pasar_al_pedido_pegado(texto):
+    """«🧩 Son varias cosas: separarlas» del Buscador (va como on_click): lo buscado va a
+    «🧩 Pegar el pedido de un cliente», abierto."""
+    st.session_state["pedido_pegado"] = str(texto or "")
+    st.session_state["exp_pedido_pegado"] = True
 
 
 def chat_para_mandar():

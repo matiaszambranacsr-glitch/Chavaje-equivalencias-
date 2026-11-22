@@ -1073,7 +1073,9 @@ CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR = ("busqueda_input", "texto_input", "
                                              "picking_codigos", "url_foto_visual",
                                              "med_paso", "med_seguro", "bujia_codigo_libre",
                                              # el cliente y el teléfono del presupuesto a seguir
-                                             "presu_seguir_cliente", "presu_seguir_tel")
+                                             "presu_seguir_cliente", "presu_seguir_tel",
+                                             # lo que pidió un cliente, pegado
+                                             "pedido_pegado")
 
 
 def cerrar_sesion():

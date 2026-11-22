@@ -705,7 +705,7 @@ def probar():
                  "amortiguador trasero": _ids_ped["AM1"]})
         cierto("lo que no está se dice, con «🔍 Buscarlo a mano»",
                any("bomba de nafta" in m.value and "no lo encontré" in m.value for m in at.markdown)
-               and [b for b in at.button if str(b.key).endswith("_a_mano")])
+               and [b for b in at.button if str(b.key).startswith("a_mano_")])
         # «✍️ Decirle lo que no hay»: a la respuesta, después de lo escrito y una sola vez.
         at.session_state[f"msj_respuesta_{_juan['id']}"] = "Hola Juan!"
         at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
@@ -728,7 +728,7 @@ def probar():
         # desplegable perezoso entre pasada y pasada: se lo vuelve a abrir.)
         at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
         [v for k, v in _sel.items() if "W712" in k][0].set_value(ns["DESCARTAR_EL_PEDIDO"]).run()
-        at.button(key=f"msj_armar_presu_{_juan['id']}").click().run()
+        at.button(key=f"armar_pedido_chat_{_juan['id']}").click().run()
         esperar("arma el presupuesto con lo elegido, sin lo descartado",
                 sorted((v["codigo"], v["cantidad"]) for v in at.session_state["carrito"].values()),
                 [("AM1", 2), ("PF1", 1)])
@@ -743,11 +743,54 @@ def probar():
         at.session_state["pagina_actual"] = ns["PAGINAS"][12]
         at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
         at.run()
-        [b for b in at.button if str(b.key).endswith("_a_mano")][0].click().run()
+        [b for b in at.button if str(b.key).startswith("a_mano_")][0].click().run()
         esperar("«🔍 Buscarlo a mano» la deja buscada por descripción en el Buscador",
                 (at.session_state["pagina_actual"], at.session_state["modo_busqueda"],
                  at.text_input(key="texto_input").value),
                 (ns["PAGINAS"][0], "Descripción", "bomba nafta gol 1.6 2015"))
+        # LO QUE LLEGÓ AL WHATSAPP DEL TELÉFONO, pegado en el Buscador: lo mismo, sin chat.
+        at.session_state["carrito"] = {}
+        at.session_state["msj_chat_abierto"] = None
+        at.session_state["presu_seguir_cliente"] = ""
+        at.session_state["exp_pedido_pegado"] = True
+        at.session_state["pedido_pegado"] = ("hola! 2 amortiguadores traseros para gol, y una "
+                                             "bomba de nafta")
+        at.run()
+        _sel_p = [s for s in at.selectbox if str(s.key).startswith("pedido_pegado_")]
+        esperar("pegado en el Buscador: el amortiguador elegido, con la cantidad",
+                ([s.value for s in _sel_p],
+                 [n.value for n in at.number_input if str(n.key).startswith("pedido_pegado_")]),
+                ([_ids_ped["AM1"]], [2]))
+        cierto("y lo que no hay, escrito para copiarlo",
+               any("ahora no tengo bomba de nafta" in str(x.value) for x in at.code))
+        at.session_state["exp_pedido_pegado"] = True
+        at.button(key="armar_pedido_pegado").click().run()
+        esperar("arma el presupuesto ahí mismo, sin tocar ningún chat ni el cliente a seguir",
+                (sorted((v["codigo"], v["cantidad"]) for v in at.session_state["carrito"].values()),
+                 at.session_state["pagina_actual"], at.session_state["msj_chat_abierto"],
+                 at.session_state["presu_seguir_cliente"]),
+                ([("AM1", 2)], ns["PAGINAS"][0], None, ""))
+        # Y una frase con varias cosas buscada en la caja de siempre ofrece separarla.
+        at.session_state["carrito"] = {}
+        at.session_state["pedido_pegado"] = ""
+        at.session_state["modo_busqueda"] = "Descripción"
+        at.session_state["texto_input"] = "pastillas delanteras y 2 amortiguadores para el gol"
+        at.run()
+        _separar = [b for b in at.button if b.key == "separar_lo_buscado"]
+        cierto("una frase con varias cosas ofrece «🧩 Son varias cosas: separarlas»", _separar)
+        if _separar:
+            _separar[0].click().run()
+            esperar("y la pasa a «🧩 Pegar el pedido de un cliente», abierto",
+                    (at.session_state["pedido_pegado"],
+                     len([s for s in at.selectbox if str(s.key).startswith("pedido_pegado_")])),
+                    ("pastillas delanteras y 2 amortiguadores para el gol", 2))
+        at.session_state["texto_input"] = "filtro"
+        at.run()
+        esperar("una sola cosa no lo ofrece",
+                [b.key for b in at.button if b.key == "separar_lo_buscado"], [])
+        at.session_state["texto_input"] = ""
+        at.session_state["pedido_pegado"] = ""
+        at.session_state["modo_busqueda"] = "Código"
 
         # En la ficha del auto, un teléfono que no sirve para WhatsApp se dice (sin característica,
         # los avisos no sabrían a quién ir); uno que sirve, no.

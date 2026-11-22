@@ -916,11 +916,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "💬 Mensajes", "empleado"),
     ("presupuesto_del_chat", "Armar el presupuesto con lo que pide el cliente en el chat",
      "armar presupuesto pide pidio pidiendo pedido pedidos separar piezas descartar elegir chat "
-     "chats escribio auto cotizo",
+     "chats escribio auto cotizo pegar pegado telefono",
      "En el chat abierto, «🧩 Armar el presupuesto con lo que pide»: separa lo que escribió (las "
      "piezas con su auto y los códigos) y de cada pedido elegís lo que va o «🗑️ Descartar». "
      "«🛒 Armar el presupuesto con lo elegido» lo lleva al Buscador con el nombre y el WhatsApp "
-     "del cliente; desde ahí, «💬 Mandárselo».",
+     "del cliente; desde ahí, «💬 Mandárselo». Si te escribió al teléfono, pegalo en el "
+     "🔍 Buscador, en «🧩 Pegar el pedido de un cliente».",
      "💬 Mensajes", "empleado"),
     ("conectar_canales", "Conectar WhatsApp, Facebook e Instagram a la app",
      "conectar vincular configurar enlazar whatsapp facebook instagram messenger meta canales "
