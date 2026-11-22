@@ -682,6 +682,10 @@ def probar():
                 [x["Codigo"] for x in ns["candidatos_del_pedido"](
                     ns["pedidos_del_mensaje"]("pastillas delanteras para gol")[0])],
                 ["PF1", "TP1", "PF2"])
+        esperar("«la batería 12x65» es un pedido, no dos (el 12x65 es de la batería)",
+                [(p["tipo"], p["texto"]) for p in ns["pedidos_del_mensaje"](
+                    "precio de la bateria 12x65 para un fiesta")],
+                [("pieza", "bateria 12x65")])
         esperar("un saludo no es un pedido", ns["pedidos_del_mensaje"]("gracias!! nos vemos"), [])
         esperar("«correa de alternador» es una pieza, no dos; «4 bujías», cuatro",
                 [(p["texto"], p["cantidad"]) for p in ns["pedidos_del_mensaje"](

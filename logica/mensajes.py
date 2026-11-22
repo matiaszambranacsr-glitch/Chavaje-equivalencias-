@@ -1024,6 +1024,10 @@ def pedidos_del_mensaje(texto):
                           if any(l.startswith(k) for l in lados)],
                 "modelos": del_modelo, "auto": auto,
                 "cantidad": min(cantidad, CANTIDAD_MAXIMA_POR_PEDIDO) if 1 <= cantidad <= 20 else 1})
+    # «la batería 12x65»: el 12x65 es de la batería, no un código aparte (salía dos veces).
+    de_las_piezas = {n for p in pedidos if p["tipo"] == "pieza" for n in p["nucleo"]}
+    pedidos = [p for p in pedidos
+               if p["tipo"] != "codigo" or p["texto"].upper() not in de_las_piezas]
     # El mismo pedido dos veces («las pastillas … sí, las pastillas»), una sola.
     unicos = list({p["buscar"]: p for p in pedidos}.values())
     return unicos[:PEDIDOS_DE_UN_CHAT]
