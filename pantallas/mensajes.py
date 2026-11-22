@@ -16,6 +16,11 @@ if pagina == PAGINAS[12]:
         "Tocá un chat para abrirlo: queda leído para todos. **⏳ Sin contestar** son los que "
         "tienen lo último del cliente, aunque alguien ya los haya leído. Si el mensaje trae un "
         "código, el botón 🔍 lo busca en el Buscador.\n\n"
+        "**🧩 Armar el presupuesto con lo que pide**: separa lo último que escribió (las piezas "
+        "con el auto que nombra, y los códigos) y de cada una te muestra lo que hay para elegir "
+        "o descartar. Con lo elegido arma el presupuesto del Buscador, con su nombre y su "
+        "WhatsApp, listo para «💬 Mandárselo». Lo que no entiende, no lo inventa: lo buscás a "
+        "mano.\n\n"
         "**Las 24 horas**: Meta deja contestar desde acá hasta 24 horas después del último "
         "mensaje del cliente; después hay que escribirle desde el teléfono. Fotos y audios se "
         "avisan, pero se miran en el teléfono.\n\n"
@@ -211,6 +216,58 @@ if pagina == PAGINAS[12]:
                              help="Los suma a 📋 Lista WhatsApp; desde ahí se le manda la "
                                   "cotización a este chat con un toque.")
 
+    def _mostrar_pedidos_del_chat(chat_id):
+        _leido, _pedidos = pedidos_y_candidatos_del_chat(chat_id)
+        _autos = {p["auto"] for p, _ in _pedidos if p["auto"]}
+        st.caption("Lo que entendí de lo último que escribió"
+                   + (f", para **{texto_para_markdown(' / '.join(sorted(_autos)))}**" if _autos
+                      else "") + ". Elegí cuál va o descartalo.")
+        # Las claves llevan la huella de lo leído: si escribe otra cosa, son pedidos nuevos y
+        # no se quedan con lo elegido para los de antes.
+        _huella = hashlib.md5(_leido.encode("utf-8")).hexdigest()[:8]
+        _elegidos = []
+        for _n, (_ped, _cands) in enumerate(_pedidos):
+            _clave = f"pedido_chat_{chat_id}_{_huella}_{_n}"
+            # Sin negritas: el rótulo es también lo que lee el lector de pantalla, y ahí las
+            # «**» quedaban escritas.
+            _titulo = (f"{_n + 1}. {texto_para_markdown(_ped['texto'])}"
+                       + (" (código)" if _ped["tipo"] == "codigo" else ""))
+            if not _cands:
+                st.markdown(f"{_titulo} — no lo encontré en el catálogo"
+                            + (" con esas palabras" if _ped["tipo"] == "pieza" else "")
+                            + ": buscalo a mano en el 🔍 Buscador.")
+                continue
+            _por_id = {x["ID"]: x for x in _cands}
+            _primero = _cands[0]
+            _col_que, _col_cant = st.columns([5, 1], vertical_alignment="bottom")
+            _opciones = list(_por_id) + [DESCARTAR_EL_PEDIDO]
+            _col_que.selectbox(
+                _titulo, _opciones, key=_clave, index=0 if _primero["para_el_auto"] else
+                len(_opciones) - 1,
+                # rótulo fijo: marca, código y descripción no cambian mientras se elige.
+                format_func=lambda x, d=_por_id: "🗑️ Descartar este pedido"
+                if x == DESCARTAR_EL_PEDIDO else (
+                    ("⚠️ " if not d[x]["para_el_auto"] else "")
+                    + f"{d[x]['Marca']} {d[x]['Codigo']} — "
+                      f"{str(d[x]['Descripcion'] or '')[:70]}"))
+            _col_cant.number_input("Cant.", 1, CANTIDAD_MAXIMA_POR_PEDIDO, _ped["cantidad"],
+                                   key=f"{_clave}_cant")
+            _elegido = _por_id.get(st.session_state.get(_clave))
+            if _elegido:
+                st.caption(("⚠️ La descripción no dice que sea para ese auto: fijate antes de "
+                            "ofrecerlo. · " if not _elegido["para_el_auto"] else "")
+                           + (f"\\${miles(_elegido['Precio'])}" if _elegido["Precio"]
+                              else "sin precio")
+                           + (f" · stock {miles(_elegido['Stock'])}"
+                              if _elegido["Stock"] is not None else ""))
+            _elegidos.append((_clave, f"{_clave}_cant"))
+        if _elegidos:
+            st.button("🛒 Armar el presupuesto con lo elegido", key=f"msj_armar_presu_{chat_id}",
+                      type="primary", width="stretch", on_click=armar_el_presupuesto_del_chat,
+                      args=(chat_id, _elegidos),
+                      help="Lo suma al presupuesto del 🔍 Buscador, con el nombre y el WhatsApp "
+                           "del cliente listos para guardarlo, y desde ahí «💬 Mandárselo».")
+
     # En la computadora, la lista a la izquierda y el chat a la derecha. En el celular, una
     # cosa por vez: la lista, y al tocar un chat, el chat con «← Volver».
     if es_celular():
@@ -306,6 +363,19 @@ if pagina == PAGINAS[12]:
                     st.button("📤 Enviar", key=f"msj_enviar_{_abierto_msj}", type="primary",
                               width="stretch", on_click=_msj_enviar,
                               args=(_abierto_msj, _clave_resp))
+                # DEL CHAT AL PRESUPUESTO: lo que pidió, separado en pedidos, cada uno con lo
+                # que hay en el catálogo para elegir o descartar (ver «LO QUE PIDE EL CHAT,
+                # SEPARADO EN PEDIDOS» en logica/mensajes.py). Perezoso: buscar cada pedido
+                # cuesta, y la mayoría de las veces se contesta sin abrirlo.
+                _pedido_msj = lo_que_pidio_el_cliente(_abierto_msj)
+                _cuantos_pedidos = len(pedidos_del_mensaje(_pedido_msj))
+                if _cuantos_pedidos and es_operador_o_admin():
+                    _exp_presu_chat = st.expander(
+                        f"🧩 Armar el presupuesto con lo que pide ({_cuantos_pedidos})",
+                        key=f"exp_presu_chat_{_abierto_msj}", on_change="rerun")
+                    if _exp_presu_chat.open:
+                        with _exp_presu_chat:
+                            _mostrar_pedidos_del_chat(_abierto_msj)
                 st.button("Marcar como no leído", key=f"msj_no_leido_{_abierto_msj}",
                           on_click=_msj_no_leido, args=(_abierto_msj,))
                 # BORRAR EL CHAT: el cliente que pide que se borren sus datos, o publicidad. Solo

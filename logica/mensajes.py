@@ -757,8 +757,10 @@ def lo_que_sabemos_del_numero(chat):
 
 # Lo que en un mensaje parece un código de repuesto: letras y números juntos, de 4 o más, con
 # al menos un número («W712/80», «PH5949», «90915-YZZE1»), y no la plata («$15000»). Para el
-# botón que lo busca.
-_PARECE_UN_CODIGO = re.compile(r"(?<![\w/.$-])(?=[\w/.-]*\d)[A-Za-z0-9][\w/.-]{2,}[A-Za-z0-9](?![\w/.-])")
+# botón que lo busca. El punto que cierra la oración no es del código: «…y el W712/80.» no se
+# reconocía (se vio armando el presupuesto desde el chat).
+_PARECE_UN_CODIGO = re.compile(r"(?<![\w/.$-])(?=[\w/.-]*\d)[A-Za-z0-9][\w/.-]{2,}[A-Za-z0-9]"
+                               r"(?![\w/-]|\.[\w/-])")
 
 
 def codigos_del_mensaje(texto, tope=3):
@@ -901,6 +903,221 @@ def cotizar_los_codigos_del_chat(codigos):
         avisar("warning", "No están cargados: " + ", ".join(no_estan[:10])
                + ". Quedaron en 📊 Estadísticas → 🔎 Búsquedas sin resultado.")
     st.session_state["pagina_actual"] = PAGINAS[5]
+
+
+# LO QUE PIDE EL CHAT, SEPARADO EN PEDIDOS. «Necesito pastillas delanteras y 2 amortiguadores
+# traseros para un Gol 2015 1.6, y el W712/80»: tres pedidos —las pastillas, los dos
+# amortiguadores y el código— para el mismo auto. Cada uno se busca en el catálogo y el que
+# atiende elige cuál va o lo descarta; con lo elegido se arma el presupuesto, que vuelve a ese
+# chat. Se lee acá, con el vocabulario de piezas de la app (FAMILIAS_REPUESTO) y el buscador:
+# lo que escribe el cliente no sale a ningún servicio de afuera. Lo que no se entiende no se
+# inventa: queda para buscarlo a mano.
+#
+# CÓMO SE BUSCA CADA PIEZA: el nombre en singular más el auto (modelo, motor y año), y la pieza
+# tiene que estar en la descripción. Buscando la frase entera, «pastillas delanteras gol» traía
+# «Tecla alza cristales delanteras Gol» (el buscador cuenta palabras, y «delanteras» y «gol» le
+# ganaban a «pastillas»; se vio con la base real). El lado —delantero, trasero— solo ordena.
+# Los modelos más comunes, por si la base todavía no los tiene en sus aplicaciones (una nueva).
+MODELOS_COMUNES = frozenset({
+    "GOL", "TREND", "VOYAGE", "SAVEIRO", "FOX", "SURAN", "POLO", "VENTO", "BORA", "GOLF",
+    "PASSAT", "AMAROK", "VIRTUS", "NIVUS", "TAOS", "CORSA", "CLASSIC", "AGILE", "ONIX", "PRISMA",
+    "CELTA", "ASTRA", "VECTRA", "CRUZE", "S10", "SPIN", "TRACKER", "AVEO", "MERIVA", "ZAFIRA",
+    "MONTANA", "PALIO", "SIENA", "UNO", "DUNA", "FIORINO", "PUNTO", "IDEA", "STRADA", "CRONOS",
+    "ARGO", "MOBI", "TORO", "DUCATO", "WEEKEND", "FIESTA", "FOCUS", "KA", "ECOSPORT", "RANGER",
+    "MONDEO", "ESCORT", "F100", "KUGA", "TRANSIT", "206", "207", "208", "307", "308", "408",
+    "3008", "PARTNER", "EXPERT", "BOXER", "C3", "C4", "BERLINGO", "XSARA", "CLIO", "MEGANE",
+    "KANGOO", "LOGAN", "SANDERO", "DUSTER", "SYMBOL", "TWINGO", "FLUENCE", "CAPTUR", "KWID",
+    "OROCH", "TRAFIC", "MASTER", "COROLLA", "HILUX", "ETIOS", "YARIS", "SW4", "CIVIC", "FIT",
+    "CITY", "SENTRA", "MARCH", "VERSA", "KICKS", "FRONTIER", "TIIDA", "R12", "R19"})
+_LADOS_DEL_PEDIDO = {"DELANTER": "DELANT", "TRASER": "TRAS", "IZQUIERD": "IZQ", "DERECH": "DER"}
+_MOTOR_DEL_PEDIDO = re.compile(r"(\d\.\d|\d{1,2}V|TDI|HDI|TSI|JTD|MPI|TURBO|DIESEL|GNC)")
+_ANIO_DEL_PEDIDO = re.compile(r"(19[5-9]\d|20[0-4]\d)")
+_SEPARA_PEDIDOS = re.compile(r"[,;\n+]|\.(?=\s|$)|\s(?:Y|E|TAMBIEN|ADEMAS|MAS)\s")
+# Lo que acompaña a la pieza y no es un detalle de ella: el relleno del chat, el lado, el auto.
+_NO_ES_DETALLE = PALABRAS_DE_RELLENO | {
+    "BUENAS", "BUEN", "DIA", "DIAS", "TARDES", "NOCHES", "PRECIO", "PRECIOS", "SALE", "SALEN",
+    "VALE", "VALEN", "COTIZACION", "PRESUPUESTO", "QUERIA", "QUISIERA", "SABER", "GRACIAS",
+    "TENDRAS", "TENDRIAS", "AUTO", "COCHE", "CAMIONETA", "MODELO", "ANO", "JUEGO", "JGO", "KIT",
+    "PAR", "TODO", "TODOS", "LADO", "LADOS", "MARCA", "ORIGINAL", "BUENA", "BUENO"}
+# Cuántos candidatos se ofrecen por pedido, y cuántos pedidos se leen de una vez.
+CANDIDATOS_POR_PEDIDO = 5
+PEDIDOS_DE_UN_CHAT = 8
+
+
+_MARCAS_DEL_AUTO = frozenset(MARCAS_VEHICULO)
+_UNEN_PALABRAS = {"DE", "DEL", "LA", "EL", "LOS", "LAS"}
+
+
+def _en_singular(palabra):
+    """«AMORTIGUADORES» → «AMORTIGUADOR»: las formas de las piezas suman solo una S al plural."""
+    if len(palabra) > 4 and palabra.endswith("ES") and palabra[-3] in "RLNDZ":
+        return palabra[:-2]
+    return palabra[:-1] if len(palabra) > 3 and palabra.endswith("S") else palabra
+
+
+def auto_del_texto(texto):
+    """(modelos, motor, año) que nombra el texto: ["GOL"], ["1.6"], "2015"."""
+    palabras = re.findall(r"[A-Z0-9]+(?:[.][0-9]+)?", normalizar_texto(str(texto or "")).upper())
+    piezas = _BUSCADOR_DE_FAMILIAS[1]
+    modelos, motor, anio = [], [], ""
+    for p in palabras:
+        if _ANIO_DEL_PEDIDO.fullmatch(p):
+            anio = anio or p
+        elif _MOTOR_DEL_PEDIDO.fullmatch(p):
+            motor.append(p)
+        elif (p in MODELOS_COMUNES or (len(p) >= 3 and not p.isdigit() and p in MODELOS_CONOCIDOS
+                                       and p not in _NO_ES_DETALLE and p not in piezas)):
+            modelos.append(p)
+    return list(dict.fromkeys(modelos)), list(dict.fromkeys(motor)), anio
+
+
+def pedidos_del_mensaje(texto):
+    """Lo que pide el texto, separado: [dict] con tipo («codigo» o «pieza»), texto (lo que se
+    entendió), buscar (lo que se le pide al catálogo), nucleo (las palabras que tiene que tener
+    la descripción), lados, modelos, cantidad y auto (el auto del mensaje, para decirlo)."""
+    modelos, motor, anio = auto_del_texto(texto)
+    del_auto = modelos + motor + ([anio] if anio else [])
+    auto = " ".join(del_auto)
+    del_modelo = [m for m in modelos if m not in _MARCAS_DEL_AUTO]
+    pedidos = []
+    for codigo in codigos_del_mensaje(texto, tope=PEDIDOS_DE_UN_CHAT):
+        # «pastillas para la F100»: en un pedido, F100 es la camioneta, no un código.
+        if codigo.upper() in MODELOS_COMUNES:
+            continue
+        pedidos.append({"tipo": "codigo", "texto": codigo, "buscar": codigo, "nucleo": [],
+                        "lados": [], "modelos": [], "cantidad": 1, "auto": auto})
+    patron = _BUSCADOR_DE_FAMILIAS[0]
+    no_se_tocan = set(del_auto) | MODELOS_COMUNES
+    base = normalizar_texto(str(texto or "")).upper()
+    for pedazo in _SEPARA_PEDIDOS.split(f" {base} "):
+        # En singular, menos el auto («FOCUS» no es el plural de nada).
+        palabras = [p if p in no_se_tocan or p in MODELOS_CONOCIDOS else _en_singular(p)
+                    for p in _normalizar_desc(pedazo).split()]
+        norm = f" {' '.join(palabras)} "
+        lados = [p for p in palabras if any(p.startswith(k) for k in _LADOS_DEL_PEDIDO)]
+        hasta = 0
+        for m in patron.finditer(norm):
+            if m.start() < hasta:      # «correa de ALTERNADOR»: ya es parte de la correa
+                continue
+            nucleo = [p for p in m.group(1).split() if p not in _UNEN_PALABRAS]
+            dicho = m.group(1).split()
+            hasta = m.end()
+            # Las palabras que siguen y dicen qué pieza es («filtro de ACEITE»), hasta dos.
+            sigue, sumadas = norm[m.end():].split(), 0
+            for k, p in enumerate(sigue):
+                if p in _UNEN_PALABRAS:
+                    continue
+                if (sumadas == 2 or p in _NO_ES_DETALLE or p.isdigit() or p in no_se_tocan
+                        or p in _MARCAS_DEL_AUTO
+                        or any(p.startswith(x) for x in _LADOS_DEL_PEDIDO)):
+                    break
+                nucleo.append(p)
+                dicho.append(p)
+                sumadas += 1
+                hasta = m.end() + len(" ".join(sigue[:k + 1])) + 1
+            cantidad = re.search(r"(?:^| )(\d{1,2}) $", norm[:m.start()])
+            cantidad = int(cantidad.group(1)) if cantidad else 1
+            pedidos.append({
+                "tipo": "pieza", "texto": " ".join(dict.fromkeys(dicho + lados)).lower(),
+                "buscar": " ".join(nucleo + del_auto), "nucleo": nucleo,
+                "lados": [_LADOS_DEL_PEDIDO[k] for k in _LADOS_DEL_PEDIDO
+                          if any(l.startswith(k) for l in lados)],
+                "modelos": del_modelo, "auto": auto,
+                "cantidad": min(cantidad, CANTIDAD_MAXIMA_POR_PEDIDO) if 1 <= cantidad <= 20 else 1})
+    # El mismo pedido dos veces («las pastillas … sí, las pastillas»), una sola.
+    unicos = list({p["buscar"]: p for p in pedidos}.values())
+    return unicos[:PEDIDOS_DE_UN_CHAT]
+
+
+def candidatos_del_pedido(pedido):
+    """Lo que hay en el catálogo para un pedido: [dict] con ID, Marca, Codigo, Descripcion,
+    Precio y Stock. Tienen que ser de la pieza pedida; primero los que nombran el auto, después
+    los del lado pedido y lo que hay en stock (entre iguales, el orden del buscador)."""
+    if pedido["tipo"] == "codigo":
+        limpio = codigo_para_buscar(pedido["buscar"])
+        filas = buscar_con_variantes_del_cero(limpio, "Todas", 3)[0] if limpio else []
+    else:
+        def orden(fila):
+            desc = _normalizar_desc(fila.get("Descripcion"))
+            return (not any(f" {m} " in desc for m in pedido["modelos"]),
+                    -sum(l in desc for l in pedido["lados"]),
+                    not (fila.get("Stock") or 0) > 0)
+        filas = sorted((f for f in buscar_por_texto(pedido["buscar"])
+                        if all(f" {n}" in _normalizar_desc(f.get("Descripcion"))
+                               for n in pedido["nucleo"])), key=orden)
+    # «para_el_auto»: si nombra el auto del mensaje. El que no lo nombra se ofrece igual (muchas
+    # descripciones no dicen el auto), pero marcado, y no viene elegido.
+    return [dict({k: f.get(k) for k in ("ID", "Marca", "Codigo", "Descripcion", "Precio", "Stock")},
+                 para_el_auto=not pedido["modelos"] or any(
+                     f" {m} " in _normalizar_desc(f.get("Descripcion")) for m in pedido["modelos"]))
+            for f in filas if f.get("ID")][:CANDIDATOS_POR_PEDIDO]
+
+
+def lo_que_pidio_el_cliente(chat_id):
+    """Lo último que escribió el cliente: sus mensajes desde la última respuesta nuestra (si
+    se le contestó último, los tres anteriores)."""
+    mensajes = mensajes_del_chat(chat_id)
+    ultimos = []
+    for m in reversed(mensajes):
+        if not m["entra"]:
+            break
+        ultimos.append(m["texto"] or "")
+    if not ultimos:
+        ultimos = [m["texto"] or "" for m in reversed(mensajes) if m["entra"]][:3]
+    return "\n".join(reversed(ultimos))
+
+
+def pedidos_y_candidatos_del_chat(chat_id):
+    """(lo leído, [(pedido, candidatos)]), recordado mientras no cambie lo escrito ni el
+    catálogo: se dibuja en cada toque de la pantalla."""
+    texto = lo_que_pidio_el_cliente(chat_id)
+    return texto, recordado_mientras_no_cambie(
+        "_pedidos_del_chat", (texto, testigo_de_los_vinculos()),
+        lambda: [(p, candidatos_del_pedido(p)) for p in pedidos_del_mensaje(texto)], cuantos=6)
+
+
+# Lo que se elige para un pedido que no va.
+DESCARTAR_EL_PEDIDO = "descartar"
+
+
+def armar_el_presupuesto_del_chat(chat_id, elegidos):
+    """«🛒 Armar el presupuesto» (va como on_click): lo elegido de cada pedido va al presupuesto
+    del 🔍 Buscador, con su cantidad; el chat queda en curso (para «💬 Mandárselo») y el cliente
+    y su WhatsApp, listos para «📌 Guardar para seguirlo».
+
+    `elegidos`: [(producto, cantidad)], cada uno el valor o la clave del campo que lo tiene. Con
+    las claves se lee lo que quedó elegido al tocar: los args de un botón se arman en la pasada
+    anterior."""
+    chat = el_chat(chat_id)
+    if not chat:
+        return
+
+    def valor(x):
+        return st.session_state.get(x) if isinstance(x, str) else x
+    sumados = 0
+    for producto, cantidad in elegidos:
+        producto, cantidad = valor(producto), valor(cantidad)
+        if producto in (None, DESCARTAR_EL_PEDIDO):
+            continue
+        fila = c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", m.nombre AS "Marca",
+                                   p.descripcion AS "Descripcion", p.precio AS "Precio"
+                            FROM productos p JOIN marcas m ON m.id = p.marca_id
+                            WHERE p.id = ?""", (int(producto),)).fetchone()
+        if fila:
+            sumar_al_presupuesto(dict(fila), max(1, int(cantidad or 1)))
+            sumados += 1
+    if not sumados:
+        avisar("info", "No quedó nada elegido: todos los pedidos están descartados.")
+        return
+    st.session_state["msj_chat_abierto"] = chat_id
+    st.session_state["msj_chat_abierto_en"] = time.monotonic()
+    st.session_state["presu_seguir_cliente"] = nombre_del_chat(chat)
+    st.session_state["presu_seguir_tel"] = (str(chat["externo"]) if chat["canal"] == "whatsapp"
+                                            else "")
+    st.session_state["exp_presupuesto_armado_item_s"] = True
+    st.session_state["pagina_actual"] = PAGINAS[0]
+    avisar("success", f"🛒 {sumados} al presupuesto, de lo que pidió {nombre_del_chat(chat)}. "
+                      "Revisalo y «💬 Mandárselo».")
 
 
 def chat_para_mandar():

@@ -914,6 +914,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "(o en el presupuesto del Buscador) está «💬 Mandárselo a …»: se lo manda a ese chat y "
      "vuelve ahí. Sale durante media hora después de abrir el chat.",
      "💬 Mensajes", "empleado"),
+    ("presupuesto_del_chat", "Armar el presupuesto con lo que pide el cliente en el chat",
+     "armar presupuesto pide pidio pidiendo pedido pedidos separar piezas descartar elegir chat "
+     "chats escribio auto cotizo",
+     "En el chat abierto, «🧩 Armar el presupuesto con lo que pide»: separa lo que escribió (las "
+     "piezas con su auto y los códigos) y de cada pedido elegís lo que va o «🗑️ Descartar». "
+     "«🛒 Armar el presupuesto con lo elegido» lo lleva al Buscador con el nombre y el WhatsApp "
+     "del cliente; desde ahí, «💬 Mandárselo».",
+     "💬 Mensajes", "empleado"),
     ("conectar_canales", "Conectar WhatsApp, Facebook e Instagram a la app",
      "conectar vincular configurar enlazar whatsapp facebook instagram messenger meta canales "
      "mensajes token webhook relevo",

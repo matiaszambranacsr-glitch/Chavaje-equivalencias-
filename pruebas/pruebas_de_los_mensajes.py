@@ -650,6 +650,79 @@ def probar():
                            + [str(e.value) for e in at.code], ensure_ascii=False)
         cierto("ningún permiso en la pantalla", not any(s in _todo for s in SECRETAS))
 
+        # DEL CHAT AL PRESUPUESTO: lo que pide, separado en pedidos (los códigos y las piezas
+        # dichas con palabras, para el auto que nombra), cada uno con lo del catálogo para elegir
+        # o descartar, y con lo elegido el presupuesto, listo para mandárselo y seguirlo.
+        c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('MARCA PEDIDO', 'PROVEEDOR')")
+        _ids_ped = {}
+        # Cargados al revés de como tienen que salir: el orden lo tiene que poner la app.
+        for _cod, _desc, _precio in (
+                ("TP1", "TAPA DE PASTILLA DELANTERA PARA GOL", 900),
+                ("PF1", "PASTILLA DE FRENO DELANTERA VW GOL TREND 1.6", 30000),
+                ("AM2", "AMORTIGUADOR DELANTERO FORD KA", 45000),
+                ("AM1", "AMORTIGUADOR TRASERO VW GOL", 50000),
+                ("PF2", "PASTILLA DE FRENO TRASERA VW GOL", 21000)):
+            c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                      "precio, stock) SELECT ?, ?, ?, id, ?, 4 FROM marcas "
+                      "WHERE nombre = 'MARCA PEDIDO'", (_cod, _cod, _desc, _precio))
+            _ids_ped[_cod] = c.lastrowid
+        _pide = ("Hola! necesito pastillas delanteras y 2 amortiguadores traseros para un gol "
+                 "2015 1.6, y el W712/80. Tambien una bomba de nafta")
+        c.execute("INSERT INTO chat_mensajes (chat_id, canal, externo_id, entra, texto, cuando) "
+                  "VALUES (?, 'whatsapp', 'pedido:1', 1, ?, datetime('now', '+1 minute'))",
+                  (_juan["id"], _pide))
+        ns["conn"].commit()
+        esperar("lee lo último que escribió", ns["lo_que_pidio_el_cliente"](_juan["id"]), _pide)
+        _peds = ns["pedidos_del_mensaje"](_pide)
+        esperar("lo separa en pedidos, con la cantidad y el auto",
+                [(p["texto"], p["cantidad"], p["auto"]) for p in _peds],
+                [("W712/80", 1, "GOL 1.6 2015"), ("pastilla delantera", 1, "GOL 1.6 2015"),
+                 ("amortiguador trasero", 2, "GOL 1.6 2015"), ("bomba de nafta", 1, "GOL 1.6 2015")])
+        esperar("primero los del lado pedido",
+                [x["Codigo"] for x in ns["candidatos_del_pedido"](
+                    ns["pedidos_del_mensaje"]("pastillas delanteras para gol")[0])],
+                ["PF1", "TP1", "PF2"])
+        esperar("un saludo no es un pedido", ns["pedidos_del_mensaje"]("gracias!! nos vemos"), [])
+        esperar("«correa de alternador» es una pieza, no dos; «4 bujías», cuatro",
+                [(p["texto"], p["cantidad"]) for p in ns["pedidos_del_mensaje"](
+                    "busco 4 bujias para el clio; tambien correa de alternador")],
+                [("bujia", 4), ("correa alternador", 1)])
+        at.session_state["carrito"] = {}
+        at.session_state["msj_chat_abierto"] = _juan["id"]
+        at.session_state["msj_chat_abierto_en"] = time.monotonic()
+        at.session_state["pagina_actual"] = ns["PAGINAS"][12]
+        at.run()
+        _exp_ped = [e for e in at.expander if "Armar el presupuesto con lo que pide" in e.label]
+        esperar("en el chat, «🧩 Armar el presupuesto con lo que pide (4)»",
+                [e.label for e in _exp_ped], ["🧩 Armar el presupuesto con lo que pide (4)"])
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.run()
+        _sel = {s.label: s for s in at.selectbox if str(s.key).startswith(
+            f"pedido_chat_{_juan['id']}_")}
+        esperar("un selector por pedido encontrado, y elegido el que es (la delantera, la trasera)",
+                {k.split(". ", 1)[-1]: v.value for k, v in _sel.items()},
+                {"W712/80 (código)": _id_mann, "pastilla delantera": _ids_ped["PF1"],
+                 "amortiguador trasero": _ids_ped["AM1"]})
+        cierto("lo que no está se dice: buscalo a mano",
+               any("bomba de nafta" in m.value and "buscalo a mano" in m.value for m in at.markdown))
+        _cant = [n for n in at.number_input if str(n.key).endswith("_cant")]
+        esperar("con la cantidad que pidió", [n.value for n in _cant], [1, 1, 2])
+        # El código lo descarta; lo demás va al presupuesto del Buscador. (AppTest cierra el
+        # desplegable perezoso entre pasada y pasada: se lo vuelve a abrir.)
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        [v for k, v in _sel.items() if "W712" in k][0].set_value(ns["DESCARTAR_EL_PEDIDO"]).run()
+        at.button(key=f"msj_armar_presu_{_juan['id']}").click().run()
+        esperar("arma el presupuesto con lo elegido, sin lo descartado",
+                sorted((v["codigo"], v["cantidad"]) for v in at.session_state["carrito"].values()),
+                [("AM1", 2), ("PF1", 1)])
+        esperar("y lleva al Buscador con el cliente y su WhatsApp listos para seguirlo",
+                (at.session_state["pagina_actual"], at.session_state["presu_seguir_cliente"],
+                 at.session_state["presu_seguir_tel"]),
+                (ns["PAGINAS"][0], "Juan Pérez", "5491155556666"))
+        cierto("con «💬 Mandárselo» a ese chat",
+               [b for b in at.button if b.key == "presupuesto_al_chat"])
+        at.session_state["carrito"] = {}
+
         # En la ficha del auto, un teléfono que no sirve para WhatsApp se dice (sin característica,
         # los avisos no sabrían a quién ir); uno que sirve, no.
         c.execute("INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono) "

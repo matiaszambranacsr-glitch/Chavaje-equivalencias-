@@ -7659,6 +7659,31 @@ conectado. Cada canal tiene su largo: WhatsApp acepta 4.096 letras, Facebook 2.0
 1.000 (era una sola regla de 2.000 y una cotización larga por WhatsApp no salía); si no entra, el
 botón lo dice.
 
+**Del chat al presupuesto: lo que pide, separado.** Los clientes casi nunca mandan códigos:
+escriben «necesito pastillas delanteras y 2 amortiguadores traseros para un Gol 2015 1.6, y el
+W712/80». El chat abierto ofrece **«🧩 Armar el presupuesto con lo que pide (3)»**: lee lo último
+que escribió (sus mensajes desde la última respuesta), lo separa en pedidos —cada pieza con su
+lado y su cantidad, cada código— y de cada uno muestra lo que hay en el catálogo para elegir, o
+«🗑️ Descartar este pedido». **«🛒 Armar el presupuesto con lo elegido»** lo lleva al presupuesto
+del Buscador con las cantidades, el nombre y el WhatsApp del cliente listos para «📌 Guardar para
+seguirlo», y «💬 Mandárselo» lo devuelve a ese chat (`pedidos_del_mensaje()`,
+`candidatos_del_pedido()` y `armar_el_presupuesto_del_chat()` en `logica/mensajes.py`).
+
+- **Se lee acá, no afuera**: con el vocabulario de piezas de la app (`FAMILIAS_REPUESTO`), los
+  modelos de auto y el buscador por descripción. Lo que escribió el cliente no va a ningún
+  servicio externo. Lo que no se entiende no se inventa: queda «buscalo a mano».
+- **Cómo se busca cada pieza**: el nombre en singular más el auto (modelo, motor y año), y la
+  pieza tiene que estar en la descripción. Con la frase entera, «pastillas delanteras gol» traía
+  «Tecla alza cristales delanteras Gol» (el buscador cuenta palabras). El lado solo ordena:
+  primero lo que nombra el auto, después el lado pedido, después lo que hay en stock.
+- **Lo que no dice el auto** se ofrece igual (muchas descripciones no lo dicen), con ⚠️ y sin
+  venir elegido: hay que fijarse antes de ofrecerlo.
+- **«correa de alternador»** es una pieza, no dos; «AMORTIGUADORES» se busca como
+  «AMORTIGUADOR» (las formas de las piezas suman solo una S); un código al final de una oración
+  («…el W712/80.») se reconoce sin el punto.
+- Las elecciones van con una clave que lleva la huella de lo leído: si el cliente escribe otra
+  cosa, son pedidos nuevos y no se quedan con lo elegido para los de antes.
+
 **Cómo llega cada uno** (`logica/mensajes.py`). Facebook e Instagram: la app le pregunta a Meta por
 las conversaciones de la página, como mucho una vez por minuto y solo mientras alguien tiene la
 app abierta. WhatsApp no deja preguntar: avisa cada mensaje a una dirección fija que tiene que

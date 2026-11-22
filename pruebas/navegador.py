@@ -54,6 +54,12 @@ for codigo, desc in (("F100", "FILTRO DE ACEITE GOL"), ("F200", "FILTRO DE AIRE 
 ns["guardar_mensaje_de_afuera"]({"canal": "whatsapp", "chat": "5491145678901",
                                  "nombre": "Cliente Del Navegador", "id": "nav-1",
                                  "texto": "hola, tenés el F100?", "entra": True, "cuando": None})
+# Y un pedido con palabras, para armar el presupuesto con lo que pide (ver el paso 7b).
+ns["guardar_mensaje_de_afuera"]({"canal": "whatsapp", "chat": "5491145678901",
+                                 "nombre": "Cliente Del Navegador", "id": "nav-2",
+                                 "texto": "y 2 filtros de aire, y un filtro de aceite para el gol",
+                                 "entra": True,
+                                 "cuando": None})
 conn.commit()
 ns["crear_usuario"]("navegador", sys.argv[3], "admin")
 # WhatsApp «conectado» con datos inventados, para que esté la caja de la respuesta. Nunca sale
@@ -300,6 +306,34 @@ def probar(url, clave, carpeta):
             nueva.value.close()
             if _url != "https://wa.me/5491145678901?text=te%20pido%204%20unidades":
                 fallas.append("el link de WhatsApp no lleva lo recién escrito: abrió " + _url)
+
+        #  · «🧩 Armar el presupuesto con lo que pide» (los filtros de aire y el de aceite): se
+        #    descarta un pedido y se cambia la cantidad del otro sin salir del campo, y se toca
+        #    directo «🛒 Armar». Lo que va es lo que se ve en ese momento (el botón lee los
+        #    campos al tocarlo: sus args se arman en la pasada anterior, con lo de antes).
+        pagina.locator('[class*="st-key-exp_presu_chat_"] summary').first.click()
+        _selec = pagina.locator('[class*="st-key-pedido_chat_"]:not([class*="_cant"])')
+        if not _hasta(lambda: _selec.count() == 2, 15):
+            fallas.append("en el chat, «🧩 Armar el presupuesto con lo que pide» no muestra los "
+                          f"dos pedidos (el filtro de aire y el de aceite): {_selec.count()}")
+        else:
+            # Antes a la vista: Playwright mueve la pantalla al tocar, y el selector se cierra
+            # solo cuando la página se mueve (una persona no mueve la página al tocar).
+            _selec.nth(0).evaluate("e => e.scrollIntoView({block: 'center'})")
+            _esperar(pagina, 1)
+            _selec.nth(0).locator('button[aria-haspopup="listbox"]').click()
+            pagina.get_by_role("option", name="🗑️ Descartar este pedido").click()
+            _esperar(pagina, 2)
+            _cant = pagina.locator('[class*="st-key-pedido_chat_"][class*="_cant"] input').nth(1)
+            _cant.fill("3")
+            pagina.get_by_role("button", name="🛒 Armar el presupuesto con lo elegido").click()
+            _armado = pagina.locator(".st-key-exp_presupuesto_armado_item_s summary")
+            if not _hasta(lambda: _armado.count() == 1, 15):
+                fallas.append("«🛒 Armar el presupuesto con lo elegido» no lleva al presupuesto "
+                              f"del Buscador: quedó en {pagina.evaluate(_marcada)!r}")
+            elif "1 ítem(s) · $3.000" not in _armado.inner_text():
+                fallas.append("el presupuesto armado desde el chat no es el filtro de aceite ×3 "
+                              f"(sin el descartado): {_armado.inner_text()!r}")
 
         # 7c. 📁 CARGAR EXCEL: la fila de los títulos es la de CADA archivo. Al cambiar de lista,
         # la app borraba la clave del campo, pero el navegador seguía mostrando el número de la
