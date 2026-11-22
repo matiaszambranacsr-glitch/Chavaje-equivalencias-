@@ -620,6 +620,16 @@ def probar():
         cierto("y va con el total",
                len(_mandado) == 1 and "TOTAL: $24.690" in _mandado[0]["json"]["text"]["body"],
                [p["json"] for p in _mandado])
+        esperar("mandado al chat, queda en «📋 Presupuestos para seguir» con su nombre y número",
+                [(p["cliente"], p["telefono"], [(i["codigo"], i["cantidad"]) for i in p["items"]])
+                 for p in ns["presupuestos_para_seguir"]()],
+                [("Juan Pérez", "5491155556666", [("W712/80", 2)])])
+        _mismo = ns["guardar_presupuesto_para_seguir"](
+            "Juan Pérez", "5491155556666", {_id_mann: {"codigo": "W712/80", "marca": "MANN CHAT",
+                                                     "descripcion": "FILTRO ACEITE",
+                                                     "precio": 12345, "cantidad": 2}})
+        esperar("y «📌 Guardar» después no lo duplica", len(ns["presupuestos_para_seguir"]()), 1)
+        ns["marcar_presupuesto"](_mismo, "no")
         # Media hora después, el chat ya no está «en curso»: no aparece en el presupuesto.
         at.session_state["msj_chat_abierto_en"] = time.monotonic() - 31 * 60
         at.session_state["pagina_actual"] = ns["PAGINAS"][0]
@@ -666,6 +676,7 @@ def probar():
                       "precio, stock) SELECT ?, ?, ?, id, ?, 4 FROM marcas "
                       "WHERE nombre = 'MARCA PEDIDO'", (_cod, _cod, _desc, _precio))
             _ids_ped[_cod] = c.lastrowid
+        c.execute("UPDATE productos SET stock = 0 WHERE id = ?", (_ids_ped["AM1"],))
         _pide = ("Hola! necesito pastillas delanteras y 2 amortiguadores traseros para un gol "
                  "2015 1.6, y el W712/80. Tambien una bomba de nafta")
         c.execute("INSERT INTO chat_mensajes (chat_id, canal, externo_id, entra, texto, cuando) "
@@ -728,6 +739,42 @@ def probar():
             f"pedido_chat_{_juan['id']}_")}
         _cant = [n for n in at.number_input if str(n.key).endswith("_cant")]
         esperar("con la cantidad que pidió", [n.value for n in _cant], [1, 1, 2])
+        # Lo no encontrado, a «🔎 Búsquedas sin resultado»: una vez, aunque se dibuje de nuevo.
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.run()
+        esperar("lo que no está queda en las búsquedas sin resultado, una sola vez",
+                c.execute("SELECT COUNT(*) FROM historial_busquedas WHERE sin_resultado = 1 "
+                          "AND termino = 'bomba nafta gol 1.6 2015'").fetchone()[0], 1)
+        # «⏳ Anotar que lo espera»: lo que no hay y lo elegido sin stock (el amortiguador), con
+        # su nombre y su WhatsApp; dos toques no lo anotan dos veces. Si el amortiguador entró
+        # entre que se vio y se tocó, ese no va.
+        c.execute("UPDATE productos SET stock = 3 WHERE id = ?", (_ids_ped["AM1"],))
+        ns["conn"].commit()
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.button(key=f"msj_espera_{_juan['id']}").click().run()
+        esperar("lo elegido que ya tiene stock no se anota",
+                c.execute("SELECT COUNT(*) FROM consultas_cliente WHERE producto_id = ?",
+                          (_ids_ped["AM1"],)).fetchone()[0], 0)
+        c.execute("UPDATE productos SET stock = 0 WHERE id = ?", (_ids_ped["AM1"],))
+        ns["conn"].commit()
+        for _vez in range(2):
+            at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+            at.button(key=f"msj_espera_{_juan['id']}").click().run()
+        esperar("«⏳ Anotar que lo espera»: lo que no hay y lo elegido sin stock, una vez",
+                sorted((r["cliente"], r["telefono"], r["producto_id"] is not None,
+                        r["descripcion"], r["cantidad"]) for r in c.execute(
+                    "SELECT * FROM consultas_cliente WHERE nota = 'Lo pidió por el chat'")),
+                [("Juan Pérez", "5491155556666", False, "bomba de nafta — gol 1.6 2015", 1),
+                 ("Juan Pérez", "5491155556666", True, "AMORTIGUADOR TRASERO VW GOL", 2)])
+        c.execute("UPDATE productos SET stock = 5 WHERE id = ?", (_ids_ped["AM1"],))
+        ns["conn"].commit()
+        esperar("cuando entra el amortiguador, sale para avisarle",
+                [(x["Cliente"], x["Pidió"]) for x in ns["consultas_que_ahora_hay_en_stock"]()
+                 if x["Cliente"] == "Juan Pérez"], [("Juan Pérez", "AM1")])
+        at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
+        at.run()
+        _sel = {s.label: s for s in at.selectbox if str(s.key).startswith(
+            f"pedido_chat_{_juan['id']}_")}
         # El código lo descarta; lo demás va al presupuesto del Buscador. (AppTest cierra el
         # desplegable perezoso entre pasada y pasada: se lo vuelve a abrir.)
         at.session_state[f"exp_presu_chat_{_juan['id']}"] = True

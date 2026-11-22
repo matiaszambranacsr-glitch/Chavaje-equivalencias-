@@ -7680,6 +7680,16 @@ seguirlo», y «💬 Mandárselo» lo devuelve a ese chat (`pedidos_del_mensaje(
   por descripción, ya buscados en el Buscador), y **«✍️ Decirle lo que no hay»** escribe en la
   respuesta «De lo que me pediste, ahora no tengo bomba de nafta. ¿Querés que te lo consiga?»,
   después de lo escrito y una sola vez (lo manda el que atiende).
+- **Lo que no hay no se pierde**: **«⏳ Anotar que lo espera»** lo deja en 📊 Estadísticas →
+  📌 Para pedir → 📞 Consultas de clientes, con su nombre y su WhatsApp (`anotar_que_lo_espera()`).
+  Lo elegido que está sin stock va con su producto: cuando entra, sale ahí con «📲 Avisarle»
+  (ver `consultas_que_ahora_hay_en_stock()`); si entró entre que se vio y se tocó, no se anota.
+  Dos toques no lo anotan dos veces. Y lo que no está en el catálogo queda en «🔎 Búsquedas sin
+  resultado», una vez por día (`anotar_lo_no_encontrado()`): es lo que piden y no se tiene.
+- **El presupuesto mandado queda para seguirlo**: «💬 Mandárselo» desde el presupuesto del
+  Buscador a un chat de WhatsApp lo guarda solo en «📋 Presupuestos para seguir», con su nombre y
+  su número (`mandar_al_chat()`). Y `guardar_presupuesto_para_seguir()` no duplica: el mismo
+  (mismos productos, cantidades y precios) al mismo cliente, abierto, queda uno.
 - **Lo que llegó al WhatsApp del teléfono** (mientras Meta no esté conectado, todo): en el
   🔍 Buscador, **«🧩 Pegar el pedido de un cliente»** hace lo mismo con lo pegado
   (`mostrar_los_pedidos()`, el mismo panel); lo que no hay queda escrito para copiarlo. Y si se

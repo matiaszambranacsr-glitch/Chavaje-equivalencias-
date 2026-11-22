@@ -196,7 +196,7 @@ if pagina == PAGINAS[0]:
                            "https://wa.me/?text=" + quote(_texto), key="presupuesto_por_wa",
                            help="Abre WhatsApp con el presupuesto escrito: elegís a quién.")
             # Si lo pidió alguien por 💬 Mensajes hace un rato: mandárselo a ese chat.
-            mostrar_boton_para_el_chat(_texto, "presupuesto_al_chat")
+            mostrar_boton_para_el_chat(_texto, "presupuesto_al_chat", carrito=_cart)
             # GUARDARLO PARA SEGUIRLO (ver «LOS PRESUPUESTOS PARA SEGUIR» en logica/ventas.py):
             # con el nombre y el teléfono, queda en «📋 Presupuestos para seguir». Solo el
             # personal: guarda el teléfono de un cliente.

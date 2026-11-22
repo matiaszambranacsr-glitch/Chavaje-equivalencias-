@@ -500,7 +500,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "En el presupuesto del Buscador, «📌 Guardarlo para hacerle el seguimiento», con el nombre "
      "y el WhatsApp del cliente. Queda en «📋 Presupuestos para seguir» (arriba en el "
      "Buscador): desde el día siguiente, «📲 Preguntarle si lo vio» con el mensaje escrito; si "
-     "vuelve, «🛒 Volvió: armarlo» lo arma de nuevo con los mismos precios.",
+     "vuelve, «🛒 Volvió: armarlo» lo arma de nuevo con los mismos precios. Si lo mandaste a un "
+     "chat de WhatsApp con «💬 Mandárselo», ya quedó guardado solo.",
      "🔍 Buscador", ""),
     ("garantia_proveedor", "Reclamarle al proveedor lo que vino fallado (garantía)",
      "reclamar reclamo reclamarle proveedor garantia garantias fallada fallado falladas "
@@ -916,13 +917,22 @@ COMO_HAGO_DEL_ASISTENTE = (
      "💬 Mensajes", "empleado"),
     ("presupuesto_del_chat", "Armar el presupuesto con lo que pide el cliente en el chat",
      "armar presupuesto pide pidio pidiendo pedido pedidos separar piezas descartar elegir chat "
-     "chats escribio auto cotizo pegar pegado telefono",
+     "chats escribio auto cotizo pegar pegado telefono espera esperando avisarle llegue",
      "En el chat abierto, «🧩 Armar el presupuesto con lo que pide»: separa lo que escribió (las "
      "piezas con su auto y los códigos) y de cada pedido elegís lo que va o «🗑️ Descartar». "
      "«🛒 Armar el presupuesto con lo elegido» lo lleva al Buscador con el nombre y el WhatsApp "
-     "del cliente; desde ahí, «💬 Mandárselo». Si te escribió al teléfono, pegalo en el "
-     "🔍 Buscador, en «🧩 Pegar el pedido de un cliente».",
+     "del cliente; desde ahí, «💬 Mandárselo». Lo que no hay: «⏳ Anotar que lo espera», para "
+     "avisarle cuando llegue. Si te escribió al teléfono, pegalo en el 🔍 Buscador, en "
+     "«🧩 Pegar el pedido de un cliente».",
      "💬 Mensajes", "empleado"),
+    ("cliente_espera", "Anotar que un cliente espera un repuesto, para avisarle cuando llegue",
+     "anotar cliente espera esperando avisarle avisar llegue llega entra consulta consultas "
+     "pensar piensa repuesto stock",
+     "En el resultado del 🔍 Buscador, «📞 El cliente lo va a pensar»: el nombre y el teléfono, y "
+     "«📞 Anotar la consulta». Si lo pidió por 💬 Mensajes, «⏳ Anotar que lo espera». Cuando "
+     "entra, aparece en 📊 Estadísticas → 📌 Para pedir, en «📞 Consultas de clientes», con "
+     "«📲 Avisarle» (y lo avisa la campanita).",
+     "🔍 Buscador", "empleado"),
     ("conectar_canales", "Conectar WhatsApp, Facebook e Instagram a la app",
      "conectar vincular configurar enlazar whatsapp facebook instagram messenger meta canales "
      "mensajes token webhook relevo",

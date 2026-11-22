@@ -1690,11 +1690,23 @@ def guardar_presupuesto_para_seguir(cliente, telefono, carrito):
     if not items:
         raise ValueError("El presupuesto está vacío.")
     total = round(sum((it.get("precio") or 0) * (it.get("cantidad") or 1) for it in items), 2)
+    cliente, telefono = str(cliente or "").strip()[:80], str(telefono or "").strip()[:40]
     with db_lock:
+        # El mismo, al mismo cliente, una sola vez: mandado al chat ya queda guardado, y después
+        # se tocaba «📌 Guardar» igual (o dos veces). «El mismo»: los mismos productos, con la
+        # misma cantidad y el mismo precio (lo tildado para llevar no cuenta).
+        def huella(lista):
+            return sorted((str(it.get("producto_id")), int(it.get("cantidad") or 1),
+                           round(float(it.get("precio") or 0), 2)) for it in lista)
+        for f in c.execute("""SELECT id, items FROM presupuestos_para_seguir
+                              WHERE estado = 'abierto' AND COALESCE(cliente, '') = ?
+                                AND COALESCE(telefono, '') = ?""", (cliente, telefono)).fetchall():
+            if huella(json.loads(f["items"] or "[]")) == huella(items):
+                return f["id"]
         c.execute("""INSERT INTO presupuestos_para_seguir (usuario, cliente, telefono, items, total)
                      VALUES (?, ?, ?, ?, ?)""",
-                  (obtener_usuario_actual(), str(cliente or "").strip()[:80] or None,
-                   str(telefono or "").strip()[:40] or None, json.dumps(items), total))
+                  (obtener_usuario_actual(), cliente or None, telefono or None,
+                   json.dumps(items), total))
         nuevo = c.lastrowid
         conn.commit()
     return nuevo

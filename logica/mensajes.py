@@ -1104,6 +1104,79 @@ def mensaje_de_lo_que_no_hay(lo_que_falta):
     return f"De lo que me pediste, ahora no tengo {lista}. ¿Querés que te lo consiga?"
 
 
+def anotar_lo_no_encontrado(terminos):
+    """Lo que pidieron y no está en el catálogo, a «🔎 Búsquedas sin resultado» (lo que se mira
+    para decidir qué traer), como lo que se busca en el Buscador y no aparece. Una vez por día
+    cada uno: el panel se dibuja en cada toque y lo mira más de uno."""
+    for termino in dict.fromkeys(str(t).strip().lower()[:120] for t in terminos
+                                 if str(t or "").strip()):
+        ya = c.execute("""SELECT 1 FROM historial_busquedas
+                          WHERE termino = ? AND sin_resultado = 1
+                            AND fecha > datetime('now', '-1 day') LIMIT 1""",
+                       (termino,)).fetchone()
+        if not ya:
+            registrar_busqueda_sin_resultado(termino)
+
+
+def _ya_lo_espera(cliente, telefono, producto_id, descripcion):
+    """Si ya está anotado que ese cliente espera eso (y no se resolvió)."""
+    return c.execute("""SELECT 1 FROM consultas_cliente
+                        WHERE estado = 'activa' AND COALESCE(cliente, '') = ?
+                          AND COALESCE(telefono, '') = ?
+                          AND (producto_id = ? OR (? IS NULL AND producto_id IS NULL
+                                                   AND descripcion = ?))
+                        LIMIT 1""",
+                     (str(cliente or "").strip(), str(telefono or "").strip(), producto_id,
+                      producto_id, str(descripcion or "").strip()[:120])).fetchone() is not None
+
+
+def anotar_que_lo_espera(chat_id, pendientes):
+    """«⏳ Anotar que lo espera» (va como on_click): lo que pidió por el chat y no hay queda en
+    «📞 Consultas de clientes», con su nombre y su WhatsApp. Lo del catálogo que está sin stock
+    va con su producto: cuando entra, sale en «📌 Para pedir» con «📲 Avisarle» (ver
+    consultas_que_ahora_hay_en_stock()). Lo que el cliente pide y no hay se perdía: se le decía
+    «no tengo» y nadie se acordaba de avisarle cuando llegaba.
+
+    `pendientes`: [(clave del elegido o None, cantidad o su clave, texto, código)]; con la
+    clave se mira lo elegido al tocar, y va solo si está sin stock."""
+    chat = el_chat(chat_id)
+    if not chat:
+        return
+    cliente = nombre_del_chat(chat)
+    telefono = str(chat["externo"]) if chat["canal"] == "whatsapp" else ""
+    anotados, error = 0, ""
+    try:
+        for clave, cantidad, texto, codigo in pendientes:
+            cantidad = st.session_state.get(cantidad) if isinstance(cantidad, str) else cantidad
+            producto_id, descripcion = None, texto
+            if clave:
+                elegido = st.session_state.get(clave)
+                if elegido in (None, DESCARTAR_EL_PEDIDO):
+                    continue
+                fila = c.execute("SELECT id, codigo_raw, descripcion, stock FROM productos "
+                                 "WHERE id = ?", (int(elegido),)).fetchone()
+                if not fila or fila["stock"] is None or fila["stock"] > 0:
+                    continue
+                producto_id, codigo = fila["id"], fila["codigo_raw"]
+                descripcion = fila["descripcion"] or texto
+            if _ya_lo_espera(cliente, telefono, producto_id, descripcion):
+                continue
+            ok, _ = anotar_consulta_cliente(cliente, telefono, producto_id, codigo or "",
+                                            descripcion, max(1, int(cantidad or 1)),
+                                            nota="Lo pidió por el chat")
+            anotados += bool(ok)
+    except PermissionError as _err:
+        error = el_error_en_castellano(_err)
+    if error:
+        avisar("error", error)
+    elif anotados:
+        avisar("success", f"⏳ Anotado: {anotados}. Está en {miga_hasta('Para pedir')} → "
+                          "📞 Consultas de clientes, y lo del catálogo, cuando entra, sale ahí con "
+                          "«📲 Avisarle».")
+    else:
+        avisar("info", "Ya estaba anotado (o lo elegido tiene stock).")
+
+
 def sumar_a_la_respuesta(clave, texto):
     """(Va como on_click.) Suma `texto` a lo escrito en la caja `clave`, después de lo que hay
     y una sola vez: «💳 Recordarle lo vencido», «✍️ Decirle lo que no hay»."""
@@ -1172,7 +1245,8 @@ def mostrar_los_pedidos(texto, base, chat_id=None):
     # Las claves llevan la huella de lo leído: si escribe otra cosa, son pedidos nuevos y
     # no se quedan con lo elegido para los de antes.
     _huella = hashlib.md5(_leido.encode("utf-8")).hexdigest()[:8]
-    _elegidos, _no_hay = [], []
+    _elegidos, _no_hay, _pendientes = [], [], []
+    anotar_lo_no_encontrado([p["buscar"] for p, cands in _pedidos if not cands])
     for _n, (_ped, _cands) in enumerate(_pedidos):
         _clave = f"{base}_{_huella}_{_n}"
         # Sin negritas: el rótulo es también lo que lee el lector de pantalla, y ahí las
@@ -1188,6 +1262,10 @@ def mostrar_los_pedidos(texto, base, chat_id=None):
                               args=(_ped["tipo"], _ped["buscar"]), width="stretch",
                               help="Lo deja buscado en el 🔍 Buscador, para mirarlo vos.")
             _no_hay.append(_ped["texto"])
+            _pendientes.append((None, _ped["cantidad"],
+                                _ped["texto"] + (f" — {_ped['auto'].lower()}" if _ped["auto"]
+                                                 and _ped["tipo"] == "pieza" else ""),
+                                _ped["buscar"] if _ped["tipo"] == "codigo" else ""))
             continue
         _por_id = {x["ID"]: x for x in _cands}
         _primero = _cands[0]
@@ -1213,6 +1291,8 @@ def mostrar_los_pedidos(texto, base, chat_id=None):
                        + (f" · stock {miles(_elegido['Stock'])}"
                           if _elegido["Stock"] is not None else ""))
         _elegidos.append((_clave, f"{_clave}_cant"))
+        if any(x["Stock"] is not None and x["Stock"] <= 0 for x in _cands):
+            _pendientes.append((_clave, f"{_clave}_cant", _ped["texto"], ""))
     # Lo que no hay, contestado de un toque: a la caja de la respuesta (o a la de WhatsApp,
     # pasadas las 24 horas), sin borrar lo escrito. Pegado en el Buscador, para copiarlo.
     _chat_ped = el_chat(chat_id) if chat_id else None
@@ -1224,6 +1304,12 @@ def mostrar_los_pedidos(texto, base, chat_id=None):
     elif _no_hay:
         st.caption("Lo que no hay, para copiarlo y contestarle:")
         st.code(mensaje_de_lo_que_no_hay(_no_hay), language=None, wrap_lines=True)
+    if chat_id and _pendientes:
+        st.button("⏳ Anotar que lo espera", key=f"msj_espera_{chat_id}",
+                  on_click=anotar_que_lo_espera, args=(chat_id, _pendientes),
+                  help="Lo que no hay (y lo elegido que está sin stock) queda en 📞 Consultas de "
+                       "clientes con su nombre y su WhatsApp. Lo del catálogo, cuando entra, "
+                       "sale en «📌 Para pedir» con «📲 Avisarle».")
     if _no_hay and _caja_ped:
         st.button("✍️ Decirle lo que no hay", key=f"msj_no_hay_{chat_id}",
                   on_click=sumar_a_la_respuesta,
@@ -1267,23 +1353,39 @@ def chat_para_mandar():
     return chat if conectados.get(chat["canal"]) else None
 
 
-def mandar_al_chat(chat_id, texto):
+def mandar_al_chat(chat_id, texto, carrito=None):
     """«💬 Mandárselo a …» (va como on_click): lo manda y, si salió, vuelve al chat para verlo
-    ahí; si no, dice por qué y se queda donde estaba."""
+    ahí; si no, dice por qué y se queda donde estaba.
+
+    Con `carrito` (el presupuesto del Buscador) a un chat de WhatsApp, queda además en
+    «📋 Presupuestos para seguir»: el que se mandaba sin tocar «📌 Guardar» se perdía si el
+    cliente no contestaba, y ahí ya se sabe quién es y su número."""
     try:
         ok, error = contestar_chat(chat_id, texto)
     except PermissionError as _err:
         ok, error = False, el_error_en_castellano(_err)
     if ok:
-        avisar("success", "💬 Enviado: quedó en el chat.")
+        aviso = "💬 Enviado: quedó en el chat."
+        chat = el_chat(chat_id) if carrito else None
+        if chat and chat["canal"] == "whatsapp":
+            try:
+                guardar_presupuesto_para_seguir(nombre_del_chat(chat), str(chat["externo"]),
+                                                carrito)
+                aviso += " 📌 Y quedó en «📋 Presupuestos para seguir», por si no contesta."
+                st.session_state["presu_seguir_cliente"] = ""
+                st.session_state["presu_seguir_tel"] = ""
+            except (PermissionError, ValueError) as _err:
+                anotar_error("mandar_al_chat: guardarlo para seguir", _err)
+        avisar("success", aviso)
         st.session_state["msj_chat_abierto_en"] = time.monotonic()
         st.session_state["pagina_actual"] = PAGINAS[12]
     else:
         avisar("error", f"No se mandó: {error}")
 
 
-def mostrar_boton_para_el_chat(texto, clave):
-    """Si hay un chat en curso (ver chat_para_mandar()), el botón para mandarle `texto`."""
+def mostrar_boton_para_el_chat(texto, clave, carrito=None):
+    """Si hay un chat en curso (ver chat_para_mandar()), el botón para mandarle `texto`. Con
+    `carrito`, mandado queda también para seguirlo (ver mandar_al_chat())."""
     chat = chat_para_mandar()
     if not chat:
         return
@@ -1294,7 +1396,8 @@ def mostrar_boton_para_el_chat(texto, clave):
     demasiado = len(str(texto or "")) > largo
     st.button(f"💬 Mandárselo a {texto_de_chat_para_markdown(nombre)} por {canal}", key=clave,
               type="primary", width="stretch", disabled=demasiado,
-              on_click=mandar_al_chat, args=(chat["id"], str(texto or "")),
+              on_click=mandar_al_chat,
+              args=(chat["id"], str(texto or ""), dict(carrito) if carrito else None),
               help=(f"Es muy largo para {canal}: tiene {miles(len(str(texto or '')))} letras y "
                     f"entran {miles(largo)}. Sacá algo, o mandá el PDF desde el teléfono."
                     if demasiado else "Lo manda al chat que abriste en 💬 Mensajes, y vuelve ahí."))
