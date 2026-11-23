@@ -1163,6 +1163,10 @@ def sumar_al_presupuesto(fila, cantidad=1):
 # revisa, y «✅ Sumar al stock» la suma de una (y lo anota en el registro de cambios). Las
 # ventas y lo entregado del depósito ya lo descuentan.
 ENTRADAS_RECORDADAS = 50        # cuántas entradas sumadas se recuerdan, para no sumar dos veces
+# EL CONTEO: para la primera carga (o para corregir), lo que importa es lo que hay, no lo que
+# entró. Con «🔢 Conteo», escanear cada unidad la cuenta, y «✅ Dejar el stock en lo contado» lo
+# deja así (con la diferencia anotada). Lo que no se contó queda como estaba.
+MODOS_DE_LA_ENTRADA = ("➕ Entró (suma al stock)", "🔢 Conteo (deja lo contado)")
 
 
 def productos_con_el_codigo(texto):
@@ -1231,6 +1235,28 @@ def sumar_al_stock(lista):
     return sumados, ahora
 
 
+def dejar_el_stock_en_lo_contado(lista):
+    """El conteo: deja el stock de cada producto de `lista` ({producto_id: contado}) en lo
+    contado. Devuelve ([(«MARCA CÓDIGO», había, hay)] de los que cambiaron, consultas de
+    clientes que ahora tienen stock)."""
+    exigir_nivel("empleado", "corregir el stock con un conteo")
+    ya_estaban = {x["_id"] for x in consultas_que_ahora_hay_en_stock()}
+    diferencias = []
+    with db_lock, transaccion():
+        for pid, contado in lista.items():
+            fila = c.execute("""SELECT p.stock, p.codigo_raw, m.nombre AS marca FROM productos p
+                                JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                             (int(pid),)).fetchone()
+            if not fila or int(contado) < 0 or fila["stock"] == int(contado):
+                continue
+            c.execute("UPDATE productos SET stock = ? WHERE id = ?", (int(contado), int(pid)))
+            anotar_cambio("conteo de stock", "producto", pid, fila["stock"], int(contado))
+            diferencias.append((f"{fila['marca']} {fila['codigo_raw']}", fila["stock"],
+                                int(contado)))
+    ahora = [x for x in consultas_que_ahora_hay_en_stock() if x["_id"] not in ya_estaban]
+    return diferencias, ahora
+
+
 def _columna_que_dice(titulos, patron):
     """La primera columna cuyo título encaja con `patron`, o None."""
     for i, t in enumerate(titulos):
@@ -1268,8 +1294,16 @@ def mostrar_entro_mercaderia():
           "cantidad. Se arma la lista de abajo: revisala y tocá **«✅ Sumar al stock»**. Lo "
           "mismo escaneado dos veces suma dos. Si un código está en varias marcas, elegís cuál "
           "entró. Las ventas y lo entregado del depósito ya descuentan del stock. Si alguien "
-          "esperaba algo de lo que entró, te avisa para que le escribas.")
+          "esperaba algo de lo que entró, te avisa para que le escribas.\n\n"
+          "**🔢 Conteo** (para la primera carga, o para corregir): escaneá cada unidad que hay "
+          "y «✅ Dejar el stock en lo contado» lo deja así, con la diferencia anotada. Lo que "
+          "no contaste queda como estaba.")
     lista = st.session_state.setdefault("entro_lista", {})
+    modo = st.radio("Qué cargás:", MODOS_DE_LA_ENTRADA, key="entro_modo", horizontal=True,
+                    help="«Entró» suma lo escaneado al stock. «Conteo» deja el stock en lo "
+                         "contado (para la primera carga o para corregir): escaneá cada unidad, "
+                         "y lo que no contaste queda como estaba.")
+    contando = modo == MODOS_DE_LA_ENTRADA[1]
     with st.form("form_entro_mercaderia", clear_on_submit=True, border=False):
         _c1, _c2, _c3 = st.columns([4, 1, 1], vertical_alignment="bottom")
         codigo = _c1.text_input("Código (escaneado o escrito):", key="entro_codigo",
@@ -1357,8 +1391,8 @@ def mostrar_entro_mercaderia():
     if not lista:
         st.caption("Todavía no cargaste nada.")
         return
-    st.markdown(f"**Lo que entró:** {miles(len(lista))} producto(s), "
-                f"{miles(sum(lista.values()))} unidad(es)")
+    st.markdown(f"**{'Lo contado' if contando else 'Lo que entró'}:** {miles(len(lista))} "
+                f"producto(s), {miles(sum(lista.values()))} unidad(es)")
     datos = {}
     for tanda, marcadores in en_tandas([int(k) for k in lista]):      # un remito puede ser largo
         datos.update({str(f["id"]): f for f in c.execute(
@@ -1379,13 +1413,45 @@ def mostrar_entro_mercaderia():
         _r1, _r2, _r3 = st.columns([5, 2, 1], vertical_alignment="center")
         _r1.markdown(f"**{texto_para_markdown(f['marca'])} {texto_para_markdown(f['codigo_raw'])}**"
                      f" — {texto_para_markdown(str(f['descripcion'] or '')[:50])}")
-        _r1.caption("stock hoy: " + (miles(f["stock"]) if f["stock"] is not None
-                                     else "sin cargar"))
-        _r2.number_input("Cant.", 1, 9999, key=f"entro_cant_{pid}",
+        _hoy = miles(f["stock"]) if f["stock"] is not None else "sin cargar"
+        _r1.caption(f"stock hoy: {_hoy}" + (
+            f" → contado: {miles(lista[pid])}"
+            + (f" ({'+' if lista[pid] > (f['stock'] or 0) else ''}"
+               f"{miles(lista[pid] - (f['stock'] or 0))})"
+               if f["stock"] is not None and lista[pid] != f["stock"] else "")
+            if contando else ""))
+        # Desde 0: en el conteo, lo que se buscó y no está se cuenta como cero.
+        _r2.number_input("Cant.", 0, 9999, key=f"entro_cant_{pid}",
                          value=valor_del_campo(f"entro_cant_{pid}", lista[pid]),
                          label_visibility="collapsed", on_change=_cambiar, args=(pid,))
         _r3.button("🗑️", key=f"entro_sacar_{pid}", on_click=_sacar, args=(pid,),
                    help="Sacarlo de la lista.")
+    if contando:
+        _c_b1, _c_b2 = st.columns([3, 1])
+        if _c_b1.button("✅ Dejar el stock en lo contado", key="entro_contar", type="primary",
+                        width="stretch"):
+            try:
+                diferencias, esperaban = dejar_el_stock_en_lo_contado(dict(lista))
+            except PermissionError as _err:
+                st.error(el_error_en_castellano(_err))
+            else:
+                for pid in list(lista):
+                    st.session_state.pop(f"entro_cant_{pid}", None)
+                contados = len(lista)
+                lista.clear()
+                avisar("success", f"✅ Contados {miles(contados)} producto(s)"
+                       + (": " + ", ".join(f"{q} {'—' if a is None else miles(a)} → {miles(h)}"
+                                           for q, a, h in diferencias[:10])
+                          + (" …" if len(diferencias) > 10 else "")
+                          if diferencias else ", todo coincidía."))
+                if esperaban:
+                    avisar("info", f"📲 {miles(len(esperaban))} cliente(s) esperaban algo que "
+                                   f"ahora hay: avisales en {miga_hasta('Para pedir')} → "
+                                   "«📞 Consultas de clientes».")
+                st.rerun()
+        _c_b2.button("Vaciar", key="entro_vaciar_conteo", width="stretch",
+                     on_click=lambda: st.session_state.get("entro_lista", {}).clear())
+        return
     _cuando = cuando_se_sumo_la_entrada(lista)
     _igual = True
     if _cuando:

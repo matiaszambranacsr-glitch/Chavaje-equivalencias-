@@ -745,11 +745,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "🧩 Combos", ""),
     # ---- stock y compras ----
     ("reponer", "Saber qué hay que pedirle al proveedor",
-     "pedir comprar reponer reposicion falta faltante stock bajo acaba termina proveedor "
-     "pedido compra anotar",
-     "Está lo que se va a acabar, a quién conviene comprarle, lo que no se mueve, y el "
-     "mensaje armado para el proveedor. Lo que falta se anota desde el Buscador («📌 Reponer») "
-     "o desde la venta («📌 Anotar para reponer») y aparece acá.",
+     "pedir comprar reponer reposicion falta faltante stock bajo acaba termina terminar "
+     "quedan poco proveedor pedido compra anotar",
+     "«🛒 Se está por terminar»: lo que, al ritmo al que se vende, alcanza menos de 15 días, con "
+     "cuánto pedir para cubrir un mes; marcalo y sale el mensaje para el proveedor. También: a "
+     "quién conviene comprarle y lo que no se mueve. Lo que falta se anota desde el Buscador "
+     "(«📌 Reponer») o desde la venta («📌 Anotar para reponer») y aparece acá.",
      "📌 Para pedir", ""),
     ("tendencias", "Ver lo que más se busca en Mercado Libre",
      "mercado libre ml meli tendencias busca gente demanda moda semana",
@@ -764,10 +765,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "hace.",
      "📈 Resumen", ""),
     ("contar_stock", "Contar el stock (inventario)",
-     "contar inventario stock control auditoria recuento diferencia",
-     "Dice qué productos conviene contar hoy para controlar el stock de a poco, sin cerrar el "
-     "negocio.",
-     "🧮 Auditoría y depósito", ""),
+     "contar conteo inventario stock control auditoria recuento recontar diferencia corregir",
+     "📦 Depósito → «📦 Entró mercadería», en «🔢 Conteo»: escaneá cada unidad que hay (o "
+     "escribí el código y cuántas) y «✅ Dejar el stock en lo contado»; queda anotada la "
+     "diferencia y lo que no contaste queda como estaba. Para controlarlo de a poco, sin cerrar, "
+     "📊 Estadísticas → «🧮 Auditoría y depósito» dice qué conviene contar hoy.",
+     "📦 Entró mercadería", "empleado"),
     ("mas_vendido", "Ver lo que más se vende",
      "mas vendido vende ranking mejores productos salida rotacion",
      "En Ventas, abajo, abrí «📊 Lo que más se vende». Lo que no se mueve está en Para pedir.",

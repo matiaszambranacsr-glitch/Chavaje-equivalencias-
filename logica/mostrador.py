@@ -1564,6 +1564,54 @@ def ejemplos_de_la_linea(marca_id, que_dice, tope=3):
     return [f"{r['codigo_raw']} — {(r['descripcion'] or '')[:50]}" for r in c.fetchall()]
 
 
+# LO QUE SE ESTÁ POR TERMINAR: «📦 Favoritos con poco stock» mira un número fijo y solo los
+# favoritos; con el stock cargado (ver «ENTRÓ MERCADERÍA» en logica/deposito.py) se puede mirar
+# lo que de verdad importa: cuántos días alcanza lo que queda al ritmo al que se vende. Lo que
+# se vende de a uno por mes con 2 en stock está bien; lo que sale cinco por semana con 4, no.
+# Cuenta las ventas y lo entregado a las cuentas (lo que el depósito entregó para Mostrador se
+# cuenta cuando se vende) de los últimos DIAS_DE_VENTAS_PARA_REPONER, y sugiere pedir lo que
+# cubre DIAS_QUE_CUBRE_EL_PEDIDO.
+DIAS_DE_VENTAS_PARA_REPONER = 60
+DIAS_QUE_TIENE_QUE_ALCANZAR = 15
+DIAS_QUE_CUBRE_EL_PEDIDO = 30
+
+
+def se_esta_por_terminar(limite=100):
+    """Lo que tiene stock cargado y, al ritmo al que se vende, alcanza menos de
+    DIAS_QUE_TIENE_QUE_ALCANZAR días: [dict] con ID, Codigo, Descripcion, Marca, Stock,
+    Vendidos, «Alcanza (días)» y Pedir. Lo que se termina antes, primero."""
+    hace = f"-{DIAS_DE_VENTAS_PARA_REPONER} days"
+    filas = c.execute(
+        """SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                  m.nombre AS "Marca", p.stock AS "Stock", SUM(s.cantidad) AS vendidos
+           FROM (SELECT vi.producto_id, vi.cantidad FROM ventas_items vi
+                 JOIN ventas v ON v.id = vi.venta_id
+                 WHERE v.anulada = 0 AND v.fecha >= datetime('now', ?)
+                 UNION ALL
+                 SELECT d.producto_id, d.cantidad FROM pedidos_deposito d
+                 WHERE d.estado = 'entregado' AND d.mecanico_id IS NOT NULL
+                   AND COALESCE(d.resuelto_en, d.pedido_en) >= datetime('now', ?)) s
+           JOIN productos p ON p.id = s.producto_id
+           JOIN marcas m ON m.id = p.marca_id
+           WHERE p.stock IS NOT NULL
+           GROUP BY p.id""", (hace, hace)).fetchall()
+    salida = []
+    for f in filas:
+        por_dia = (f["vendidos"] or 0) / DIAS_DE_VENTAS_PARA_REPONER
+        if por_dia <= 0:
+            continue
+        alcanza = (f["Stock"] or 0) / por_dia
+        if alcanza >= DIAS_QUE_TIENE_QUE_ALCANZAR:
+            continue
+        salida.append({"ID": f["ID"], "Codigo": f["Codigo"], "Descripcion": f["Descripcion"],
+                       "Marca": f["Marca"], "Stock": f["Stock"], "Vendidos": int(f["vendidos"]),
+                       "Alcanza (días)": int(alcanza),
+                       "Pedir": max(1, math.ceil(por_dia * DIAS_QUE_CUBRE_EL_PEDIDO
+                                                 - (f["Stock"] or 0)))})
+    salida.sort(key=lambda x: (x["Alcanza (días)"], -x["Vendidos"]))
+    return salida[:limite]
+
+
 def listar_favoritos_stock_bajo(umbral=2):
     c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
                  m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"

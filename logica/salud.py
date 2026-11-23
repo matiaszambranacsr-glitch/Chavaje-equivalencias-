@@ -507,6 +507,20 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
 
+    # LO QUE SE TERMINA EN MENOS DE UNA SEMANA al ritmo al que se vende (ver
+    # se_esta_por_terminar() en logica/mostrador.py): pedirlo hoy es no quedarse sin.
+    try:
+        _se_terminan = [x for x in se_esta_por_terminar() if x["Alcanza (días)"] < 7]
+        if _se_terminan:
+            sumar("medio", f"🛒 {len(_se_terminan)} producto(s) se terminan en menos de una semana",
+                  "Al ritmo al que se venden: " + ", ".join(
+                      f"{x['Marca']} {x['Codigo']} (quedan {miles(x['Stock'])})"
+                      for x in _se_terminan[:3]) + (" …" if len(_se_terminan) > 3 else "")
+                  + ". En «🛒 Se está por terminar» está cuánto pedir y el mensaje al proveedor.",
+                  miga_hasta("Para pedir"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/por_terminar", _err)
+
     # LO FALLADO SIN RECLAMAR (ver «LAS GARANTÍAS» en logica/ventas.py): el proveedor no acepta
     # cualquier fecha, y lo que no se reclama a tiempo se pierde.
     try:

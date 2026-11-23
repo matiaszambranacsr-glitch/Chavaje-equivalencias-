@@ -118,7 +118,60 @@ def probar():
     esperar("dicho que es otra, se suma", c.execute(
         "SELECT stock FROM productos WHERE id = ?", (e1,)).fetchone()[0], 6)
 
-    # 5. EL REMITO: el código y la cantidad, cotejados con el catálogo.
+    # 4b. EL CONTEO: escanear cada unidad la cuenta, y deja el stock en lo contado (con la
+    # diferencia anotada); lo que no se contó queda como estaba.
+    at.radio(key="entro_modo").set_value(ns["MODOS_DE_LA_ENTRADA"][1]).run()
+    escanear("E2")
+    escanear("E2")
+    cierto("en el conteo, la diferencia a la vista (había 3, contado 2)",
+           any("contado: 2 (-1)" in x.value for x in at.caption), [x.value for x in at.caption])
+    at.button(key="entro_contar").click().run()
+    esperar("el conteo deja el stock en lo contado, y lo demás como estaba",
+            [c.execute("SELECT stock FROM productos WHERE id = ?", (x,)).fetchone()[0]
+             for x in (e2, e1)], [2, 6])
+    cierto("y dice qué cambió", any("MARCA ENTRA E2 3 → 2" in x.value for x in at.success),
+           [x.value for x in at.success])
+    esperar("anotado como conteo", c.execute(
+        "SELECT antes, despues FROM registro_de_cambios WHERE accion = 'conteo de stock'")
+        .fetchall() and [tuple(r) for r in c.execute(
+            "SELECT antes, despues FROM registro_de_cambios WHERE accion = 'conteo de stock'")],
+        [("3", "2")])
+    at.radio(key="entro_modo").set_value(ns["MODOS_DE_LA_ENTRADA"][0]).run()
+
+    # 4c. LO QUE SE ESTÁ POR TERMINAR: al ritmo al que se vende, con cuánto pedir.
+    for _fecha, _cant, _anulada in (("-10 days", 20, 0), ("-40 days", 10, 0), ("-5 days", 50, 1),
+                                    ("-90 days", 99, 0)):
+        c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada) "
+                  "VALUES (datetime('now', ?), 'ana', 'Efectivo', 0, 1, ?)", (_fecha, _anulada))
+        c.execute("INSERT INTO ventas_items (venta_id, producto_id, codigo, marca, cantidad, "
+                  "precio) VALUES (?, ?, 'E1', 'MARCA ENTRA', ?, 100)", (c.lastrowid, e1, _cant))
+    ns["conn"].commit()
+    esperar("vendió 30 en 60 días (sin la anulada ni lo de hace 90) y quedan 6: alcanza 12 días, "
+            "pedir 9 para cubrir 30",
+            [(x["Codigo"], x["Vendidos"], x["Alcanza (días)"], x["Pedir"])
+             for x in ns["se_esta_por_terminar"]()], [("E1", 30, 12, 9)])
+    ns["invalidar_salud"]()
+    esperar("con 12 días no avisa la campanita",
+            [p["titulo"] for p in ns["diagnostico_de_salud"]() if "se terminan" in p["titulo"]], [])
+    c.execute("UPDATE productos SET stock = 2 WHERE id = ?", (e1,))
+    ns["conn"].commit()
+    ns["invalidar_salud"]()
+    esperar("con 2 (alcanza 4 días), la campanita lo dice",
+            [p["titulo"] for p in ns["diagnostico_de_salud"]() if "se terminan" in p["titulo"]],
+            ["🛒 1 producto(s) se terminan en menos de una semana"])
+    c.execute("UPDATE productos SET stock = 6 WHERE id = ?", (e1,))
+    ns["conn"].commit()
+    at.session_state["pagina_actual"] = ns["PAGINAS"][4]
+    at.session_state["sub_stats"] = "📌 Para pedir"
+    at.run()
+    _chk = [x for x in at.checkbox if x.key == f"chk_porterminar_{e1}"]
+    cierto("en 📌 Para pedir, «🛒 Se está por terminar» con el E1", _chk)
+    if _chk:
+        _chk[0].check().run()
+        cierto("y al marcarlo, el pedido al proveedor dice cuánto pedir",
+               any("E1 (FILTRO) — quedan 6 — pedir 9" in t.value for t in at.text_area),
+               [t.value for t in at.text_area][:2])
+
     _filas = [["Artículo", "Descripción", "Cant."], ["E2", "FILTRO", "5"],
               ["NOPE", "X", "1"], ["DUP1", "FILTRO", "2"], ["E1", "FILTRO", "0"], ["", "", ""]]
     esperar("la columna de la cantidad, por su título",

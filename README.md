@@ -7897,8 +7897,22 @@ mercadería»** (`logica/deposito.py`, «ENTRÓ MERCADERÍA: EL STOCK PROPIO»):
   entrada dos veces** (los mismos productos y cantidades) avisa y no se suma sin decir que es otra.
 - **Si alguien esperaba algo de lo que entró**, lo dice: «📲 2 cliente(s) esperaban algo de lo que
   entró: avisales en 📊 Estadísticas → 📌 Para pedir».
+- **🔢 Conteo**, el otro modo de la misma solapa: para la primera carga o para corregir,
+  escaneando cada unidad que hay (o escribiendo el código y cuántas), y **«✅ Dejar el stock en lo
+  contado»** lo deja así, con la diferencia en el registro de cambios («E2: 3 → 2»). Lo que no se
+  contó queda como estaba; lo buscado y no encontrado se cuenta como cero
+  (`dejar_el_stock_en_lo_contado()`).
 - Las ventas y lo entregado por el depósito ya descontaban. Lo controla
   `pruebas/pruebas_de_la_mercaderia.py`.
+
+**Lo que se está por terminar.** «📦 Favoritos con poco stock» mira un número fijo y solo los
+favoritos. Con el stock cargado, en 📊 Estadísticas → 📌 Para pedir, **«🛒 Se está por
+terminar»** mira cuántos días alcanza lo que queda al ritmo al que se vende (lo vendido y lo
+entregado a las cuentas en los últimos 60 días): lo que alcanza menos de 15, con **cuánto pedir**
+para cubrir 30, al mismo mensaje para el proveedor («- E1 (FILTRO) — quedan 6 — pedir 9»), a su
+WhatsApp. Lo que se vende de a uno por mes con 2 en stock está bien; lo que sale cinco por semana
+con 4, no. La campanita avisa lo que se termina en menos de una semana
+(`se_esta_por_terminar()`, en `logica/mostrador.py`).
 
 ## 💾 El backup, una vez por semana, a la vista
 

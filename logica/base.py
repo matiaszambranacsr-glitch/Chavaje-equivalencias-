@@ -27,6 +27,7 @@ import requests          # se usa en varias funciones; importarlo una vez evita 
 import sys
 import collections
 import itertools
+import math            # lo usan la reposición (mostrador.py) y otras cuentas
 import types
 from datetime import datetime, timedelta, date, time as dtime
 from urllib.parse import quote

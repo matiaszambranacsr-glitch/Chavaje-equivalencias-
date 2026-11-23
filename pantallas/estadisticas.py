@@ -669,6 +669,23 @@ a traer solas desde Administrar → Mantenimiento.
             st.caption("Ningún empleado marcó nada para pedir todavía.")
 
         st.markdown("---")
+        # LO QUE SE ESTÁ POR TERMINAR al ritmo al que se vende (ver se_esta_por_terminar()),
+        # con cuánto pedir: va al mismo mensaje para el proveedor que los favoritos.
+        st.markdown("**🛒 Se está por terminar: lo que se vende y queda poco**",
+                    help=f"Lo vendido en los últimos {DIAS_DE_VENTAS_PARA_REPONER} días contra lo "
+                         f"que queda: lo que alcanza menos de {DIAS_QUE_TIENE_QUE_ALCANZAR} días, "
+                         f"con lo que hay que pedir para cubrir {DIAS_QUE_CUBRE_EL_PEDIDO}. Solo lo "
+                         "que tiene stock cargado (📦 Depósito → 📦 Entró mercadería).")
+        _por_terminar = se_esta_por_terminar()
+        if not _por_terminar:
+            st.caption("Nada por ahora. Cuenta solo lo que tiene el stock cargado en 📦 Depósito "
+                       "→ «📦 Entró mercadería».")
+        for f in _por_terminar:
+            if st.checkbox(f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (quedan "
+                           f"{miles(f['Stock'])}, alcanza {miles(f['Alcanza (días)'])} día(s): "
+                           f"pedir {miles(f['Pedir'])})", key=f"chk_porterminar_{f['ID']}"):
+                seleccionados.append(f)
+
         st.markdown("**📦 Favoritos con poco stock**")
         umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1,
                                         key="umbral_para_pedir")
@@ -688,8 +705,12 @@ a traer solas desde Administrar → Mantenimiento.
         if seleccionados:
             st.markdown("---")
             st.markdown(f"**📲 Armar mensaje para el proveedor ({len(seleccionados)} ítem(s) elegidos)**")
-            por_marca = {}
+            por_marca, _ya_va = {}, set()
             for item in seleccionados:
+                # El mismo producto marcado en dos listas (favorito y por terminar), una vez.
+                if item.get("ID") in _ya_va:
+                    continue
+                _ya_va.add(item.get("ID"))
                 por_marca.setdefault(item["Marca"], []).append(item)
             for marca, items in por_marca.items():
                 lineas_msg = [f"Hola! Necesito reponer estos productos de {marca}:"]
@@ -698,6 +719,7 @@ a traer solas desde Administrar → Mantenimiento.
                     lineas_msg.append(
                         f"- {it['Codigo']} ({it.get('Descripcion') or ''}) — "
                         f"quedan {stock_it if stock_it is not None else 's/d'}"
+                        + (f" — pedir {it['Pedir']}" if it.get("Pedir") else "")
                     )
                 mensaje_reposicion = "\n".join(lineas_msg)
                 with st.expander(f"📨 {marca} ({len(items)} ítem(s))", key=f"exp_envio_{marca}"):
