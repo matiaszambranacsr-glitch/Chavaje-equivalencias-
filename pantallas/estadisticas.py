@@ -706,6 +706,22 @@ a traer solas desde Administrar → Mantenimiento.
                                help="Abre WhatsApp con lo que falta, al número del proveedor si "
                                     "está anotado (si no, elegís a quién).")
 
+        # ⏱️ CUÁNTO TARDA CADA PROVEEDOR (ver cuanto_tarda_cada_proveedor()), con lo anotado y
+        # llegado. Perezoso: es una consulta y casi nunca se mira.
+        _exp_tarda = st.expander("⏱️ Cuánto tarda cada proveedor", key="exp_cuanto_tarda",
+                                 on_change="rerun")
+        if _exp_tarda.open:
+            with _exp_tarda:
+                _tardan = cuanto_tarda_cada_proveedor()
+                if _tardan:
+                    st.dataframe([{k: (miles(v, 1) if isinstance(v, float) else v)
+                                   for k, v in x.items()} for x in _tardan],
+                                 hide_index=True, width="stretch")
+                    st.caption(f"De lo pedido en los últimos {DIAS_DE_CUANTO_TARDA} días, desde "
+                               "que se anotó hasta que llegó. Por producto.")
+                else:
+                    st.caption("Todavía no llegó nada de lo anotado con «📝 Anotar como pedido».")
+
         st.markdown("---")
         # LO QUE SE ESTÁ POR TERMINAR al ritmo al que se vende (ver se_esta_por_terminar()),
         # con cuánto pedir: va al mismo mensaje para el proveedor que los favoritos.

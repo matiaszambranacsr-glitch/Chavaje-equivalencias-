@@ -1657,6 +1657,34 @@ def cerrar_el_pedido_al_proveedor(pedido_id, llego=True):
                   ("llego" if llego else "cancelado", bool(llego), int(pedido_id)))
 
 
+# CUÁNTO TARDA CADA PROVEEDOR, con lo que ya se anota: entre que se pidió y que llegó, en los
+# últimos DIAS_DE_CUANTO_TARDA. Para saber a quién pedirle lo urgente y cuándo reclamar.
+DIAS_DE_CUANTO_TARDA = 180
+
+
+def cuanto_tarda_cada_proveedor():
+    """[dict] por marca: Marca, Llegaron (productos), Tarda (días, en promedio), «El más lento»
+    (días), «Sin llegar» y Cancelados. El que más tarda, primero."""
+    filas = c.execute(
+        """SELECT m.nombre AS marca,
+                  SUM(pp.estado = 'llego') AS llegaron,
+                  AVG(CASE WHEN pp.estado = 'llego'
+                           THEN julianday(pp.llego_en) - julianday(pp.pedido_en) END) AS tarda,
+                  MAX(CASE WHEN pp.estado = 'llego'
+                           THEN julianday(pp.llego_en) - julianday(pp.pedido_en) END) AS lento,
+                  SUM(pp.estado = 'pedido') AS sin_llegar,
+                  SUM(pp.estado = 'cancelado') AS cancelados
+           FROM pedidos_a_proveedores pp
+           JOIN productos p ON p.id = pp.producto_id
+           JOIN marcas m ON m.id = p.marca_id
+           WHERE pp.pedido_en >= datetime('now', ?)
+           GROUP BY m.nombre HAVING SUM(pp.estado = 'llego') > 0
+           ORDER BY tarda DESC, m.nombre""", (f"-{DIAS_DE_CUANTO_TARDA} days",)).fetchall()
+    return [{"Marca": f["marca"], "Llegaron": f["llegaron"],
+             "Tarda (días)": round(f["tarda"], 1), "El más lento (días)": round(f["lento"], 1),
+             "Sin llegar": f["sin_llegar"], "Cancelados": f["cancelados"]} for f in filas]
+
+
 def mensaje_para_reclamar_el_pedido(pedidos):
     """El mensaje al proveedor por lo que no llegó (los de una marca)."""
     lineas = ["Hola! Todavía no me llegó esto que te pedí:"]

@@ -269,6 +269,21 @@ def probar():
             [tuple(f) for f in c.execute("SELECT estado FROM pedidos_a_proveedores "
                                          "ORDER BY id DESC LIMIT 2")], [("llego",), ("cancelado",)])
 
+    # 4g. CUÁNTO TARDA CADA PROVEEDOR: con lo llegado (2 y 4 días), lo cancelado aparte.
+    for _dias, _orden in ((2, "ASC"), (4, "DESC")):
+        c.execute(f"""UPDATE pedidos_a_proveedores SET pedido_en = datetime(llego_en, ?)
+                      WHERE id = (SELECT id FROM pedidos_a_proveedores WHERE estado = 'llego'
+                                  ORDER BY id {_orden} LIMIT 1)""", (f"-{_dias} days",))
+    ns["conn"].commit()
+    esperar("cuánto tarda cada proveedor", ns["cuanto_tarda_cada_proveedor"](),
+            [{"Marca": "MARCA ENTRA", "Llegaron": 2, "Tarda (días)": 3.0,
+              "El más lento (días)": 4.0, "Sin llegar": 0, "Cancelados": 1}])
+    at.session_state["exp_cuanto_tarda"] = True
+    at.run()
+    cierto("y en 📌 Para pedir, la tabla con «3,0» días",
+           any("3,0" in d.value.to_string() for d in at.dataframe),
+           [d.value.to_string()[:200] for d in at.dataframe][:1])
+
     _filas = [["Artículo", "Descripción", "Cant."], ["E2", "FILTRO", "5"],
               ["NOPE", "X", "1"], ["DUP1", "FILTRO", "2"], ["E1", "FILTRO", "0"], ["", "", ""]]
     esperar("la columna de la cantidad, por su título",

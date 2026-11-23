@@ -7930,6 +7930,10 @@ que dice «pedir», si lo dice) y queda en **«🚚 Pedido y sin llegar»**, en 
   terminar» y de favoritos lo marcan («— 🚚 pedido el 23/11»), la campanita deja de insistir con
   lo que se termina si ya está pedido, y lo que un empleado marcó con «📌 Pedir» sale de «🙋
   Pedidos marcados» al anotarlo.
+- **«⏱️ Cuánto tarda cada proveedor»**: con lo anotado y llegado en los últimos
+  `DIAS_DE_CUANTO_TARDA` (180) días, cuántos días tarda cada marca en promedio, el más lento, lo
+  que sigue sin llegar y lo cancelado. Para saber a quién pedirle lo urgente
+  (`cuanto_tarda_cada_proveedor()`).
 
 Está en «LOS PEDIDOS A LOS PROVEEDORES», en `logica/deposito.py` (la tabla
 `pedidos_a_proveedores`). Lo controla `pruebas/pruebas_de_la_mercaderia.py`.
