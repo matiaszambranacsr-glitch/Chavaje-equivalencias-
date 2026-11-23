@@ -89,6 +89,8 @@ ENTIENDE = (
     ("llego mercaderia nueva", "como:remito"),
     ("no llego lo que le pedi al proveedor", "como:pedido_proveedor"),
     ("cambiar los tiempos de la pagina", "como:tiempos"),
+    ("que clientes dejaron de venir", "como:no_vienen"),
+    ("talleres que ya no compran mas", "como:no_vienen"),
     ("configurar los plazos de los avisos", "como:tiempos"),
     ("reclamarle un pedido atrasado al proveedor", "como:pedido_proveedor"),
     ("lo que suele llevar el taller", "como:suele_llevar"),
@@ -1026,6 +1028,11 @@ def probar(L):
               "'el secreto de Rosa', datetime('now'), 2, datetime('now'))")
     c.execute("INSERT INTO presupuestos_para_seguir (cliente, telefono, items, total, creado_en) "
               "VALUES ('Rosa', '11 0000-0000', '[]', 0, datetime('now', '-1 day'))")
+    # Una cuenta que compraba seguido y dejó de venir.
+    for _dias_d in (50, 60, 70):
+        c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada, "
+                  "mecanico_id) VALUES (datetime('now', ?), 'ana', 'Cuenta', 10, 0, 0, ?)",
+                  (f"-{_dias_d} days", _cuenta_d))
     # Un pedido al proveedor atrasado y uno de hoy.
     c.executemany("INSERT INTO pedidos_a_proveedores (producto_id, cantidad, pedido_en) "
                   "VALUES (?, 2, datetime('now', ?))", [(_prod_d[0], "-9 days"),
@@ -1097,6 +1104,8 @@ def probar(L):
                                                "saldo vencido")), _pend_d["texto"])
     cierto("y lo pedido al proveedor que no llegó (el de hoy no)",
            "🚚 **1** pedido(s) a proveedores sin llegar" in _pend_d["texto"], _pend_d["texto"])
+    cierto("y las cuentas que dejaron de venir (cuántas, sin nombres)",
+           "😴 **1** cuenta(s) que compraban seguido" in _pend_d["texto"], _pend_d["texto"])
     cierto("eso no le llega a quien no tiene 📊 Estadísticas",
            "a proveedores" not in responder("que tengo pendiente", _roles_d["depósito"])["texto"])
     cierto("y los que contestaron por el chat sobre su presupuesto (sin decir qué escribieron)",

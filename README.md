@@ -7946,6 +7946,21 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 😴 Las cuentas que dejaron de venir
+
+Un taller que compraba todas las semanas y hace un mes no aparece se fue a otro lado, y nadie
+se daba cuenta hasta que alguien preguntaba «¿y Pérez?». En 🗂️ Administrar → 💳 Cuentas
+corrientes, **«😴 Las cuentas que dejaron de venir (N)»** lo dice a tiempo: las cuentas que
+compraron 3 veces o más en los `DIAS_DEL_HABITO` (90) días anteriores y hace
+`DIAS_SIN_VENIR_PARA_EXTRANAR` (30) o más que no compran nada —ni en el mostrador ni por el
+depósito; lo anulado y lo que el depósito no entregó no cuentan—, las que más compraban
+primero. Cada una con **«📲 Escribirle»** (WhatsApp al número de la cuenta: «hace rato que no
+pasás. ¿Necesitás algo? Decinos y te lo dejamos preparado», sin reproche ni plata) y **«✅ Ya le
+escribí»**, que la saca por otro tanto; si vuelve a comprar, sale sola. Los dos plazos están en
+«⏱️ Los tiempos de la página». El asistente dice cuántas en «¿Qué tengo pendiente?», nunca
+quiénes (`cuentas_que_dejaron_de_venir()`, en `logica/mecanico.py`; lo controla
+`pruebas/pruebas_de_los_mensajes.py`).
+
 ## ⏱️ Los tiempos de la página, a elección del administrador
 
 Lo pidió el dueño: «lo de los pedidos, en vez de 5 días que sean 7, y así con todo». Cada plazo
@@ -7963,8 +7978,9 @@ valor de siempre en la ayuda (?):
   atrasado (5), «Cuánto tarda cada proveedor» (180), garantías sin reclamar (14), la lista de
   precios vieja (60).
 - **📦 Depósito**: el 🟡 y el 🔴 de lo que espera (10 y 20 minutos), lo que sigue afuera (24 horas).
-- **💳 Cuentas corrientes**: volver a recordar lo vencido (7 días), el permiso para pasar el
-  límite (24 horas), el código de retiro (24 horas).
+- **💳 Cuentas corrientes**: volver a recordar lo vencido (7 días), las cuentas que dejaron de
+  venir (30 días sin comprar, después de comprar seguido en 90), el permiso para pasar el límite
+  (24 horas), el código de retiro (24 horas).
 - **💬 Mensajes**: el chat «en curso» (30 minutos), la respuesta fuera de horario (12 horas; la
   del relevo de Cloudflare, al instante, sigue con 12).
 - **💾 Copias y avisos**: cada cuánto se mira la copia (15 minutos), recordar el backup (7 días),

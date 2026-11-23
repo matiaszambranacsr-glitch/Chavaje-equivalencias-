@@ -1871,6 +1871,96 @@ def mostrar_cobrar_lo_vencido():
 
 
 # ============================================================
+# LAS CUENTAS QUE DEJARON DE VENIR
+# ============================================================
+# Un taller que compraba todas las semanas y hace un mes no aparece se fue a otro lado, y nadie
+# se daba cuenta hasta que alguien preguntaba «¿y Pérez?». Esto lo dice a tiempo: la cuenta que
+# compró al menos COMPRAS_PARA_SER_HABITUAL veces en los DIAS_DEL_HABITO anteriores y hace
+# DIAS_SIN_VENIR_PARA_EXTRANAR que no compra nada (ni en el mostrador ni por el depósito), con
+# su WhatsApp ya escrito. «✅ Ya le escribí» la saca por otro tanto; si vuelve a comprar, sale
+# sola. Los dos plazos los elige el administrador (ver «LOS TIEMPOS QUE ELIGE EL
+# ADMINISTRADOR»).
+DIAS_SIN_VENIR_PARA_EXTRANAR = 30
+DIAS_DEL_HABITO = 90
+COMPRAS_PARA_SER_HABITUAL = 3
+
+
+def mensaje_para_la_cuenta_que_no_viene(nombre):
+    """Sin reproche ni plata: una pregunta que pide respuesta."""
+    nombre = str(nombre or "").strip()
+    return (f"Hola{(' ' + nombre) if nombre else ''}! Te escribimos de El Chavo: hace rato que "
+            "no pasás. ¿Necesitás algo? Decinos y te lo dejamos preparado. ¡Saludos!")
+
+
+def cuentas_que_dejaron_de_venir():
+    """[dict] con ID, Taller, Compras (en el hábito), Ultima (como está guardada), Dias (desde
+    la última), telefono, tiene_whatsapp y link: las que dejaron de venir y no se les escribió
+    desde que dejaron (o se les escribió hace DIAS_SIN_VENIR_PARA_EXTRANAR o más). Las que más
+    compraban primero."""
+    sin_venir = f"-{DIAS_SIN_VENIR_PARA_EXTRANAR} days"
+    desde = f"-{DIAS_SIN_VENIR_PARA_EXTRANAR + DIAS_DEL_HABITO} days"
+    filas = c.execute(
+        """SELECT k.id, k.nombre, k.telefono, k.extranado_en, s.compras, s.ultima,
+                  CAST(julianday('now') - julianday(s.ultima) AS INTEGER) AS dias
+           FROM (SELECT mecanico_id,
+                        SUM(cuando >= datetime('now', ?) AND cuando < datetime('now', ?))
+                            AS compras,
+                        MAX(cuando) AS ultima
+                 FROM (SELECT v.mecanico_id, v.fecha AS cuando FROM ventas v
+                       WHERE v.anulada = 0 AND v.mecanico_id IS NOT NULL
+                       UNION ALL
+                       SELECT d.mecanico_id, COALESCE(d.resuelto_en, d.pedido_en)
+                       FROM pedidos_deposito d
+                       WHERE d.estado = 'entregado' AND d.mecanico_id IS NOT NULL)
+                 GROUP BY mecanico_id) s
+           JOIN mecanicos k ON k.id = s.mecanico_id
+           WHERE s.compras >= ? AND s.ultima < datetime('now', ?)
+             AND (k.extranado_en IS NULL OR k.extranado_en < s.ultima
+                  OR k.extranado_en < datetime('now', ?))
+           ORDER BY s.compras DESC, s.ultima DESC""",
+        (desde, sin_venir, COMPRAS_PARA_SER_HABITUAL, sin_venir, sin_venir)).fetchall()
+    salida = []
+    for f in filas:
+        telefono = str(f["telefono"] or "")
+        salida.append({"ID": f["id"], "Taller": f["nombre"], "Compras": f["compras"],
+                       "Ultima": f["ultima"], "Dias": f["dias"], "telefono": telefono,
+                       "tiene_whatsapp": bool(numero_para_whatsapp(telefono)),
+                       "link": link_de_whatsapp(telefono, mensaje_para_la_cuenta_que_no_viene(
+                           f["nombre"]))})
+    return salida
+
+
+def marcar_que_se_le_escribio(mecanico_id):
+    """«✅ Ya le escribí» (va como on_click)."""
+    exigir_nivel("empleado", "anotar que se le escribió a una cuenta que dejó de venir")
+    with db_lock:
+        c.execute("UPDATE mecanicos SET extranado_en = datetime('now') WHERE id = ?",
+                  (int(mecanico_id),))
+        anotar_cambio("le escribió porque dejó de venir", "cuenta", mecanico_id)
+        conn.commit()
+
+
+def mostrar_cuentas_que_dejaron_de_venir(cuentas):
+    """Adentro de «😴 Las cuentas que dejaron de venir», en Cuentas corrientes."""
+    st.caption(f"Compraron {COMPRAS_PARA_SER_HABITUAL} veces o más en {DIAS_DEL_HABITO} días y "
+               f"hace {DIAS_SIN_VENIR_PARA_EXTRANAR} o más que no compran nada. Después de "
+               "escribirle, «✅ Ya le escribí»; si vuelve a comprar, sale sola.")
+    for x in cuentas[:MAXIMO_DE_CUENTAS_PARA_RECORDAR]:
+        with st.container(border=True, key=f"cc_extranada_{x['ID']}"):
+            _c1, _c2, _c3 = st.columns([3, 2, 2], vertical_alignment="center")
+            _c1.markdown(f"😴 **{texto_para_markdown(x['Taller'])}**")
+            _c1.caption(f"{miles(x['Compras'])} compras antes · la última el "
+                        f"{dia_y_mes_de_aca(x['Ultima'])}, hace {miles(x['Dias'])} días"
+                        + ("" if x["tiene_whatsapp"] else " · sin WhatsApp anotado"))
+            _c2.link_button("📲 Escribirle" if x["tiene_whatsapp"]
+                            else "📲 Escribirle (elegís a quién)", x["link"], width="stretch")
+            _c3.button("✅ Ya le escribí", key=f"cc_extranada_ok_{x['ID']}", width="stretch",
+                       on_click=marcar_que_se_le_escribio, args=(x["ID"],))
+    if len(cuentas) > MAXIMO_DE_CUENTAS_PARA_RECORDAR:
+        st.caption(f"Y {miles(len(cuentas) - MAXIMO_DE_CUENTAS_PARA_RECORDAR)} más.")
+
+
+# ============================================================
 # PASAR EL LÍMITE CON PERMISO
 # ============================================================
 # Lo pidió el dueño: cuando el límite de crédito frena una venta, el que atiende puede pedir

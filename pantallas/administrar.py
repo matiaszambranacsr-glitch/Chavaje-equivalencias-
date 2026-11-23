@@ -1611,6 +1611,17 @@ if pagina == PAGINAS[3]:
                         with _exp_cobrar:
                             mostrar_cobrar_lo_vencido()
 
+            # LAS QUE DEJARON DE VENIR (ver cuentas_que_dejaron_de_venir()): una consulta chica,
+            # para decir cuántas en el título; los renglones, al abrirlo.
+            _extranadas = cuentas_que_dejaron_de_venir()
+            if _extranadas:
+                _exp_extranadas = st.expander(
+                    f"😴 Las cuentas que dejaron de venir ({miles(len(_extranadas))})",
+                    key="exp_cuentas_que_no_vienen", on_change="rerun")
+                if _exp_extranadas.open:
+                    with _exp_extranadas:
+                        mostrar_cuentas_que_dejaron_de_venir(_extranadas)
+
             # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta. Ver
             # mostrar_permisos_de_limite().
             mostrar_permisos_de_limite()

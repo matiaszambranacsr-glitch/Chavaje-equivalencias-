@@ -1693,6 +1693,9 @@ def _esquema_gestion(c):
     # Cuándo se le recordó lo vencido por WhatsApp (ver cuentas_para_recordar()).
     if "recordado_en" not in _cols_mecanicos:
         c.execute("ALTER TABLE mecanicos ADD COLUMN recordado_en TEXT")
+    # Cuándo se le escribió porque dejó de venir (ver cuentas_que_dejaron_de_venir()).
+    if "extranado_en" not in _cols_mecanicos:
+        c.execute("ALTER TABLE mecanicos ADD COLUMN extranado_en TEXT")
 
     # Presupuestos armados por mecánicos externos: repuestos elegidos + su propia mano de obra.
     c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_mecanico (

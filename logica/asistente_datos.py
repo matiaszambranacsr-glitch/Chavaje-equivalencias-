@@ -29,6 +29,7 @@ FUNCIONES_QUE_PUEDE_USAR = (
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
     "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "garantias", "hoy_aca",
     "miles", "texto_para_markdown", "presupuestos_para_seguir", "pedidos_sin_llegar",
+    "cuentas_que_dejaron_de_venir",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -235,6 +236,12 @@ def _dato_de_lo_pendiente(contexto):
             lineas.append(f"💳 **{miles(len(vencidas))}** cuenta(s) con saldo vencido"
                           + (f"; a {miles(_tocan)} toca recordárselo: «📲 Cobrar lo vencido», "
                              "en 💳 Cuentas corrientes." if _tocan else "."))
+        # Cuántas, nunca quiénes ni sus teléfonos.
+        _no_vienen = cuentas_que_dejaron_de_venir()
+        if _no_vienen:
+            lineas.append(f"😴 **{miles(len(_no_vienen))}** cuenta(s) que compraban seguido "
+                          "dejaron de venir: «😴 Las cuentas que dejaron de venir», en 💳 "
+                          "Cuentas corrientes.")
     # Guardan teléfonos de clientes: solo para el personal (el invitado y el taller no llegan
     # acá, ver dato_del_momento(); va explícito igual).
     if _BUSCADOR in visibles and contexto.get("nivel") in ("operador", "admin"):

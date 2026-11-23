@@ -1025,6 +1025,78 @@ def probar():
             _ya[0].click().run()
             esperar("que la anota", [x["recordado_hace"] for x in ns["cuentas_para_recordar"]()
                                      if x["ID"] == _cuenta_juan], [0])
+        # LAS CUENTAS QUE DEJARON DE VENIR: tres compras en el hábito (ventas o entregas del
+        # depósito) y nada hace un mes. Lo anulado no cuenta; la que volvió, tampoco.
+        _ventas_de = {}
+        _cuentas_x = {n: ns["crear_mecanico"](n) for n in (
+            "Taller Que No Viene", "Taller Que Viene", "Taller De Dos", "Taller Anulado",
+            "Taller Del Deposito")}
+        for _nombre_x, _dias_x, _anulada_x in (
+                ("Taller Que No Viene", 50, 0), ("Taller Que No Viene", 60, 0),
+                ("Taller Que No Viene", 70, 0), ("Taller Que Viene", 50, 0),
+                ("Taller Que Viene", 60, 0), ("Taller Que Viene", 70, 0),
+                ("Taller Que Viene", 5, 0), ("Taller De Dos", 50, 0), ("Taller De Dos", 60, 0),
+                ("Taller Anulado", 50, 0), ("Taller Anulado", 60, 0), ("Taller Anulado", 70, 1)):
+            c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada, "
+                      "mecanico_id) VALUES (datetime('now', ?), 'ana', 'Cuenta', 100, 0, ?, ?)",
+                      (f"-{_dias_x} days", _anulada_x, _cuentas_x[_nombre_x]))
+        c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('MARCA X', 'PROVEEDOR')")
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "SELECT 'X1', 'X1', 'FILTRO', id FROM marcas WHERE nombre = 'MARCA X'")
+        _x1 = c.lastrowid
+        for _dias_x in (40, 45, 48):
+            c.execute("INSERT INTO pedidos_deposito (producto_id, cantidad, estado, mecanico_id, "
+                      "pedido_en, resuelto_en) VALUES (?, 1, 'entregado', ?, datetime('now', ?), "
+                      "datetime('now', ?))", (_x1, _cuentas_x["Taller Del Deposito"],
+                                              f"-{_dias_x} days", f"-{_dias_x} days"))
+        # Lo que el depósito no entregó («no hay») no es una compra: el de dos no llega a tres.
+        c.execute("INSERT INTO pedidos_deposito (producto_id, cantidad, estado, mecanico_id, "
+                  "pedido_en) VALUES (?, 1, 'no_hay', ?, datetime('now', '-70 days'))",
+                  (_x1, _cuentas_x["Taller De Dos"]))
+        ns["conn"].commit()
+        _no_vienen = lambda: [x["Taller"] for x in ns["cuentas_que_dejaron_de_venir"]()  # noqa
+                              if x["ID"] in _cuentas_x.values()]
+        esperar("las que dejaron de venir (las de la última más reciente primero)", _no_vienen(),
+                ["Taller Del Deposito", "Taller Que No Viene"])
+        ns["guardar_los_tiempos"]({"DIAS_SIN_VENIR_PARA_EXTRANAR": 49})
+        # El tiempo lo elige el administrador: con 49 días, la del depósito (vino hace 40) no.
+        esperar("con 49 días sin venir", _no_vienen(), ["Taller Que No Viene"])
+        ns["guardar_los_tiempos"]({"DIAS_SIN_VENIR_PARA_EXTRANAR": 55})
+        esperar("con 55, ninguna (la otra vino hace 50)", _no_vienen(), [])
+        ns["guardar_los_tiempos"]({"DIAS_SIN_VENIR_PARA_EXTRANAR": 30})
+        ns["guardar_telefono_de_la_cuenta"](_cuentas_x["Taller Que No Viene"], "11 4444-3333")
+        at.session_state["exp_cuentas_que_no_vienen"] = True
+        at.run()
+        _escribirle = [b.proto.url for b in at.get("link_button")
+                       if b.proto.label == "📲 Escribirle"]
+        cierto("en 💳 Cuentas corrientes: «📲 Escribirle», al WhatsApp de la cuenta",
+               any(u.startswith("https://wa.me/5491144443333?text=") for u in _escribirle),
+               (_escribirle, [e.value for e in at.exception]))
+        _ya_x = [b for b in at.button
+                 if b.key == f"cc_extranada_ok_{_cuentas_x['Taller Que No Viene']}"]
+        cierto("y «✅ Ya le escribí»", _ya_x)
+        if _ya_x:
+            _ya_x[0].click().run()
+        esperar("escrita, sale", _no_vienen(), ["Taller Del Deposito"])
+        c.execute("UPDATE mecanicos SET extranado_en = datetime('now', '-31 days') WHERE id = ?",
+                  (_cuentas_x["Taller Que No Viene"],))
+        ns["conn"].commit()
+        esperar("pasado otro mes sin venir, vuelve", _no_vienen(),
+                ["Taller Del Deposito", "Taller Que No Viene"])
+        c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada, "
+                  "mecanico_id) VALUES (datetime('now'), 'ana', 'Cuenta', 100, 0, 0, ?)",
+                  (_cuentas_x["Taller Del Deposito"],))
+        ns["conn"].commit()
+        esperar("la que volvió a comprar, sale sola", _no_vienen(), ["Taller Que No Viene"])
+        for _nivel in ("mecanico", ""):
+            try:
+                _g["_nivel_de_quien_esta_adentro"] = lambda _n=_nivel: _n
+                ns["marcar_que_se_le_escribio"](_cuentas_x["Taller Que No Viene"])
+                fallas.append(f"«{_nivel or 'invitado'}» pudo anotar que le escribió")
+            except PermissionError:
+                pass
+            finally:
+                _g["_nivel_de_quien_esta_adentro"] = _adentro
         at.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
         at.session_state["exp_conectar_canales"] = True
         at.run()

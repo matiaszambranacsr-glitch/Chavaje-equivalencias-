@@ -605,8 +605,9 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-23d"
+VERSION_DE_LO_NUEVO = "2026-11-23e"
 LO_NUEVO = (
+    ("😴 «Las cuentas que dejaron de venir»: el taller que compraba seguido y hace un mes no aparece, con su WhatsApp ya escrito para preguntarle si necesita algo. Los días se cambian en «⏱️ Los tiempos de la página».", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("⏱️ Los tiempos de la página, a tu elección: cada plazo (cuándo un pedido al proveedor está atrasado, cuánto vale un presupuesto, cuándo vuelve sola a Mostrador la cuenta elegida, cada cuánto se recuerda cobrar, cuánto queda lo borrado en la papelera…) se cambia en un solo lugar, para todos. Por ejemplo, el pedido atrasado a los 7 días en vez de 5. Está en «⏱️ Los tiempos de la página».", "🗂️ Administrar → 👥 Usuarios"),
     ("🚚 Pedidos a proveedores con seguimiento: después de mandar el mensaje, «📝 Anotar como pedido». Llega solo cuando lo cargás en «Entró mercadería» (si viene en partes, cuando llegó todo); lo que no llegó en 5 días va a la campanita, con «⏰ Reclamarle». Las listas marcan lo ya pedido, para no pedirlo dos veces, y «⏱️ Cuánto tarda cada proveedor» dice cuántos días tarda cada uno.", "📊 Estadísticas → 📌 Para pedir"),
     ("🔁 «Lo que suele llevar»: con la cuenta de un taller elegida, lo que compra siempre, para sumarlo con un toque.", "🧾 Ventas"),
@@ -834,6 +835,10 @@ TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR = (
      "Lo entregado que sigue afuera se marca en rojo y se avisa a las", "horas", 1, 720),
     ("💳 Cuentas corrientes", "DIAS_PARA_VOLVER_A_RECORDAR",
      "«📲 Cobrar lo vencido»: volver a recordarle a una cuenta a los", "días", 1, 90),
+    ("💳 Cuentas corrientes", "DIAS_SIN_VENIR_PARA_EXTRANAR",
+     "«😴 Las cuentas que dejaron de venir»: las que no compran hace", "días", 7, 365),
+    ("💳 Cuentas corrientes", "DIAS_DEL_HABITO",
+     "…y antes compraban seguido en los", "días", 14, 365),
     ("💳 Cuentas corrientes", "HORAS_QUE_VALE_UN_PERMISO",
      "Un permiso para pasar el límite de crédito vale", "horas", 1, 720),
     ("💳 Cuentas corrientes", "VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS",

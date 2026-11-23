@@ -655,6 +655,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "Después de mandarlo tocá «✅ Ya se lo recordé»: pasa al final por "
      "{DIAS_PARA_VOLVER_A_RECORDAR} días.",
      "💳 Cuentas corrientes", ""),
+    ("no_vienen", "Ver las cuentas que dejaron de venir",
+     "dejaron dejo venir viene vino perdido perdidos perdimos extranar extrano clientes "
+     "habituales compraban no compra mas desaparecio",
+     "Abrí «😴 Las cuentas que dejaron de venir»: las que compraban seguido (3 veces o más en "
+     "{DIAS_DEL_HABITO} días) y hace {DIAS_SIN_VENIR_PARA_EXTRANAR} días o más que no compran "
+     "nada. Cada una con «📲 Escribirle» (el WhatsApp ya escrito) y, después, «✅ Ya le "
+     "escribí». Si vuelve a comprar, sale sola.",
+     "💳 Cuentas corrientes", ""),
     ("limite", "Cambiar el límite, el descuento o el plazo de una cuenta",
      "limite credito tope descuento plazo dias vencimiento interes mora tasa bcra punitorio "
      "configurar cuenta",
