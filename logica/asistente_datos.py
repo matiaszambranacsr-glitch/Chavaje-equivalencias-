@@ -28,7 +28,7 @@ FUNCIONES_QUE_PUEDE_USAR = (
     "resumen_de_la_caja", "ventas_a_cobrar", "pedidos_pendientes", "pendientes_por_pedido",
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
     "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "garantias", "hoy_aca",
-    "miles", "texto_para_markdown", "presupuestos_para_seguir",
+    "miles", "texto_para_markdown", "presupuestos_para_seguir", "pedidos_sin_llegar",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -74,6 +74,7 @@ _CAJA, _DEPOSITO, _ADMINISTRAR, _VEHICULOS = "💵 Caja", "📦 Depósito", "�
 _MENSAJES = "💬 Mensajes"
 _DEVOLUCIONES = "↩️ Devoluciones"
 _BUSCADOR = "🔍 Buscador"
+_ESTADISTICAS = "📊 Estadísticas"
 
 
 def _asis_nombre(texto):
@@ -250,6 +251,15 @@ def _dato_de_lo_pendiente(contexto):
                           "🔍 Buscador.")
         if _tocan_p or _contestaron_p:
             botones += _asis_ir_a(_BUSCADOR, contexto)
+    # Lo pedido al proveedor que no llegó (ver «LOS PEDIDOS A LOS PROVEEDORES»): las marcas y
+    # cuántos, nada de precios.
+    if _ESTADISTICAS in visibles and contexto.get("nivel") in ("operador", "admin"):
+        _atrasados = [x for x in pedidos_sin_llegar() if x["Atrasado"]]
+        if _atrasados:
+            lineas.append(f"🚚 **{miles(len(_atrasados))}** pedido(s) a proveedores sin llegar "
+                          f"hace más de {DIAS_PARA_RECLAMAR_EL_PEDIDO} días: «⏰ Reclamarle», en "
+                          "«🚚 Pedido y sin llegar» (📌 Para pedir).")
+            botones += _asis_ir_a(_ESTADISTICAS, contexto)
     if _DEVOLUCIONES in visibles:
         _por_reclamar = [g for g in garantias() if not g["reclamo"]]
         if _por_reclamar:

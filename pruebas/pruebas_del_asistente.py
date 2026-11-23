@@ -1024,6 +1024,10 @@ def probar(L):
               "'el secreto de Rosa', datetime('now'), 2, datetime('now'))")
     c.execute("INSERT INTO presupuestos_para_seguir (cliente, telefono, items, total, creado_en) "
               "VALUES ('Rosa', '11 0000-0000', '[]', 0, datetime('now', '-1 day'))")
+    # Un pedido al proveedor atrasado y uno de hoy.
+    c.executemany("INSERT INTO pedidos_a_proveedores (producto_id, cantidad, pedido_en) "
+                  "VALUES (?, 2, datetime('now', ?))", [(_prod_d[0], "-9 days"),
+                                                       (_prod_d[0], "-1 hours")])
     ns["conn"].commit()
     _todas_d = list(ns["ORDEN_DE_LAS_PAGINAS"])
     _roles_d = {
@@ -1089,6 +1093,10 @@ def probar(L):
     cierto("lo pendiente junta la caja, el depósito y las cuentas vencidas",
            all(x in _pend_d["texto"] for x in ("esperan en la caja", "depósito",
                                                "saldo vencido")), _pend_d["texto"])
+    cierto("y lo pedido al proveedor que no llegó (el de hoy no)",
+           "🚚 **1** pedido(s) a proveedores sin llegar" in _pend_d["texto"], _pend_d["texto"])
+    cierto("eso no le llega a quien no tiene 📊 Estadísticas",
+           "a proveedores" not in responder("que tengo pendiente", _roles_d["depósito"])["texto"])
     cierto("y los que contestaron por el chat sobre su presupuesto (sin decir qué escribieron)",
            "**1** cliente(s) te contestaron por el chat" in _pend_d["texto"]
            and "secreto" not in _pend_d["texto"], _pend_d["texto"])
