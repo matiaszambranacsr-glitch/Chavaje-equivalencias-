@@ -222,6 +222,25 @@ if pagina == PAGINAS[11]:
             _validas = [v for v in _del_dia if not v["anulada"]]
             _caja = cierre_de_caja(_dia_txt)
             _devs_dia = devoluciones_del_dia(_dia_txt)
+            # LA SEMANA, hasta el día elegido (ver resumen_de_la_semana()): lo vendido
+            # contra la anterior y lo que más piden y no hay. Perezoso: son 14 días de caja.
+            # Siempre, aunque ese día no haya ventas: el lunes a la mañana es cuando sirve.
+            _pop_semana = st.popover("📲 Resumen de la semana para el dueño",
+                                     key="pop_resumen_semana", width="stretch",
+                                     on_change="rerun")
+            if _pop_semana.open:
+                with _pop_semana:
+                    _semana = resumen_de_la_semana(_dia_txt, con_ganancia=es_admin())
+                    _clave_sem = ("resumen_semana_"
+                                  + hashlib.md5(_semana.encode()).hexdigest()[:8])
+                    _sem_final = st.text_area("Resumen:", value=_semana, height=240,
+                                              key=_clave_sem) or _semana
+                    _tel_d = whatsapp_del_duenio()
+                    st.link_button("📲 Mandárselo por WhatsApp"
+                                   if numero_para_whatsapp(_tel_d)
+                                   else "📲 Abrir WhatsApp (elegís a quién)",
+                                   link_de_whatsapp(_tel_d, _sem_final), width="stretch",
+                                   key=f"walink__{_clave_sem}")
             if not _del_dia and not _devs_dia:
                 st.caption("Ese día no hubo ventas.")
             else:

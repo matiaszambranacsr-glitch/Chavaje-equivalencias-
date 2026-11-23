@@ -189,7 +189,9 @@ if pagina == PAGINAS[0]:
             # Con la cuenta elegida, el presupuesto dice para quién es. Los precios son los de
             # lista: el descuento de la cuenta no se ve (ver «EL DESCUENTO NO SE VE»).
             _texto = ((f"Para: {cuenta_elegida()['nombre']}\n\n" if cuenta_elegida() else "")
-                      + "\n".join(_lineas) + f"\n\nTOTAL: ${miles(_total, 0)}")
+                      + "\n".join(_lineas) + f"\n\nTOTAL: ${miles(_total, 0)}"
+                      # Hasta cuándo vale: ver DIAS_DE_VALIDEZ_DEL_PRESUPUESTO.
+                      + f"\nPrecios válidos por {DIAS_DE_VALIDEZ_DEL_PRESUPUESTO} días.")
             # Mandarlo derecho, sin copiar y pegar: WhatsApp pregunta a quién (lo propuso una
             # revisión con Gemini, «presupuestos con enlace directo para mandar al cliente»).
             st.link_button("📲 Mandar el presupuesto por WhatsApp",

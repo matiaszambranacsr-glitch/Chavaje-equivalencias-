@@ -196,7 +196,8 @@ SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "
 SUB_DEVOLUCIONES = ["📦 Al depósito", "🧾 De un cliente", "🏷️ Etiquetas", "🔧 Garantías"]
 # El depósito, separado en lo de todos los días (buscar lo pedido) y el mapa: dónde está cada
 # cosa, ubicar lo que no tiene lugar y armar las estanterías.
-SUB_DEPOSITO = ["⏳ Para buscar", "🗺️ Mapa", "📍 Ubicar", "🏗️ Armar el depósito"]
+SUB_DEPOSITO = ["⏳ Para buscar", "🗺️ Mapa", "📍 Ubicar", "🏗️ Armar el depósito",
+                "📦 Entró mercadería"]
 # Qué solapas tiene cada pantalla, y con qué clave de la sesión se elige.
 SOLAPAS_DE_LA_PAGINA = {
     "📊 Estadísticas": (SUB_STATS, "sub_stats"),
@@ -254,6 +255,8 @@ PARA_QUE_SIRVE_LA_SOLAPA = {
     "📍 Ubicar": "Ponerle lugar a lo que no tiene: escaneá el estante y después lo que hay en él.",
     "🏗️ Armar el depósito": "Los depósitos, sus pisos y sus estanterías: armalo en un minuto y "
                            "retocalo.",
+    "📦 Entró mercadería": "Cargar el stock de lo que entró: escaneando cada cosa o con el "
+                          "remito en Excel; avisa si un cliente lo esperaba.",
 }
 
 
@@ -602,8 +605,13 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-22d"
+VERSION_DE_LO_NUEVO = "2026-11-23"
 LO_NUEVO = (
+    ("📦 «Entró mercadería»: cargá el stock escaneando cada cosa (o con el remito en Excel), revisalo y «✅ Sumar al stock». Si un cliente esperaba algo de lo que entró, te avisa para escribirle.", "📦 Depósito → 📦 Entró mercadería"),
+    ("💲 Presupuestos viejos: si subieron los precios desde que lo mandaste, se dice cuánto; pasados 7 días se arma con los de hoy (y el mensaje dice «precios válidos por 7 días»).", "🔍 Buscador"),
+    ("📊 «Resumen de la semana para el dueño»: lo vendido contra la semana anterior, lo que más salió y lo que más pidieron y no había, para mandar por WhatsApp.", "💵 Caja"),
+    ("🌙 Respuesta fuera de horario: con el horario cargado, al que escribe con el local cerrado se le contesta solo («estamos cerrados, te contestamos apenas abramos»), y el chat sigue sin leer.", "🗂️ Administrar → 💬 Mensajería y cobros"),
+    ("💾 Si la copia automática no se hace, una vez por semana sale arriba el botón para bajar el backup (con «Más tarde»).", "📊 Estadísticas → 💾 Backup y config"),
     ("⏳ Lo que te piden por el chat y no hay: «⏳ Anotar que lo espera» lo deja en Consultas de clientes con su WhatsApp, y lo del catálogo sin stock sale con «📲 Avisarle» cuando entra. Lo que no está en el catálogo suma en «Búsquedas sin resultado», para ver qué traer.", "💬 Mensajes"),
     ("📌 El presupuesto que le mandás a un chat de WhatsApp («💬 Mandárselo») queda solo en «📋 Presupuestos para seguir», para preguntarle si no contesta. Y si ya te contestó por el chat, sale primero con «💬 Te contestó: ver el chat», en vez de preguntarle de nuevo.", "🔍 Buscador"),
     ("🧩 Lo que te piden al WhatsApp del teléfono, pegalo en «🧩 Pegar el pedido de un cliente»: lo separa igual que el chat, elegís o descartás cada cosa y arma el presupuesto. Si buscás una frase con varias cosas, ofrece separarla.", "🔍 Buscador"),
@@ -1282,6 +1290,7 @@ AYUDAS_DEL_NAVEGADOR = r"""
   var CAJA_DE_CADA_PANTALLA = [
     ["🗺️ Mapa", ".st-key-mapa_buscar input"], ["📍 Ubicar", ".st-key-ubicar_escaneo input"],
     ["📦 Al depósito", ".st-key-dvl_escaneo input"],
+    ["📦 Entró mercadería", ".st-key-entro_codigo input"],
     ["🧾 De un cliente", ".st-key-venta_buscar_dev input"],
     ["🧾 Ventas", ".st-key-venta_buscar input"], ["🔍 Buscador", ".st-key-busqueda_input input"]];
   var conMouse = !!(window.matchMedia && window.matchMedia("(pointer: fine)").matches);

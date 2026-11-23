@@ -493,6 +493,25 @@ def probar(L):
     esperar("la ganancia, solo si se pide",
             ("Ganancia" in ns["resumen_del_dia"](),
              "💰 Ganancia estimada: $" in ns["resumen_del_dia"](con_ganancia=True)), (False, True))
+    # EL RESUMEN DE LA SEMANA: lo vendido contra la semana anterior, lo que más salió y lo que
+    # más pidieron y no había (lo buscado sin resultado, también en los pedidos del chat).
+    c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada) "
+              "VALUES (datetime('now', '-8 days'), 'ana', 'Efectivo', 1000, 1, 0)")
+    for _t in ("bomba nafta gol", "bomba nafta gol", "kit embrague palio"):
+        ns["registrar_busqueda_sin_resultado"](_t)
+    conn.commit()
+    _semana = ns["resumen_de_la_semana"]().split("\n")
+    esperar("la semana: título, lo vendido y contra la anterior",
+            (_semana[0].startswith("📊 Semana del "), _semana[1].startswith("💵 Vendido: $"),
+             any("contra la semana anterior ($1.000)" in r for r in _semana)), (True, True, True))
+    esperar("lo que más salió y lo que más pidieron y no había",
+            (any(r.startswith("🏆 Lo que más salió: ") and "A1" in r for r in _semana),
+             "🔎 Lo que más pidieron y no había: bomba nafta gol ×2, kit embrague palio"
+             in _semana), (True, True))
+    esperar("la ganancia de la semana, solo si se pide",
+            ("Ganancia" in "\n".join(_semana),
+             "💰 Ganancia estimada: $" in ns["resumen_de_la_semana"](con_ganancia=True)),
+            (False, True))
     _id_medida = uno("SELECT id FROM ventas_devoluciones WHERE motivo = 'medida' "
                      "ORDER BY id DESC LIMIT 1")
     esperar("lo de otra medida no se puede reclamar", ns["marcar_reclamo"]([_id_medida],

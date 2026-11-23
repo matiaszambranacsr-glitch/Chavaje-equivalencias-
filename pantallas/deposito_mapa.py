@@ -8,7 +8,8 @@ que elige la solapa."""
 # DEPÓSITO → EL MAPA: dónde está cada cosa, ubicar y armar las estanterías
 # ============================================================
 # Cómo funciona, en logica/mapa.py («EL MAPA DEL DEPÓSITO»).
-if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
+# Las solapas del mapa (1 a 3): «📦 Entró mercadería», la última, está en pantallas/deposito.py.
+if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:4]:
     _depositos = depositos_y_pisos()
     _pisos = [p_ for d_ in _depositos for p_ in d_["pisos"]]
     _por_id = {p_["id"]: p_ for p_ in _pisos}

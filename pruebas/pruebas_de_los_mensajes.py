@@ -892,6 +892,75 @@ def probar():
         at.session_state["pedido_pegado"] = ""
         at.session_state["modo_busqueda"] = "Código"
 
+        # LA RESPUESTA FUERA DE HORARIO: el horario se entiende como se dice, se contesta solo a
+        # lo escrito con el local cerrado, una vez, y el chat sigue sin leer.
+        esperar("el horario, como se dice",
+                (ns["descripcion_del_horario"]("lun-vie 8:00-18:00, sáb 8:30 a 13"),
+                 ns["esta_abierto"]("lun-vie 8:00-18:00", "2026-11-23 12:00:00"),   # lun 9:00
+                 ns["esta_abierto"]("lun-vie 8:00-18:00", "2026-11-22 12:00:00"),   # dom 9:00
+                 ns["esta_abierto"]("cualquier cosa", "2026-11-23 12:00:00")),
+                ("lunes a viernes de 8:00 a 18:00; sábado de 8:30 a 13:00", True, False, None))
+        try:
+            ns["guardar_respuesta_fuera_de_horario"](True, "cuando se pueda", "x")
+            fallas.append("se guardó prendida con un horario que no se entiende")
+        except ValueError:
+            pass
+        _dias_fh = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
+        _ahora_fh = datetime.now()
+        _msj_fh = _ahora_fh - timedelta(hours=1)
+        _aca_fh = _msj_fh - timedelta(hours=3)
+        c.execute("INSERT INTO chats (canal, externo, nombre, ultimo_texto, ultimo_en, "
+                  "ultimo_entra, ultimo_del_cliente_en, sin_leer) VALUES ('whatsapp', "
+                  "'5491177778888', 'Noche', 'hola?', ?, 1, ?, 1)",
+                  (_msj_fh.strftime("%Y-%m-%d %H:%M:%S"),) * 2)
+        _chat_fh = c.lastrowid
+        # Los otros chats de la prueba, como ya contestados solos: se mira solo este.
+        c.execute("UPDATE chats SET auto_respondido_en = datetime('now', '+1 day') WHERE id <> ?",
+                  (_chat_fh,))
+        ns["conn"].commit()
+        # Escrito con el local abierto (el horario es justo esa hora): no se contesta solo.
+        ns["guardar_respuesta_fuera_de_horario"](
+            True, f"{_dias_fh[_aca_fh.weekday()]} {_aca_fh.hour}:00-{_aca_fh.hour + 1}:00",
+            "Estamos cerrados, te contestamos mañana")
+        meta.pedidos.clear()
+        esperar("lo escrito con el local abierto lo contesta una persona",
+                (ns["contestar_fuera_de_horario"](_ahora_fh + timedelta(hours=1)),
+                 len(meta.pedidos)), (0, 0))
+        # Escrito con el local cerrado: se contesta solo, una vez.
+        ns["guardar_respuesta_fuera_de_horario"](
+            True, f"{_dias_fh[(_aca_fh.weekday() + 3) % 7]} 8:00-18:00",
+            "Estamos cerrados, te contestamos mañana")
+        esperar("escrito con el local cerrado: se contesta solo, una sola vez",
+                (ns["contestar_fuera_de_horario"](), ns["contestar_fuera_de_horario"](),
+                 [p["json"]["text"]["body"] for p in meta.pedidos
+                  if p["url"].endswith("/NUM1/messages")]),
+                (1, 0, ["Estamos cerrados, te contestamos mañana"]))
+        esperar("queda en el chat como automática, y el chat sigue sin leer y esperando",
+                (c.execute("SELECT quien FROM chat_mensajes WHERE chat_id = ? AND entra = 0",
+                           (_chat_fh,)).fetchone()[0],
+                 tuple(c.execute("SELECT sin_leer, ultimo_entra FROM chats WHERE id = ?",
+                                 (_chat_fh,)).fetchone())),
+                (ns["QUIEN_RESPONDE_SOLO"], (1, 1)))
+        # La que mandó el relevo llega como eco «automatica»: se ve, no da el chat por atendido,
+        # y la app no contesta otra vez.
+        c.execute("UPDATE chats SET auto_respondido_en = NULL WHERE id = ?", (_chat_fh,))
+        _eco = {"object": "whatsapp_business_account", "entry": [{"changes": [{"value": {
+            "metadata": {"phone_number_id": "NUM1"}, "message_echoes": [{
+                "id": "wamid.auto-1", "to": "5491177778888", "type": "text",
+                "timestamp": str(int(time.time())), "text": {"body": "Estamos cerrados"},
+                "automatica": True}]}}]}]}
+        _leidos = ns["mensajes_del_aviso"](json.dumps(_eco))
+        esperar("el eco del relevo se lee como respuesta automática",
+                [(m["entra"], m["automatica"]) for m in _leidos], [(False, True)])
+        for _m in _leidos:
+            ns["guardar_mensaje_de_afuera"](_m)
+        meta.pedidos.clear()
+        esperar("el chat sigue sin leer y la app no contesta otra vez",
+                (tuple(c.execute("SELECT sin_leer, ultimo_entra FROM chats WHERE id = ?",
+                                 (_chat_fh,)).fetchone()),
+                 ns["contestar_fuera_de_horario"](), len(meta.pedidos)), ((1, 1), 0, 0))
+        ns["guardar_respuesta_fuera_de_horario"](False, "", "")
+
         # En la ficha del auto, un teléfono que no sirve para WhatsApp se dice (sin característica,
         # los avisos no sabrían a quién ir); uno que sirve, no.
         c.execute("INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono) "
@@ -1118,6 +1187,40 @@ r = await pedir("/confirmar", { method: "POST", body: JSON.stringify({ ids: [avi
 salida.confirmar_sin_clave = [r.status, kv.size];
 r = await pedir("/confirmar", { method: "POST", body: JSON.stringify({ ids: [avisos[0].id, "otra-cosa"] }), headers: { Authorization: "Bearer clave-del-relevo-de-prueba" } });
 salida.confirmar = [r.status, kv.size];
+// LA RESPUESTA FUERA DE HORARIO: contesta al instante al que escribe con el local cerrado, una
+// vez, y guarda lo mandado como eco «automatica».
+const kv2 = new Map();
+const AVISOS2 = {
+  async put(k, v) { kv2.set(k, v); }, async get(k) { return kv2.has(k) ? kv2.get(k) : null; },
+  async delete(k) { kv2.delete(k); },
+  async list({ prefix }) { return { keys: [...kv2.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })) }; },
+};
+const llamadas = [];
+globalThis.fetch = async (url, opciones) => {
+  llamadas.push({ url, auth: opciones.headers.Authorization, body: JSON.parse(opciones.body) });
+  return new Response(JSON.stringify({ messages: [{ id: "wamid.auto" + llamadas.length }] }),
+                      { status: 200, headers: { "Content-Type": "application/json" } });
+};
+const diasJs = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"];
+const hoyJs = (new Date(Date.now() - 3 * 3600 * 1000).getUTCDay() + 6) % 7;
+const envFH = { ...env, AVISOS: AVISOS2, WHATSAPP_TOKEN: "permiso-de-prueba",
+                HORARIO: diasJs[(hoyJs + 3) % 7] + " 8:00-18:00", RESPUESTA: "Estamos cerrados" };
+const conNumero = JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { metadata: { phone_number_id: "NUM1" }, messages: [{ id: "wamid.9", from: "5491100000001", type: "text", text: { body: "hola?" } }] } }] }] });
+const pedirFH = async (cuerpo, e) => relevo.fetch(new Request("https://relevo.example/webhook", { method: "POST", body: cuerpo, headers: { "X-Hub-Signature-256": await firmar(cuerpo) } }), e);
+r = await pedirFH(conNumero, envFH);
+const ecos = [...kv2.entries()].filter(([k]) => k.startsWith("m:")).map(([, v]) => JSON.parse(v))
+  .filter(a => a.entry[0].changes[0].value.message_echoes);
+salida.fuera_de_horario = [r.status, llamadas.length, llamadas[0] && llamadas[0].url,
+  llamadas[0] && llamadas[0].body.to, llamadas[0] && llamadas[0].body.text.body,
+  llamadas[0] && llamadas[0].auth, ecos.length,
+  ecos[0] && ecos[0].entry[0].changes[0].value.message_echoes[0].automatica];
+r = await pedirFH(conNumero.replace("wamid.9", "wamid.10"), envFH);
+salida.una_vez = llamadas.length;
+llamadas.length = 0; kv2.clear();
+r = await pedirFH(conNumero, { ...envFH, HORARIO: "lun-dom 0:00-24:00" });
+salida.abierto = [r.status, llamadas.length];
+r = await pedirFH(conNumero, { ...envFH, WHATSAPP_TOKEN: "" });
+salida.sin_permiso = [r.status, llamadas.length];
 const sinClave = { ...env, CLAVE_DEL_RELEVO: "" };
 r = await relevo.fetch(new Request("https://relevo.example/avisos", { headers: { Authorization: "Bearer " } }), sinClave);
 salida.relevo_sin_clave_puesta = r.status;
@@ -1129,6 +1232,9 @@ _LO_QUE_TIENE_QUE_DAR_EL_RELEVO = {
     "sin_firma": [401, 1], "solo_estados": [200, 1], "enorme": [413, 1], "avisos_sin_clave": 401,
     "avisos_clave_mala": 401, "avisos": [200, 1, True], "cuantos": 1,
     "confirmar_sin_clave": [401, 1], "confirmar": [200, 0], "relevo_sin_clave_puesta": 401,
+    "fuera_de_horario": [200, 1, "https://graph.facebook.com/v26.0/NUM1/messages",
+                         "5491100000001", "Estamos cerrados", "Bearer permiso-de-prueba", 1, True],
+    "una_vez": 1, "abierto": [200, 0], "sin_permiso": [200, 0],
 }
 
 

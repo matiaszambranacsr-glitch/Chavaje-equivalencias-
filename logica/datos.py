@@ -3275,6 +3275,9 @@ def _esquema_de_los_mensajes(c):
         creado_en TEXT DEFAULT (datetime('now')),
         UNIQUE(canal, externo)
     )""")
+    # Cuándo se le contestó solo (fuera de horario): una vez cada tanto, no a cada mensaje.
+    if "auto_respondido_en" not in [f[1] for f in c.execute("PRAGMA table_info(chats)")]:
+        c.execute("ALTER TABLE chats ADD COLUMN auto_respondido_en TEXT")
     # externo_id es el número que le pone Meta al mensaje: el mismo mensaje traído dos veces
     # (el relevo que reintenta, el aviso y la pregunta) entra una sola vez.
     c.execute("""CREATE TABLE IF NOT EXISTS chat_mensajes (

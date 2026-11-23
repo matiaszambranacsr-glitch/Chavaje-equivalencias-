@@ -142,6 +142,7 @@ específico, y las pantallas quedan todas al final:
         · CUÁNTO TARDA EL DEPÓSITO
         · ELEGIR UNA CUENTA ENTRE MILES
         · A QUIÉN SE ESTÁ ATENDIENDO
+        · ENTRÓ MERCADERÍA: EL STOCK PROPIO
     logica/ventas.py
         · VENTAS DEL MOSTRADOR
         · DEVOLVER ALGO DE UNA VENTA
@@ -169,6 +170,7 @@ específico, y las pantallas quedan todas al final:
         · GUARDAR LO QUE LLEGA
         · LA BANDEJA
         · CONTESTAR
+        · LA RESPUESTA FUERA DE HORARIO
         · DEL CHAT A LA COTIZACIÓN, Y DE VUELTA
     logica/asistente.py
         · EL ASISTENTE: QUÉ PUEDE Y QUÉ NO
@@ -830,6 +832,32 @@ if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
                     st.rerun()
     except Exception as _err:             # lo nuevo no puede impedir que la app abra
         anotar_error("lo_nuevo", _err)
+
+
+# EL BACKUP, UNA VEZ POR SEMANA, A LA VISTA (ver hay_que_recordar_el_backup()).
+if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
+    try:
+        _hace_backup = hay_que_recordar_el_backup()
+        if _hace_backup is not False:
+            with st.container(border=True, key="recordatorio_del_backup"):
+                st.markdown("**💾 " + ("Nunca bajaste un backup" if _hace_backup is None else
+                                      f"Hace {miles(_hace_backup)} días que no bajás un backup")
+                            + "**, y la copia automática no se está haciendo: si la app se "
+                              "reinicia, se pierde lo cargado después.")
+                _bk1, _bk2 = st.columns([3, 1])
+                _bk1.download_button(
+                    "⬇️ Bajarlo ahora", data=generar_backup_sin_fotos,
+                    file_name=f"equivalencias_backup_{ahora_aca():%Y%m%d_%H%M}.db",
+                    # Sin type="primary": el estilo de los botones principales no alcanza a los
+                    # de descarga y el texto quedaba oscuro sobre oscuro (se vio en el celular).
+                    on_click=marcar_backup_bajado, key="bajar_backup_semanal",
+                    width="stretch", help="La base entera sin las fotos (se vuelven a bajar "
+                                          "solas). Guardalo en la compu o en un pendrive.")
+                _bk2.button("Más tarde", key="backup_mas_tarde", width="stretch",
+                            on_click=posponer_el_recordatorio_del_backup,
+                            help=f"Vuelve a salir en {DIAS_PARA_RECORDAR_EL_BACKUP} días.")
+    except Exception as _err:             # el recordatorio no puede impedir que la app abra
+        anotar_error("recordatorio_del_backup", _err)
 
 
 # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta, a quien puede darlos, en cualquier

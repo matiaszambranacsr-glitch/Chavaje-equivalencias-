@@ -1149,3 +1149,266 @@ def sumar_al_presupuesto(fila, cantidad=1):
         carrito[fila["ID"]] = {"codigo": fila["Codigo"], "marca": fila["Marca"],
                                "descripcion": fila.get("Descripcion") or "",
                                "precio": fila.get("Precio") or 0, "cantidad": int(cantidad)}
+
+
+# ============================================================================================
+# ENTRÓ MERCADERÍA: EL STOCK PROPIO
+# ============================================================================================
+# En la copia de la base real, ninguno de los 86.946 productos tenía stock: el stock entraba solo
+# si la lista del proveedor traía esa columna (y ese es el stock del proveedor, no el del
+# local), o leyendo la foto del remito con la IA, que necesita una clave. Sin stock no andan
+# «⏳ Anotar que lo espera» con su «📲 Avisarle», el «sin stock» de los pedidos del chat ni el
+# orden por lo que hay. «📦 Entró mercadería» lo carga sin IA: con el lector de códigos (o
+# escribiendo el código) y la cantidad, o con el remito en Excel o CSV. Se arma una lista, se
+# revisa, y «✅ Sumar al stock» la suma de una (y lo anota en el registro de cambios). Las
+# ventas y lo entregado del depósito ya lo descuentan.
+ENTRADAS_RECORDADAS = 50        # cuántas entradas sumadas se recuerdan, para no sumar dos veces
+
+
+def productos_con_el_codigo(texto):
+    """Los productos con ese código o código de barras, de las listas (no las referencias de
+    fábrica, que no son algo que entra): [dict] con ID, Codigo, Marca, Descripcion y Stock."""
+    limpio = sanitizar(str(texto or ""))
+    if not limpio:
+        return []
+    return [dict(f) for f in c.execute(
+        """SELECT p.id AS "ID", p.codigo_raw AS "Codigo", m.nombre AS "Marca",
+                  p.descripcion AS "Descripcion", p.stock AS "Stock"
+           FROM productos p JOIN marcas m ON m.id = p.marca_id
+           WHERE (p.codigo_clean = ? OR p.codigo_barras = ?) AND m.tipo <> 'OEM'
+           ORDER BY m.nombre LIMIT 20""", (limpio, limpio)).fetchall()]
+
+
+def sumar_a_la_entrada(producto_id, cantidad=1):
+    """Suma a la lista de lo que entró (en la sesión, hasta «✅ Sumar al stock»)."""
+    lista = st.session_state.setdefault("entro_lista", {})
+    clave = str(int(producto_id))
+    lista[clave] = lista.get(clave, 0) + max(1, int(cantidad or 1))
+    # El campo de la cantidad guarda lo suyo: escaneado otra vez, tiene que mostrar la nueva.
+    poner_en_el_campo(f"entro_cant_{clave}", lista[clave])
+
+
+def huella_de_la_entrada(lista):
+    return hashlib.md5(json.dumps(sorted((str(k), int(v)) for k, v in lista.items()))
+                       .encode()).hexdigest()[:16]
+
+
+def cuando_se_sumo_la_entrada(lista):
+    """Si esta misma entrada (los mismos productos y cantidades) ya se sumó: cuándo, o None.
+    El mismo remito subido dos veces duplicaba el stock."""
+    try:
+        return json.loads(obtener_config("entradas_sumadas", "") or "{}").get(
+            huella_de_la_entrada(lista))
+    except ValueError:
+        return None
+
+
+def sumar_al_stock(lista):
+    """Suma lo que entró al stock: `lista` es {producto_id: cantidad}. Devuelve (productos
+    sumados, consultas de clientes que esperaban algo de esto y ahora tienen stock)."""
+    exigir_nivel("empleado", "sumar mercadería al stock")
+    ya_estaban = {x["_id"] for x in consultas_que_ahora_hay_en_stock()}
+    sumados = 0
+    with db_lock, transaccion():
+        for pid, cantidad in lista.items():
+            fila = c.execute("SELECT stock FROM productos WHERE id = ?", (int(pid),)).fetchone()
+            if not fila or int(cantidad or 0) <= 0:
+                continue
+            c.execute("UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ?",
+                      (int(cantidad), int(pid)))
+            anotar_cambio("entró mercadería", "producto", pid, fila["stock"],
+                          (fila["stock"] or 0) + int(cantidad))
+            sumados += 1
+        try:
+            sumadas = json.loads(obtener_config("entradas_sumadas", "") or "{}")
+        except ValueError:
+            sumadas = {}
+        sumadas[huella_de_la_entrada(lista)] = ahora_aca().strftime("%d/%m %H:%M")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('entradas_sumadas', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (json.dumps(dict(list(sumadas.items())[-ENTRADAS_RECORDADAS:])),))
+    ahora = [x for x in consultas_que_ahora_hay_en_stock() if x["_id"] not in ya_estaban]
+    return sumados, ahora
+
+
+def _columna_que_dice(titulos, patron):
+    """La primera columna cuyo título encaja con `patron`, o None."""
+    for i, t in enumerate(titulos):
+        if re.search(patron, normalizar_texto(str(t or "")).upper()):
+            return i
+    return None
+
+
+def leer_el_remito_de_entrada(filas, col_codigo, col_cantidad, desde=1):
+    """Las filas del remito, cotejadas con el catálogo: (para sumar [(producto_id, cantidad)],
+    no están [código], con varias marcas [código]). Las que tienen varias marcas con ese código
+    se eligen a mano, de a una: sumar a ciegas a la primera era cargar stock a otra marca."""
+    sumar, no_estan, varias = [], [], []
+    for fila in filas[desde:]:
+        if col_codigo >= len(fila) or not str(fila[col_codigo] or "").strip():
+            continue
+        codigo = str(fila[col_codigo]).strip()
+        cantidad = leer_numero(fila[col_cantidad]) if col_cantidad < len(fila) else None
+        if not cantidad or cantidad <= 0:
+            continue
+        encontrados = productos_con_el_codigo(codigo)
+        if len(encontrados) == 1:
+            sumar.append((encontrados[0]["ID"], int(round(cantidad))))
+        elif encontrados:
+            varias.append(codigo)
+        else:
+            no_estan.append(codigo)
+    return sumar, no_estan, varias
+
+
+def mostrar_entro_mercaderia():
+    """La solapa «📦 Entró mercadería» del Depósito."""
+    ayuda("Cargá lo que entró: **escaneá el código** (o escribilo) y la cantidad, y Enter; o "
+          "**subí el remito** en Excel o CSV y elegí qué columna es el código y cuál la "
+          "cantidad. Se arma la lista de abajo: revisala y tocá **«✅ Sumar al stock»**. Lo "
+          "mismo escaneado dos veces suma dos. Si un código está en varias marcas, elegís cuál "
+          "entró. Las ventas y lo entregado del depósito ya descuentan del stock. Si alguien "
+          "esperaba algo de lo que entró, te avisa para que le escribas.")
+    lista = st.session_state.setdefault("entro_lista", {})
+    with st.form("form_entro_mercaderia", clear_on_submit=True, border=False):
+        _c1, _c2, _c3 = st.columns([4, 1, 1], vertical_alignment="bottom")
+        codigo = _c1.text_input("Código (escaneado o escrito):", key="entro_codigo",
+                                placeholder="Escaneá o escribí el código y Enter")
+        cantidad = _c2.number_input("Cant.", 1, 9999, 1, key="entro_cant")
+        sumar = _c3.form_submit_button("➕ Sumar", width="stretch")
+    if sumar and str(codigo or "").strip():
+        encontrados = productos_con_el_codigo(codigo)
+        if len(encontrados) == 1:
+            sumar_a_la_entrada(encontrados[0]["ID"], cantidad)
+            st.success(f"➕ {encontrados[0]['Marca']} {encontrados[0]['Codigo']} × "
+                       f"{miles(cantidad)}")
+        elif encontrados:
+            st.session_state["entro_elegir"] = {"codigo": str(codigo).strip(),
+                                                "cantidad": int(cantidad),
+                                                "opciones": [x["ID"] for x in encontrados]}
+        else:
+            st.warning(f"«{str(codigo).strip()}» no está en el catálogo. Si es nuevo, cargalo "
+                       "con su lista en 📁 Cargar Excel.")
+    _elegir = st.session_state.get("entro_elegir")
+    if _elegir:
+        _ops = {x["ID"]: x for x in productos_con_el_codigo(_elegir["codigo"])}
+        st.info(f"«{_elegir['codigo']}» está en {len(_ops)} marcas: ¿cuál entró?")
+        _cual = st.selectbox(
+            "Cuál entró:", list(_ops), label_visibility="collapsed",
+            key=f"entro_cual_{hashlib.md5(_elegir['codigo'].encode()).hexdigest()[:8]}",
+            # rótulo fijo: marca, código y descripción.
+            format_func=lambda x: f"{_ops[x]['Marca']} {_ops[x]['Codigo']} — "
+                                  f"{str(_ops[x]['Descripcion'] or '')[:60]}")
+
+        def _elegido(producto_id, cantidad_elegida):
+            sumar_a_la_entrada(producto_id, cantidad_elegida)
+            st.session_state.pop("entro_elegir", None)
+        _e1, _e2 = st.columns(2)
+        _e1.button("➕ Esa", key="entro_cual_si", type="primary", width="stretch",
+                   on_click=_elegido, args=(_cual, _elegir["cantidad"]))
+        _e2.button("Ninguna", key="entro_cual_no", width="stretch",
+                   on_click=lambda: st.session_state.pop("entro_elegir", None))
+
+    # EL REMITO EN EXCEL O CSV.
+    _exp_remito = st.expander("📄 Subir el remito (Excel o CSV)", key="exp_entro_remito",
+                              on_change="rerun")
+    if _exp_remito.open:
+        with _exp_remito:
+            archivo = subir_archivo("El remito del proveedor:", ["xlsx", "xls", "csv", "txt"],
+                                    "remito_de_entrada")
+            filas = leer_excel(archivo) if archivo is not None else []
+            filas = [f for f in filas if any(str(x or "").strip() for x in f)]
+            if archivo is not None and not filas:
+                st.warning("No se pudo leer nada en ese archivo.")
+            elif filas:
+                _huella = hashlib.md5(json.dumps(filas[:50], default=str).encode()).hexdigest()[:8]
+                titulos = [str(x or "") for x in filas[0]]
+                _opciones = list(range(len(titulos)))
+                _rot = lambda i: f"{chr(65 + i) if i < 26 else i + 1}: {titulos[i][:30]}"  # noqa
+                _cc, _cq = st.columns(2)
+                col_cod = _cc.selectbox(
+                    "Columna del código:", _opciones, key=f"entro_col_cod_{_huella}",
+                    index=_columna_que_dice(titulos, r"COD|ARTIC|REFER|PARTE|ITEM") or 0,
+                    format_func=_rot)  # rótulo fijo: los títulos del archivo
+                col_cant = _cq.selectbox(
+                    "Columna de la cantidad:", _opciones, key=f"entro_col_cant_{_huella}",
+                    index=_columna_que_dice(titulos, r"CANT|UNID|CNT|QTY")
+                    or min(1, len(_opciones) - 1), format_func=_rot)  # rótulo fijo
+                para_sumar, no_estan, varias = leer_el_remito_de_entrada(filas, col_cod,
+                                                                         col_cant)
+                st.caption(f"De {miles(len(filas) - 1)} renglón(es): {miles(len(para_sumar))} "
+                           f"encontrados, {miles(len(no_estan))} que no están en el catálogo y "
+                           f"{miles(len(varias))} con varias marcas (esos, escaneados uno por "
+                           "uno arriba).")
+                if no_estan or varias:
+                    st.caption("No están: " + ", ".join(no_estan[:15])
+                               + (" …" if len(no_estan) > 15 else "")
+                               + (" · Varias marcas: " + ", ".join(varias[:15]) if varias
+                                  else ""))
+
+                def _sumar_el_remito(renglones):
+                    for pid, cant in renglones:
+                        sumar_a_la_entrada(pid, cant)
+                st.button(f"➕ Sumar los {miles(len(para_sumar))} a la lista",
+                          key=f"entro_remito_{_huella}", disabled=not para_sumar,
+                          on_click=_sumar_el_remito, args=(para_sumar,))
+
+    # LA LISTA, PARA REVISAR ANTES DE SUMAR.
+    if not lista:
+        st.caption("Todavía no cargaste nada.")
+        return
+    st.markdown(f"**Lo que entró:** {miles(len(lista))} producto(s), "
+                f"{miles(sum(lista.values()))} unidad(es)")
+    datos = {}
+    for tanda, marcadores in en_tandas([int(k) for k in lista]):      # un remito puede ser largo
+        datos.update({str(f["id"]): f for f in c.execute(
+            f"""SELECT p.id, p.codigo_raw, p.descripcion, p.stock, m.nombre AS marca
+                FROM productos p JOIN marcas m ON m.id = p.marca_id
+                WHERE p.id IN ({marcadores})""", tanda)})
+
+    def _cambiar(pid):
+        lista[pid] = int(st.session_state.get(f"entro_cant_{pid}") or 1)
+
+    def _sacar(pid):
+        lista.pop(pid, None)
+    for pid in list(lista):
+        f = datos.get(pid)
+        if not f:
+            lista.pop(pid, None)
+            continue
+        _r1, _r2, _r3 = st.columns([5, 2, 1], vertical_alignment="center")
+        _r1.markdown(f"**{texto_para_markdown(f['marca'])} {texto_para_markdown(f['codigo_raw'])}**"
+                     f" — {texto_para_markdown(str(f['descripcion'] or '')[:50])}")
+        _r1.caption("stock hoy: " + (miles(f["stock"]) if f["stock"] is not None
+                                     else "sin cargar"))
+        _r2.number_input("Cant.", 1, 9999, key=f"entro_cant_{pid}",
+                         value=valor_del_campo(f"entro_cant_{pid}", lista[pid]),
+                         label_visibility="collapsed", on_change=_cambiar, args=(pid,))
+        _r3.button("🗑️", key=f"entro_sacar_{pid}", on_click=_sacar, args=(pid,),
+                   help="Sacarlo de la lista.")
+    _cuando = cuando_se_sumo_la_entrada(lista)
+    _igual = True
+    if _cuando:
+        st.warning(f"⚠️ Esta misma entrada ya se sumó al stock el {_cuando}: si la sumás de "
+                   "nuevo, queda el doble.")
+        _igual = st.checkbox("Es otra entrada igual: sumarla igual", key="entro_igual")
+    _b1, _b2 = st.columns([3, 1])
+    if _b1.button("✅ Sumar al stock", key="entro_sumar", type="primary", width="stretch",
+                  disabled=not _igual):
+        try:
+            sumados, esperaban = sumar_al_stock(dict(lista))
+        except PermissionError as _err:
+            st.error(el_error_en_castellano(_err))
+        else:
+            for pid in list(lista):
+                st.session_state.pop(f"entro_cant_{pid}", None)
+            lista.clear()
+            st.session_state.pop("entro_igual", None)
+            avisar("success", f"✅ Sumado al stock: {miles(sumados)} producto(s).")
+            if esperaban:
+                avisar("info", f"📲 {miles(len(esperaban))} cliente(s) esperaban algo de lo que "
+                               f"entró: avisales en {miga_hasta('Para pedir')} → «📞 Consultas "
+                               "de clientes».")
+            st.rerun()
+    _b2.button("Vaciar", key="entro_vaciar", width="stretch",
+               on_click=lambda: st.session_state.get("entro_lista", {}).clear())

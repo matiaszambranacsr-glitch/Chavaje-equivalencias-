@@ -697,12 +697,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "«💲 Qué hace esta lista con tus precios» dice cuántos suben y bajan, sin tocar nada.",
      "📁 Cargar Excel", "admin"),
     ("remito", "Cargar la mercadería que llegó (sumar stock)",
-     "mercaderia llego llegada remito entrada ingreso sumar stock recibir proveedor compra "
-     "factura proveedor reponer cargar",
-     "Abajo de todo está «📄 Cargar remito por foto (con IA)»: sacale una foto al remito del "
-     "proveedor, la app lee los ítems y suma el stock de los que coinciden con tu catálogo "
-     "(revisalos antes). El stock de un solo producto se corrige en Administrar, en Productos.",
-     "📁 Cargar Excel", "admin"),
+     "mercaderia llego llegada remito entrada entro ingreso sumar stock recibir proveedor compra "
+     "factura proveedor reponer cargar escanear",
+     "📦 Depósito → «📦 Entró mercadería»: escaneá (o escribí) cada código con la cantidad y "
+     "Enter, o subí el remito en Excel o CSV; revisá la lista y «✅ Sumar al stock». La misma "
+     "entrada dos veces avisa antes de sumarla, y si alguien esperaba algo de lo que entró, te "
+     "avisa para escribirle. Con la IA conectada, en 📁 Cargar Excel también se puede leer la "
+     "foto del remito.",
+     "📦 Entró mercadería", "empleado"),
     ("deshacer_lista", "Deshacer una lista que se importó mal",
      "deshacer importacion lista mal cargada revertir volver atras borrar",
      "En «↩️ Deshacer una importación» elegís cuál y vuelve todo a como estaba antes.",
@@ -925,6 +927,18 @@ COMO_HAGO_DEL_ASISTENTE = (
      "avisarle cuando llegue. Si te escribió al teléfono, pegalo en el 🔍 Buscador, en "
      "«🧩 Pegar el pedido de un cliente».",
      "💬 Mensajes", "empleado"),
+    ("resumen_semana", "El resumen de la semana para el dueño",
+     "resumen semana semanal dueno vendido anterior salio piden comprar",
+     "💵 Caja → «📋 Ventas y cierre de caja» → «📲 Resumen de la semana para el dueño»: lo "
+     "vendido contra la semana anterior, lo que más salió y lo que más pidieron y no había, "
+     "listo para mandar por WhatsApp.",
+     "💵 Caja", "empleado"),
+    ("fuera_de_horario", "Contestar solo cuando el local está cerrado",
+     "respuesta automatica fuera horario cerrado noche domingo feriado contestar solo",
+     "En 🗂️ Administrar → 💬 Mensajería y cobros, «🌙 Respuesta fuera de horario»: prendela y "
+     "poné el horario («lun-vie 8:00-18:00, sab 8:30-13:00») y el texto. Al que escribe con el "
+     "local cerrado se le contesta solo, una vez cada 12 horas; el chat sigue sin leer.",
+     "💬 Mensajería y cobros", "admin"),
     ("cliente_espera", "Anotar que un cliente espera un repuesto, para avisarle cuando llegue",
      "anotar cliente espera esperando avisarle avisar llegue llega entra consulta consultas "
      "pensar piensa repuesto stock",

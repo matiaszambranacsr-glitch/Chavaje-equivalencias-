@@ -15,6 +15,12 @@
 // Las tres claves van como variables «Secret» del Worker (nunca en este archivo), y el KV se
 // enlaza con el nombre AVISOS. Sirve igual para los avisos de la página de Facebook y de
 // Instagram, si algún día se suscriben a la misma dirección.
+//
+// LA RESPUESTA FUERA DE HORARIO (si se quiere): con HORARIO y RESPUESTA (variables, las que
+// muestra la app en Administrar → 🌙 Respuesta fuera de horario) y WHATSAPP_TOKEN (Secret), al
+// que escribe con el local cerrado se le contesta al instante, una vez cada 12 horas. Lo que se
+// mandó se guarda como un aviso más (un «eco» marcado "automatica"), así la app lo muestra en el
+// chat sin darlo por atendido y no contesta otra vez. Sin esas tres, no contesta nada.
 
 const SIETE_DIAS = 7 * 24 * 60 * 60;
 const TOPE_DE_UN_AVISO = 256 * 1024;
@@ -55,6 +61,66 @@ function traeMensajes(aviso) {
   return false;
 }
 
+// EL HORARIO, el mismo dibujo que la app (tramos_del_horario() en logica/mensajes.py):
+// «lun-vie 8:00-18:00, sab 8:30-13:00», en hora de Argentina (UTC-3, sin cambio de hora).
+const DIAS = { lun: 1, mar: 2, mie: 3, jue: 4, vie: 5, sab: 6, dom: 0 };
+const UN_TRAMO = /^([a-z]{3})[a-z]*(?:\s*(?:-|\ba\b)\s*([a-z]{3})[a-z]*)?\s+(\d{1,2})(?:[:.](\d{2}))?\s*(?:-|\ba\b)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs?)?$/;
+const DOCE_HORAS = 12 * 60 * 60;
+
+function abierto(horario, ahora) {
+  const aca = new Date(ahora.getTime() - 3 * 60 * 60 * 1000);
+  // Lunes primero, como en la app: domingo es el último.
+  const dia = (aca.getUTCDay() + 6) % 7;
+  const minuto = aca.getUTCHours() * 60 + aca.getUTCMinutes();
+  let entendido = false;
+  const texto = String(horario || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const pedazo of texto.split(/[,;\n]/)) {
+    const m = pedazo.trim().match(UN_TRAMO);
+    if (!m || !(m[1] in DIAS) || (m[2] && !(m[2] in DIAS))) continue;
+    const d1 = (DIAS[m[1]] + 6) % 7, d2 = (DIAS[m[2] || m[1]] + 6) % 7;
+    const desde = Number(m[3]) * 60 + Number(m[4] || 0), hasta = Number(m[5]) * 60 + Number(m[6] || 0);
+    if (!(desde < hasta && hasta <= 24 * 60)) continue;
+    entendido = true;
+    const enElDia = d1 <= d2 ? (dia >= d1 && dia <= d2) : (dia >= d1 || dia <= d2);
+    if (enElDia && minuto >= desde && minuto < hasta) return true;
+  }
+  return entendido ? false : null;
+}
+
+// Contesta solo a los que escribieron con el local cerrado (una vez cada 12 horas cada uno) y
+// guarda lo mandado como eco. Nunca rompe el aviso: si algo falla, el aviso ya está guardado.
+async function contestarFueraDeHorario(aviso, env) {
+  if (!env.WHATSAPP_TOKEN || !env.HORARIO || !env.RESPUESTA || aviso.object !== "whatsapp_business_account") return;
+  if (abierto(env.HORARIO, new Date()) !== false) return;
+  for (const entrada of aviso.entry || []) {
+    for (const cambio of (entrada && entrada.changes) || []) {
+      const valor = (cambio && cambio.value) || {};
+      const numeroId = valor.metadata && valor.metadata.phone_number_id;
+      for (const m of valor.messages || []) {
+        if (!numeroId || !m || !m.from || await env.AVISOS.get("auto:" + m.from)) continue;
+        await env.AVISOS.put("auto:" + m.from, "1", { expirationTtl: DOCE_HORAS });
+        try {
+          const r = await fetch(`https://graph.facebook.com/v26.0/${numeroId}/messages`, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + env.WHATSAPP_TOKEN, "Content-Type": "application/json" },
+            body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: m.from,
+                                   type: "text", text: { preview_url: false, body: env.RESPUESTA } }),
+          });
+          const datos = await r.json();
+          const id = datos && datos.messages && datos.messages[0] && datos.messages[0].id;
+          if (!r.ok || !id) continue;
+          const eco = { object: "whatsapp_business_account", entry: [{ changes: [{ value: {
+            messaging_product: "whatsapp", metadata: { phone_number_id: numeroId },
+            message_echoes: [{ id, to: m.from, timestamp: String(Math.floor(Date.now() / 1000)),
+                               type: "text", text: { body: env.RESPUESTA }, automatica: true }] } }] }] };
+          await env.AVISOS.put(`m:${String(Date.now()).padStart(15, "0")}:${crypto.randomUUID()}`,
+                               JSON.stringify(eco), { expirationTtl: SIETE_DIAS });
+        } catch (_e) { /* sin respuesta automática esta vez */ }
+      }
+    }
+  }
+}
+
 const respuesta = (texto, estado) => new Response(texto, { status: estado });
 const comoJson = (datos) => new Response(JSON.stringify(datos), {
   status: 200, headers: { "Content-Type": "application/json" } });
@@ -82,6 +148,7 @@ export default {
       if (!traeMensajes(aviso)) return respuesta("ok", 200);
       const id = `m:${String(Date.now()).padStart(15, "0")}:${crypto.randomUUID()}`;
       await env.AVISOS.put(id, texto, { expirationTtl: SIETE_DIAS });
+      try { await contestarFueraDeHorario(aviso, env); } catch (_e) { /* el aviso ya está guardado */ }
       return respuesta("ok", 200);
     }
 

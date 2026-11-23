@@ -1214,6 +1214,59 @@ if pagina == PAGINAS[3]:
                     for _canal_p, _bien_p, _dijo_p in _pruebas_canales:
                         (st.success if _bien_p else st.error)(f"{_canal_p}: {_dijo_p}")
 
+        # LA RESPUESTA FUERA DE HORARIO (ver esa sección en logica/mensajes.py): el horario y
+        # el texto, y lo que hay que cargarle al relevo para que WhatsApp conteste al instante.
+        _exp_horario = st.expander("🌙 Respuesta fuera de horario", key="exp_fuera_de_horario",
+                                   on_change="rerun")
+        if _exp_horario.open:
+            with _exp_horario:
+                _conf_fh = respuesta_fuera_de_horario()
+                explicar("Al que escribe con el local cerrado se le contesta solo, una vez cada "
+                         f"{HORAS_ENTRE_RESPUESTAS_AUTOMATICAS} horas.",
+                         "La respuesta queda en el chat como «🤖 respuesta automática», y el chat "
+                         "sigue sin leer: lo contesta una persona al abrir. Lo que se escribió "
+                         "con el local abierto no se contesta solo, aunque después se cierre. "
+                         "WhatsApp contesta al instante si el relevo tiene el horario (abajo); "
+                         "Facebook e Instagram, cuando la app trae los mensajes.",
+                         en_expander=True)
+                # valor fijo: lo guardado, una sola configuración.
+                st.session_state.setdefault("fh_activa", _conf_fh["activa"])
+                st.session_state.setdefault("fh_horario", _conf_fh["horario"] or HORARIO_DE_EJEMPLO)
+                st.session_state.setdefault("fh_texto", _conf_fh["texto"])
+                st.toggle("Contestar solo fuera de horario", key="fh_activa")
+                st.text_input("Horario de atención (hora de acá):", key="fh_horario",
+                              help=f"Así: «{HORARIO_DE_EJEMPLO}». Los días: lun, mar, mie, jue, "
+                                   "vie, sab, dom.")
+                _desc_fh = descripcion_del_horario(st.session_state.get("fh_horario"))
+                st.caption(f"Abierto: {_desc_fh}." if _desc_fh
+                           else f"⚠️ No entiendo el horario: escribilo así: «{HORARIO_DE_EJEMPLO}».")
+                st.text_area("Lo que se le contesta:", key="fh_texto", height=90,
+                             max_chars=900)
+                if candado("cambiar la respuesta fuera de horario",
+                           st.button("💾 Guardar", key="fh_guardar"),
+                           "cambiar_la_respuesta_fuera_de_horario"):
+                    try:
+                        guardar_respuesta_fuera_de_horario(
+                            st.session_state.get("fh_activa"), st.session_state.get("fh_horario"),
+                            st.session_state.get("fh_texto"))
+                        _fh_error = ""
+                    except ValueError as _err:
+                        _fh_error = str(_err)
+                    if _fh_error:
+                        st.error(_fh_error)
+                    else:
+                        avisar("success", "🌙 Guardado." + (" Se contesta solo fuera de horario."
+                                                            if st.session_state.get("fh_activa")
+                                                            else " Está apagada."))
+                        st.rerun()
+                if _conf_fh["activa"]:
+                    st.caption("Para que WhatsApp conteste al instante aunque la app esté "
+                               "dormida, en el relevo (Cloudflare → el Worker → Settings → "
+                               "Variables) van estas dos, y el permiso WHATSAPP_TOKEN como "
+                               "«Secret» (pasos en integraciones/relevo_de_mensajes/LEEME.md):")
+                    st.code(f"HORARIO = {_conf_fh['horario']}\nRESPUESTA = {_conf_fh['texto']}",
+                            language=None, wrap_lines=True)
+
     if sub_admin == SUB_ADMIN[3]:
         st.markdown("**🧩 Combos de repuestos relacionados**",
                     help="Cuando alguien busca un producto cuya descripción contenga el "

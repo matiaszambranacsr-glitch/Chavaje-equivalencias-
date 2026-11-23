@@ -420,6 +420,43 @@ def marcar_backup_bajado():
     guardar_config("ultimo_backup_bajado", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
+# EL BACKUP, UNA VEZ POR SEMANA, A LA VISTA. Con la copia automática frenada, la campanita lo
+# avisaba con el botón para bajarlo, pero adentro del 🔔: pasaron semanas sin que nadie lo
+# bajara. Si la copia no se está haciendo y el último backup bajado tiene más de
+# DIAS_PARA_RECORDAR_EL_BACKUP, al administrador le sale arriba de todo; «Más tarde» lo deja
+# para dentro de una semana.
+DIAS_PARA_RECORDAR_EL_BACKUP = 7
+
+
+def hay_que_recordar_el_backup():
+    """False si no hace falta; si hace falta, hace cuántos días se bajó el último (None si
+    nunca). Hace falta si la copia automática no se está haciendo (frenada, o la última de hace
+    más de tres días) y el último backup bajado es viejo, y no se pospuso esta semana."""
+    ahora = datetime.now()
+
+    def dias_desde(clave):
+        valor = str(obtener_config(clave, "") or "")[:19]
+        try:
+            return (ahora - datetime.strptime(valor, "%Y-%m-%d %H:%M:%S")).days
+        except ValueError:
+            return None
+    copia = dias_desde("ultimo_backup_github")
+    if not obtener_config("copia_frenada_sin_cifrar", "") and copia is not None and copia <= 3:
+        return False
+    pospuesto = dias_desde("backup_recordado_en")
+    if pospuesto is not None and pospuesto < DIAS_PARA_RECORDAR_EL_BACKUP:
+        return False
+    bajado = dias_desde("ultimo_backup_bajado")
+    if bajado is not None and bajado < DIAS_PARA_RECORDAR_EL_BACKUP:
+        return False
+    return bajado
+
+
+def posponer_el_recordatorio_del_backup():
+    """«Más tarde» (va como on_click): vuelve a salir en una semana."""
+    guardar_config("backup_recordado_en", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
 # Archivos que genera la propia app. Reimportar uno de estos es un error que no da ningún
 # aviso y ensucia la base: subir el filas_omitidas.xlsx crea una marca llamada "FILAS OMITIDAS"
 # con los productos que justamente se habían descartado.

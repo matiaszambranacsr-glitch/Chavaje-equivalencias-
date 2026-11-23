@@ -215,6 +215,22 @@ def probar(url, clave, carpeta):
         if not _hasta(lambda: _foco(pagina) == "st-key-busqueda_input"):
             fallas.append(f"al entrar al Buscador el cursor no está en la búsqueda: "
                           f"{_foco(pagina)}")
+        # Y en «📦 Entró mercadería», en la caja del código: el lector escanea derecho, y con
+        # Enter lo suma a la lista y la caja queda lista para el siguiente.
+        _ir(pagina, "Depósito")
+        pagina.locator("[class*='st-key-sub_'] label").filter(has_text="Entró mercadería").first.click()
+        _esperar(pagina, 2)
+        if not _hasta(lambda: _foco(pagina) == "st-key-entro_codigo"):
+            fallas.append("al entrar a «📦 Entró mercadería» el cursor no está en el código: "
+                          f"{_foco(pagina)}")
+        else:
+            pagina.keyboard.type("F100", delay=20)
+            pagina.keyboard.press("Enter")
+            _esperar(pagina, 2)
+            if not _hasta(lambda: pagina.locator('[class*="st-key-entro_cant_"]').count() == 1):
+                fallas.append("en «📦 Entró mercadería», escanear y Enter no lo suma a la lista")
+            elif pagina.locator(".st-key-entro_codigo input").input_value():
+                fallas.append("después de sumarlo, la caja del código no quedó vacía")
 
         # 6. Los textos de Streamlit en castellano: el recuadro para subir un archivo, que en
         # Streamlit 1.65 dice «Upload» y «200MB per file» (antes, «Browse files» y «Drag and

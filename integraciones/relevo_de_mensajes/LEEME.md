@@ -36,6 +36,26 @@ alguien tiene la app abierta). Facebook e Instagram no lo necesitan: la app les 
 9. En la app: 🗂️ Administrar → 💬 Mensajería y cobros → «📲 Conectar WhatsApp, Facebook e
    Instagram» → **🔌 Probar la conexión**.
 
+## La respuesta fuera de horario, al instante (si querés)
+
+Al que escribe por WhatsApp con el local cerrado, el relevo le contesta solo, en el momento
+(aunque la app esté dormida), una vez cada 12 horas: «Ahora estamos cerrados, te contestamos
+apenas abramos». En el chat de la app queda como «🤖 respuesta automática» y el chat sigue sin
+leer, para que lo conteste una persona al abrir.
+
+1. En la app: 🗂️ Administrar → 💬 Mensajería y cobros → «🌙 Respuesta fuera de horario»:
+   prendela, poné el horario («lun-vie 8:00-18:00, sab 8:30-13:00») y el texto, y «💾 Guardar».
+   Abajo te muestra las dos líneas para el relevo.
+2. En Cloudflare, el Worker → **Settings → Variables and Secrets**:
+   - **HORARIO** (texto común): el horario, igual que en la app.
+   - **RESPUESTA** (texto común): lo que se le contesta.
+   - **WHATSAPP_TOKEN** (**Secret**): el mismo permiso que `whatsapp_token` en los secretos de
+     Streamlit.
+3. **Deploy**. Sin alguna de las tres, el relevo no contesta nada (la app igual contesta cuando
+   trae los mensajes, y Facebook e Instagram los contesta siempre la app).
+
+Si cambiás el horario en la app, cambialo también acá.
+
 ## Lo que hay que saber
 
 - **Las claves no van en ningún archivo**: ni en `worker.js`, ni en el repositorio, ni en un

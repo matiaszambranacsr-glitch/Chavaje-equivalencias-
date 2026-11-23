@@ -135,8 +135,31 @@ def probar():
     esperar("y a los días vuelve a tocar", [p["toca"] for p in ns["presupuestos_para_seguir"]()],
             [True])
 
-    # 4. «🛒 VOLVIÓ: ARMARLO»: el presupuesto vuelve al Buscador con los precios que se le pasaron,
-    # y sale de la lista.
+    # 3b. SI SUBIERON LOS PRECIOS: se dice cuánto, y dentro de la validez se arma con los que se
+    # le pasaron; con el otro botón, con los de hoy.
+    c.execute("UPDATE productos SET precio = 1100 WHERE id = ?", (ids["PR1"],))
+    ns["conn"].commit()
+    _p = ns["presupuestos_para_seguir"]()[0]
+    esperar("subió el PR1 de 900 (lo que se le pasó) a 1.100: se dice cuánto",
+            (_p["subio"], _p["subieron"], _p["total_hoy"], _p["vencido"]),
+            (9, [("MARCA PRESU PR1", 22)], 4700.0, False))
+    at.session_state["exp_presupuestos_para_seguir"] = True
+    at.run()
+    cierto("en la lista, «⚠️ Los precios subieron 9%»",
+           any("subieron **9%**" in x.value for x in at.caption))
+    cierto("y el otro botón: «con los precios de hoy»",
+           [b for b in at.button if b.key == f"presu_volvio_otro_{_id}"
+            and "de hoy" in b.label])
+    # Pasada la validez, el mensaje lo dice y se arma con los de hoy.
+    c.execute("UPDATE presupuestos_para_seguir SET creado_en = datetime('now', ?) WHERE id = ?",
+              (f"-{ns['DIAS_DE_VALIDEZ_DEL_PRESUPUESTO']} days", _id))
+    ns["conn"].commit()
+    _p = ns["presupuestos_para_seguir"]()[0]
+    esperar("vencido: el mensaje ofrece pasarlo actualizado",
+            (_p["vencido"], "te lo pasamos actualizado" in ns["mensaje_de_seguimiento"](_p)),
+            (True, True))
+
+    # 4. «🛒 VOLVIÓ: ARMARLO»: pasada la validez, con los precios de hoy; y sale de la lista.
     at.session_state["exp_presupuestos_para_seguir"] = True
     at.run()
     _volvio = [b for b in at.button if b.key == f"presu_volvio_{_id}"]
@@ -144,11 +167,24 @@ def probar():
         fallas.append("no está «🛒 Volvió: armarlo»")
     else:
         _volvio[0].click().run()
-        esperar("volvió: armado otra vez, con los precios que se le pasaron",
+        esperar("volvió pasada la validez: armado otra vez, con los precios de hoy",
                 sorted((v["codigo"], v["cantidad"], v["precio"])
                        for v in (at.session_state["carrito"] or {}).values()),
-                [("PR1", 2, 900.0), ("PR2", 1, 2500.0)])
+                [("PR1", 2, 1100.0), ("PR2", 1, 2500.0)])
         esperar("y sale de la lista", ns["presupuestos_para_seguir"](), [])
+
+    # 4b. Dentro de la validez, «Volvió: armarlo» respeta el precio que se le pasó, aunque haya
+    # subido; con los de hoy, si se pide.
+    for _con_hoy, _esperado in ((None, 900.0), (True, 1100.0)):
+        _nuevo = ns["guardar_presupuesto_para_seguir"](
+            "Pedro", "", {ids["PR1"]: {"codigo": "PR1", "marca": "MARCA PRESU", "precio": 900.0,
+                                      "cantidad": 1}})
+        at.session_state["carrito"] = {}
+        ns["volver_a_armar_el_presupuesto"].__globals__["st"].session_state["carrito"] = {}
+        _g_st = ns["volver_a_armar_el_presupuesto"].__globals__["st"]
+        ns["volver_a_armar_el_presupuesto"](_nuevo, _con_hoy)
+        esperar(f"dentro de la validez ({'con los de hoy' if _con_hoy else 'sin decir'})",
+                [v["precio"] for v in _g_st.session_state["carrito"].values()], [_esperado])
 
     # 5. «🗑️ NO LO QUIERE» lo cierra; y solo el personal guarda (guarda el teléfono de un cliente).
     _otro = ns["guardar_presupuesto_para_seguir"]("Ana", "", {ids["PR1"]: {"codigo": "PR1",

@@ -297,7 +297,9 @@ def mensajes_del_aviso(cuerpo):
                     if isinstance(m, dict) and m.get("id") and m.get("to"):
                         salida.append({"canal": "whatsapp", "chat": str(m["to"]), "nombre": "",
                                        "id": str(m["id"]), "texto": _texto_de_whatsapp(m),
-                                       "cuando": _momento_utc(m.get("timestamp")), "entra": False})
+                                       "cuando": _momento_utc(m.get("timestamp")), "entra": False,
+                                       # la respuesta fuera de horario que mandó el relevo
+                                       "automatica": m.get("automatica") is True})
         elif objeto in ("page", "instagram"):
             canal = "messenger" if objeto == "page" else "instagram"
             for evento in _como_lista(entrada.get("messaging")):
@@ -327,6 +329,9 @@ def guardar_mensaje_de_afuera(m, contar_sin_leer=True):
     texto = str(m.get("texto") or "")[:_LARGO_QUE_SE_GUARDA]
     cuando = str(m.get("cuando") or _momento_utc(None))
     entra = 1 if m.get("entra") else 0
+    # La respuesta fuera de horario que mandó el relevo (ver «LA RESPUESTA FUERA DE HORARIO»):
+    # se ve en el chat, pero no lo da por atendido. Si no, a la mañana no aparecía sin leer.
+    automatica = not entra and bool(m.get("automatica"))
     with transaccion():
         c.execute("""INSERT INTO chats (canal, externo, nombre) VALUES (?, ?, ?)
                      ON CONFLICT(canal, externo) DO UPDATE SET
@@ -338,9 +343,14 @@ def guardar_mensaje_de_afuera(m, contar_sin_leer=True):
                                                           cuando, quien)
                      VALUES (?, ?, ?, ?, ?, ?, ?)""",
                   (chat_id, canal, str(m["id"])[:200], entra, texto, cuando,
-                   None if entra else "desde otro lado"))
+                   None if entra else QUIEN_RESPONDE_SOLO if automatica else "desde otro lado"))
         if c.rowcount != 1:
             return False
+        if automatica:
+            c.execute("""UPDATE chats SET auto_respondido_en =
+                             MAX(COALESCE(auto_respondido_en, ''), ?) WHERE id = ?""",
+                      (cuando, chat_id))
+            return True
         if entra:
             c.execute("""UPDATE chats SET sin_leer = sin_leer + ?,
                              ultimo_del_cliente_en = MAX(COALESCE(ultimo_del_cliente_en, ''), ?)
@@ -459,6 +469,10 @@ def traer_mensajes_nuevos(cfg=None):
         _BANDEJA["estado"][canal] = {"cuando": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                      "nuevos": resultado[canal][0],
                                      "error": resultado[canal][1]}
+    try:
+        contestar_fuera_de_horario()
+    except (sqlite3.Error, ValueError) as _err:      # no frena la bandeja
+        anotar_error("contestar_fuera_de_horario", _err)
     return resultado
 
 
@@ -783,8 +797,9 @@ def codigos_del_mensaje(texto, tope=3):
 # ============================================================================================
 # CONTESTAR
 # ============================================================================================
-def contestar_chat(chat_id, texto):
-    """Manda la respuesta por el canal del chat. (True, None) o (False, por qué no)."""
+def contestar_chat(chat_id, texto, automatica=False):
+    """Manda la respuesta por el canal del chat. (True, None) o (False, por qué no). La
+    `automatica` (fuera de horario) se ve en el chat pero no lo da por leído ni atendido."""
     exigir_nivel("empleado", "contestar un mensaje")
     texto = str(texto or "").strip()
     if not texto:
@@ -827,11 +842,14 @@ def contestar_chat(chat_id, texto):
                                                           cuando, quien)
                      VALUES (?, ?, ?, 0, ?, ?, ?)""",
                   (chat["id"], chat["canal"], str(mensaje_id or f"app-{uuid.uuid4().hex}"),
-                   texto, cuando, obtener_usuario_actual()))
-        c.execute("""UPDATE chats SET sin_leer = 0, ultimo_texto = ?, ultimo_en = ?,
-                         ultimo_entra = 0, leido_por = ?, leido_en = ?
-                     WHERE id = ?""",
-                  (texto[:200], cuando, obtener_usuario_actual(), cuando, chat["id"]))
+                   texto, cuando, QUIEN_RESPONDE_SOLO if automatica else obtener_usuario_actual()))
+        if automatica:
+            c.execute("UPDATE chats SET auto_respondido_en = ? WHERE id = ?", (cuando, chat["id"]))
+        else:
+            c.execute("""UPDATE chats SET sin_leer = 0, ultimo_texto = ?, ultimo_en = ?,
+                             ultimo_entra = 0, leido_por = ?, leido_en = ?
+                         WHERE id = ?""",
+                      (texto[:200], cuando, obtener_usuario_actual(), cuando, chat["id"]))
     return True, None
 
 
@@ -864,6 +882,131 @@ def probar_los_canales():
                        error or f"Anda: tiene {miles(int((datos or {}).get('cuantos') or 0))} "
                                 "aviso(s) esperando."))
     return salida
+
+
+# ============================================================================================
+# LA RESPUESTA FUERA DE HORARIO
+# ============================================================================================
+# El que escribe a la noche o el domingo no sabía si alguien lo iba a leer, y se iba a otro
+# lado. Con el horario cargado (en Administrar), al que escribe con el local cerrado se le
+# contesta solo, una vez cada HORAS_ENTRE_RESPUESTAS_AUTOMATICAS: «Ahora estamos cerrados, te
+# contestamos apenas abramos». Lo hacen dos: el relevo de WhatsApp, al instante (recibe cada
+# mensaje aunque la app esté dormida; ver integraciones/relevo_de_mensajes/), y la app al traer
+# los mensajes (Facebook, Instagram, y WhatsApp si el relevo no lo hizo). La respuesta queda en
+# el chat como «🤖 respuesta automática» y el chat sigue sin leer: lo contesta una persona.
+# El horario se escribe como se dice: «lun-vie 8:00-18:00, sab 8:30-13:00», en hora de acá.
+CLAVE_DEL_HORARIO = "horario_de_atencion"
+CLAVE_DE_LA_RESPUESTA_FUERA_DE_HORARIO = "respuesta_fuera_de_horario"
+CLAVE_DE_LA_RESPUESTA_ACTIVA = "respuesta_fuera_de_horario_activa"
+HORARIO_DE_EJEMPLO = "lun-vie 8:00-18:00, sab 8:30-13:00"
+RESPUESTA_FUERA_DE_HORARIO_DE_SIEMPRE = ("¡Hola! Ahora estamos cerrados: te contestamos apenas "
+                                         "abramos. ¡Gracias por escribir!")
+HORAS_ENTRE_RESPUESTAS_AUTOMATICAS = 12
+QUIEN_RESPONDE_SOLO = "🤖 respuesta automática"
+_DIAS_DEL_HORARIO = {"LUN": 0, "MAR": 1, "MIE": 2, "JUE": 3, "VIE": 4, "SAB": 5, "DOM": 6}
+_NOMBRES_DE_LOS_DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+# El mismo dibujo que en el relevo (worker.js): «lun-vie 8:00-18:00», «sab 8-13», «lun a vie».
+_UN_TRAMO_DEL_HORARIO = re.compile(
+    r"([A-Z]{3})[A-Z]*(?:\s*(?:-|\bA\b)\s*([A-Z]{3})[A-Z]*)?\s+(\d{1,2})(?:[:.](\d{2}))?"
+    r"\s*(?:-|\bA\b)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:HS?)?")
+
+
+def tramos_del_horario(texto):
+    """[(día desde, día hasta, minuto desde, minuto hasta)], con lunes = 0. Lo que no se
+    entiende se saltea."""
+    tramos = []
+    for pedazo in re.split(r"[,;\n]", normalizar_texto(str(texto or "")).upper()):
+        m = _UN_TRAMO_DEL_HORARIO.fullmatch(pedazo.strip())
+        if not m or m.group(1) not in _DIAS_DEL_HORARIO or (
+                m.group(2) and m.group(2) not in _DIAS_DEL_HORARIO):
+            continue
+        desde, hasta = (int(m.group(3)) * 60 + int(m.group(4) or 0),
+                        int(m.group(5)) * 60 + int(m.group(6) or 0))
+        if desde < hasta <= 24 * 60:
+            tramos.append((_DIAS_DEL_HORARIO[m.group(1)],
+                           _DIAS_DEL_HORARIO[m.group(2) or m.group(1)], desde, hasta))
+    return tramos
+
+
+def esta_abierto(horario, momento=None):
+    """Si el local está abierto en `momento` (UTC, como guarda la app; ahora, si no se dice),
+    según el horario en hora de acá. None si el horario no se entiende."""
+    tramos = tramos_del_horario(horario)
+    if not tramos:
+        return None
+    if momento is None:
+        momento = datetime.now()
+    elif isinstance(momento, str):
+        momento = datetime.strptime(momento[:19], "%Y-%m-%d %H:%M:%S")
+    aca = momento + DIFERENCIA_CON_LA_HORA_DE_ACA
+    dia, minuto = aca.weekday(), aca.hour * 60 + aca.minute
+    for d1, d2, desde, hasta in tramos:
+        en_el_dia = d1 <= dia <= d2 if d1 <= d2 else (dia >= d1 or dia <= d2)
+        if en_el_dia and desde <= minuto < hasta:
+            return True
+    return False
+
+
+def descripcion_del_horario(horario):
+    """«lunes a viernes de 8:00 a 18:00; sábado de 8:30 a 13:00»."""
+    def hora(m):
+        return f"{m // 60}:{m % 60:02d}"
+    return "; ".join(
+        (_NOMBRES_DE_LOS_DIAS[d1] if d1 == d2 else
+         f"{_NOMBRES_DE_LOS_DIAS[d1]} a {_NOMBRES_DE_LOS_DIAS[d2]}")
+        + f" de {hora(desde)} a {hora(hasta)}"
+        for d1, d2, desde, hasta in tramos_del_horario(horario))
+
+
+def respuesta_fuera_de_horario():
+    """{activa, horario, texto}, como lo dejó el administrador."""
+    return {"activa": obtener_config(CLAVE_DE_LA_RESPUESTA_ACTIVA, "") == "1",
+            "horario": obtener_config(CLAVE_DEL_HORARIO, "") or "",
+            "texto": (obtener_config(CLAVE_DE_LA_RESPUESTA_FUERA_DE_HORARIO, "")
+                      or RESPUESTA_FUERA_DE_HORARIO_DE_SIEMPRE)}
+
+
+def guardar_respuesta_fuera_de_horario(activa, horario, texto):
+    """La guarda el administrador. Prendida con un horario que no se entiende, no se guarda
+    (ValueError): contestaría «estamos cerrados» a cualquier hora, o nunca."""
+    exigir_nivel("admin", "cambiar la respuesta fuera de horario")
+    horario, texto = str(horario or "").strip()[:200], str(texto or "").strip()[:900]
+    if activa and not tramos_del_horario(horario):
+        raise ValueError(f"No entiendo el horario. Escribilo así: «{HORARIO_DE_EJEMPLO}».")
+    guardar_config(CLAVE_DEL_HORARIO, horario)
+    guardar_config(CLAVE_DE_LA_RESPUESTA_FUERA_DE_HORARIO, texto)
+    guardar_config(CLAVE_DE_LA_RESPUESTA_ACTIVA, "1" if activa else "")
+    anotar_cambio("cambió la respuesta fuera de horario", "configuración",
+                  CLAVE_DE_LA_RESPUESTA_ACTIVA, despues=f"{'prendida' if activa else 'apagada'}: "
+                                                         f"{horario}")
+
+
+def contestar_fuera_de_horario(ahora=None):
+    """Contesta a los que escribieron con el local cerrado y nadie les contestó, una vez cada
+    HORAS_ENTRE_RESPUESTAS_AUTOMATICAS. Lo que se escribió con el local abierto no: eso lo
+    contesta una persona, aunque ya se haya cerrado. Devuelve cuántas mandó."""
+    conf = respuesta_fuera_de_horario()
+    if not conf["activa"] or not tramos_del_horario(conf["horario"]):
+        return 0
+    ahora = ahora or datetime.now()
+    if esta_abierto(conf["horario"], ahora):
+        return 0
+    desde = (ahora - timedelta(hours=HORAS_ENTRE_RESPUESTAS_AUTOMATICAS)).strftime(
+        "%Y-%m-%d %H:%M:%S")
+    mandadas = 0
+    for f in c.execute("""SELECT id, ultimo_del_cliente_en FROM chats
+                          WHERE ultimo_entra = 1 AND ultimo_del_cliente_en >= ?
+                            AND COALESCE(auto_respondido_en, '') < ?
+                            AND COALESCE(auto_respondido_en, '') < ultimo_del_cliente_en""",
+                       (desde, desde)).fetchall():
+        if esta_abierto(conf["horario"], f["ultimo_del_cliente_en"]):
+            continue
+        ok, _por_que = contestar_chat(f["id"], conf["texto"], automatica=True)
+        if not ok:      # que no lo reintente en cada vuelta
+            c.execute("UPDATE chats SET auto_respondido_en = ? WHERE id = ?",
+                      (ahora.strftime("%Y-%m-%d %H:%M:%S"), f["id"]))
+        mandadas += bool(ok)
+    return mandadas
 
 
 # ============================================================================================

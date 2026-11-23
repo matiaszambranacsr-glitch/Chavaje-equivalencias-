@@ -274,6 +274,82 @@ def resumen_del_dia(dia=None, con_ganancia=False):
     return "\n".join(renglones)
 
 
+# EL RESUMEN DE LA SEMANA: lo del día dice cómo cerró la caja; para decidir qué comprar hace
+# falta la semana. Lo vendido contra la semana anterior, lo que más salió, y sobre todo LO QUE
+# MÁS PIDEN Y NO SE TIENE: lo buscado sin resultado (en el Buscador y en los pedidos del chat) y
+# los clientes que esperan algo. Eso estaba repartido en tres pantallas y nadie lo juntaba.
+DIAS_DE_LA_SEMANA_DEL_RESUMEN = 7
+
+
+def resumen_de_la_semana(hasta=None, con_ganancia=False):
+    """El texto del resumen de los 7 días que terminan en `hasta` (hoy, si no se dice), con la
+    semana anterior al lado, listo para WhatsApp."""
+    fin = date.fromisoformat(hasta) if hasta else hoy_aca()
+    plata = lambda x: f"${miles(x, 0)}"
+
+    def la_semana(ultimo):
+        total = ganancia = 0.0
+        ventas = 0
+        vendidos = {}
+        for i in range(DIAS_DE_LA_SEMANA_DEL_RESUMEN):
+            dia = (ultimo - timedelta(days=i)).isoformat()
+            caja = cierre_de_caja(dia)
+            total += caja["total"]
+            ganancia += caja["ganancia"]
+            ventas += caja["ventas"]
+            for v in ventas_del_dia(dia):
+                if v["anulada"] or not v["cobrada"]:
+                    continue
+                for it in v["items"]:
+                    clave = f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip()
+                    vendidos[clave] = vendidos.get(clave, 0) + int(it.get("cantidad") or 0)
+        return total, ganancia, ventas, vendidos
+
+    total, ganancia, ventas, vendidos = la_semana(fin)
+    total_antes = la_semana(fin - timedelta(days=DIAS_DE_LA_SEMANA_DEL_RESUMEN))[0]
+    desde = fin - timedelta(days=DIAS_DE_LA_SEMANA_DEL_RESUMEN - 1)
+    renglones = [f"📊 Semana del {desde:%d/%m} al {fin:%d/%m} — El Chavo",
+                 f"💵 Vendido: {plata(total)} en {miles(ventas)} venta(s)"]
+    if total_antes:
+        cambio = round((total / total_antes - 1) * 100)
+        renglones.append(f"   {'📈' if cambio >= 0 else '📉'} {'+' if cambio >= 0 else ''}"
+                         f"{cambio}% contra la semana anterior ({plata(total_antes)})")
+    if con_ganancia and ganancia:
+        renglones.append(f"💰 Ganancia estimada: {plata(ganancia)} (de lo que tiene costo)")
+    mas_vendidos = sorted(vendidos.items(), key=lambda x: -x[1])[:5]
+    if mas_vendidos:
+        renglones.append("🏆 Lo que más salió: " + ", ".join(f"{q} ×{miles(n)}"
+                                                           for q, n in mas_vendidos))
+    try:
+        sin_resultado = c.execute(
+            """SELECT termino, COUNT(*) AS veces FROM historial_busquedas
+               WHERE sin_resultado = 1 AND fecha >= datetime('now', ?)
+               GROUP BY lower(termino) ORDER BY veces DESC, termino LIMIT 5""",
+            (f"-{DIAS_DE_LA_SEMANA_DEL_RESUMEN} days",)).fetchall()
+        if sin_resultado:
+            renglones.append("🔎 Lo que más pidieron y no había: "
+                             + ", ".join(f"{f['termino']}"
+                                         + (f" ×{miles(f['veces'])}" if f["veces"] > 1 else "")
+                                         for f in sin_resultado))
+        esperan = c.execute("SELECT COUNT(*) FROM consultas_cliente "
+                            "WHERE estado = 'activa'").fetchone()[0]
+        if esperan:
+            renglones.append(f"📞 Clientes esperando algo: {miles(esperan)}")
+        presus = presupuestos_para_seguir()
+        if presus:
+            contestaron = sum(1 for p in presus if p["contesto"])
+            renglones.append(f"📋 Presupuestos para seguir: {miles(len(presus))}"
+                             + (f" ({miles(contestaron)} te contestaron)" if contestaron
+                                else ""))
+        vencidas = cuentas_para_recordar()
+        if vencidas:
+            renglones.append(f"💳 Cuentas con vencido: {plata(sum(r['Vencido'] for r in vencidas))} "
+                             f"en {miles(len(vencidas))}")
+    except Exception as _err:          # el resumen sale igual, sin eso
+        anotar_error("resumen_de_la_semana", _err)
+    return "\n".join(renglones)
+
+
 def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=None,
                  a_la_caja=False):
     """Cierra la venta. Devuelve (venta_id, avisos). Ver «VENTAS DEL MOSTRADOR».
@@ -1677,6 +1753,11 @@ def descartar_el_presupuesto_a_medio_armar():
 # quedó —volvió (se vuelve a armar, con los precios que se le pasaron) o no lo quiere—. Desde el
 # día siguiente toca preguntar; preguntado, vuelve a tocar a los DIAS_PARA_VOLVER_A_PREGUNTAR.
 DIAS_PARA_VOLVER_A_PREGUNTAR = 3
+# LA VALIDEZ DEL PRESUPUESTO: con la inflación, «🛒 Volvió: armarlo» con los precios de hace dos
+# semanas vendía por debajo de la lista de hoy, sin que nadie se diera cuenta. El mensaje dice
+# hasta cuándo valen; pasados esos días se arma con los de hoy (y se puede respetar el de
+# entonces a mano), y antes, si subieron, se dice cuánto.
+DIAS_DE_VALIDEZ_DEL_PRESUPUESTO = 7
 ESTADOS_DEL_PRESUPUESTO = {"abierto": "⏳ Esperando respuesta", "volvio": "✅ Volvió",
                            "no": "🗑️ No lo quiere"}
 
@@ -1744,10 +1825,34 @@ def presupuestos_para_seguir():
         p["toca"] = (not p["contesto"] and p["hace"] >= 1
                      and (p["preguntado_hace"] is None
                           or p["preguntado_hace"] >= DIAS_PARA_VOLVER_A_PREGUNTAR))
+        p["vencido"] = p["hace"] >= DIAS_DE_VALIDEZ_DEL_PRESUPUESTO
+        p.update(lo_que_subio(p["items"]))
         p["link"] = link_de_whatsapp(p["telefono"], mensaje_de_seguimiento(p))
         salida.append(p)
     salida.sort(key=lambda p: (not p["contesto"], not p["toca"]))
     return salida
+
+
+def lo_que_subio(items):
+    """Cuánto cambiaron los precios de un presupuesto guardado: {total_hoy, subio (en %, del
+    total; 0 si no subió), subieron [(«MARCA CÓDIGO», % de suba)]}. Lo que ya no está en el
+    catálogo o no tiene precio hoy no cuenta."""
+    antes = hoy = 0.0
+    subieron = []
+    for it in items or []:
+        actual = item_de_venta(it.get("producto_id")) if it.get("producto_id") else None
+        precio = float(it.get("precio") or 0)
+        cantidad = int(it.get("cantidad") or 1)
+        if not actual or not actual["precio"] or not precio:
+            continue
+        antes += precio * cantidad
+        hoy += actual["precio"] * cantidad
+        if actual["precio"] > precio * 1.005:
+            subieron.append((f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip(),
+                             round((actual["precio"] / precio - 1) * 100)))
+    return {"total_hoy": round(hoy, 2),
+            "subio": round((hoy / antes - 1) * 100) if antes and hoy > antes * 1.005 else 0,
+            "subieron": subieron}
 
 
 def mensaje_de_seguimiento(presupuesto):
@@ -1759,8 +1864,10 @@ def mensaje_de_seguimiento(presupuesto):
     return (f"Hola{(' ' + nombre) if nombre else ''}! Te escribimos de El Chavo por el presupuesto "
             f"que te pasamos el {dia_de_aca(presupuesto.get('creado_en'))[8:10]}/"
             f"{dia_de_aca(presupuesto.get('creado_en'))[5:7]} ({que}, total "
-            f"${miles(presupuesto.get('total') or 0, 0)}). ¿Lo pudiste ver? Si querés, te lo "
-            "guardamos. ¡Gracias!")
+            f"${miles(presupuesto.get('total') or 0, 0)}). ¿Lo pudiste ver? "
+            + ("Los precios pueden haber cambiado: si querés, te lo pasamos actualizado."
+               if presupuesto.get("vencido") else "Si querés, te lo guardamos.")
+            + " ¡Gracias!")
 
 
 def marcar_presupuesto(presupuesto_id, que):
@@ -1780,27 +1887,44 @@ def marcar_presupuesto(presupuesto_id, que):
         conn.commit()
 
 
-def volver_a_armar_el_presupuesto(presupuesto_id):
+def volver_a_armar_el_presupuesto(presupuesto_id, con_los_de_hoy=None):
     """«🛒 Volvió: armarlo» (va como on_click): vuelve al presupuesto del Buscador, con la
-    cantidad y el precio que se le pasaron, y el seguimiento se cierra como «volvió». Lo que ya
-    no está en el catálogo queda afuera, y se dice."""
-    fila = c.execute("SELECT items FROM presupuestos_para_seguir WHERE id = ?",
+    cantidad que se le pasó, y el seguimiento se cierra como «volvió». El precio: el que se le
+    pasó, salvo `con_los_de_hoy` (sin decir, pasada la validez: ver
+    DIAS_DE_VALIDEZ_DEL_PRESUPUESTO). Lo que ya no está en el catálogo queda afuera, y se dice."""
+    fila = c.execute("""SELECT items, CAST(julianday('now') - julianday(creado_en) AS INTEGER)
+                               AS hace
+                        FROM presupuestos_para_seguir WHERE id = ?""",
                      (int(presupuesto_id),)).fetchone()
     if not fila:
         return
+    if con_los_de_hoy is None:
+        con_los_de_hoy = (fila["hace"] or 0) >= DIAS_DE_VALIDEZ_DEL_PRESUPUESTO
+    items = json.loads(fila["items"] or "[]")
+    subas = lo_que_subio(items)
     carrito = st.session_state.setdefault("carrito", {})
     afuera = []
-    for it in json.loads(fila["items"] or "[]"):
+    for it in items:
         pid = it.get("producto_id")
-        if not item_de_venta(pid):
+        actual = item_de_venta(pid)
+        if not actual:
             afuera.append(f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip())
             continue
         carrito[pid] = {k: it.get(k) for k in CAMPOS_DEL_PRESUPUESTO_QUE_SE_GUARDAN}
         carrito[pid]["cantidad"] = int(it.get("cantidad") or 1)
+        if con_los_de_hoy and actual["precio"]:
+            carrito[pid]["precio"] = actual["precio"]
         st.session_state.pop(f"cant_cart_{pid}", None)
         st.session_state.pop(f"se_lleva_{pid}", None)
     marcar_presupuesto(presupuesto_id, "volvio")
-    avisar("success", "🛒 El presupuesto volvió a armarse, con los precios que se le pasaron."
+    if con_los_de_hoy:
+        como = "con los precios de hoy"
+    elif subas["subio"]:
+        como = (f"con los precios que se le pasaron (hoy están {subas['subio']}% más arriba: "
+                + ", ".join(f"{q} +{s}%" for q, s in subas["subieron"][:3]) + ")")
+    else:
+        como = "con los precios que se le pasaron"
+    avisar("success", f"🛒 El presupuesto volvió a armarse, {como}."
                       + (f" Ya no están en el catálogo: {', '.join(afuera)}." if afuera else ""))
 
 
@@ -1860,6 +1984,12 @@ def mostrar_presupuestos_para_seguir():
                         + (f" · lo armó {p['usuario']}" if p.get("usuario") else "")
                         + ("" if numero_para_whatsapp(p["telefono"]) else
                            " · sin WhatsApp anotado"))
+            if p["subio"]:
+                _c1.caption(f"⚠️ Los precios subieron **{p['subio']}%** desde el presupuesto "
+                            f"(hoy: \\${miles(p['total_hoy'], 0)})"
+                            + (". Pasaron los "
+                               f"{DIAS_DE_VALIDEZ_DEL_PRESUPUESTO} días de validez: se arma "
+                               "con los de hoy." if p["vencido"] else "."))
             if p["contesto"]:
                 _c2.button("💬 Te contestó: ver el chat", key=f"presu_chat_{p['id']}",
                            type="primary", width="stretch", on_click=abrir_el_chat,
@@ -1876,10 +2006,21 @@ def mostrar_presupuestos_para_seguir():
                        on_click=marcar_presupuesto, args=(p["id"], "preguntado"))
             _b2.button("🛒 Volvió: armarlo", key=f"presu_volvio_{p['id']}", width="stretch",
                        on_click=volver_a_armar_el_presupuesto, args=(p["id"],),
-                       help="Vuelve al presupuesto de acá arriba, con los precios que se le "
-                            "pasaron, para pasarlo a una venta.")
+                       help=("Vuelve al presupuesto de acá arriba, con los precios de hoy "
+                             f"(pasaron los {DIAS_DE_VALIDEZ_DEL_PRESUPUESTO} días de validez), "
+                             "para pasarlo a una venta." if p["vencido"] else
+                             "Vuelve al presupuesto de acá arriba, con los precios que se le "
+                             "pasaron, para pasarlo a una venta."))
             _b3.button("🗑️ No lo quiere", key=f"presu_no_{p['id']}", width="stretch",
                        on_click=marcar_presupuesto, args=(p["id"], "no"))
+            # Si subieron, la otra forma a mano: respetar el precio vencido, o actualizar el
+            # que todavía vale.
+            if p["subio"]:
+                st.button("🛒 Volvió, pero con los precios que se le pasaron" if p["vencido"]
+                          else "🛒 Volvió, pero con los precios de hoy",
+                          key=f"presu_volvio_otro_{p['id']}", width="stretch",
+                          on_click=volver_a_armar_el_presupuesto,
+                          args=(p["id"], not p["vencido"]))
     if len(lista) > MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR:
         st.caption(f"Y {miles(len(lista) - MAXIMO_DE_PRESUPUESTOS_PARA_SEGUIR)} más.")
 

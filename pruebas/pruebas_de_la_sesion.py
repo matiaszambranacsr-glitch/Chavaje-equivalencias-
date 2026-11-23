@@ -1276,6 +1276,13 @@ def probar():
              any("Efectivo → Transferencia" in d.value.to_string() and "rita" in d.value.to_string()
                  for d in vta.dataframe),
              [e.value for e in vta.exception]), ("Transferencia", True, []))
+    # El resumen de la semana para el dueño, en la caja (ver resumen_de_la_semana()).
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.session_state["pop_resumen_semana"] = True
+    vta.run()
+    esperar("en la caja, «📲 Resumen de la semana para el dueño» con el texto de la semana",
+            [t.value.split("\n")[0][:12] for t in vta.text_area
+             if str(t.key).startswith("resumen_semana_")], ["📊 Semana del"])
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()
@@ -1424,9 +1431,33 @@ def probar():
     _rita = sesion_nueva("clave-rita-1")
     esperar("el operador (que entró) no", (_rita.session_state["nivel_usuario"],
                                            _bajar_backup(_rita)), ("operador", []))
+    # Y una vez por semana, a la vista (no solo adentro del 🔔): «Más tarde» lo deja para la
+    # semana que viene; bajado, no sale más hasta dentro de una semana.
+    def _recordatorio(sesion):
+        return [b.proto.label for b in sesion.get("download_button")
+                if b.proto.label == "⬇️ Bajarlo ahora"]
+    ns["guardar_config"]("ultimo_backup_bajado", "")
+    ns["guardar_config"]("backup_recordado_en", "")
+    _adm_bk = sesion_nueva("clave-duenio-1")
+    esperar("copia frenada y ningún backup bajado: a la vista, arriba",
+            _recordatorio(_adm_bk), ["⬇️ Bajarlo ahora"])
+    esperar("al operador, no", _recordatorio(sesion_nueva("clave-rita-1")), [])
+    _adm_bk.button(key="backup_mas_tarde").click().run()
+    esperar("«Más tarde»: no sale en esta semana", _recordatorio(sesion_nueva("clave-duenio-1")),
+            [])
+    ns["guardar_config"]("backup_recordado_en", "2020-01-01 00:00:00")
+    ns["marcar_backup_bajado"]()
+    esperar("bajado hace poco: tampoco", ns["hay_que_recordar_el_backup"](), False)
+    ns["guardar_config"]("ultimo_backup_bajado", "2020-01-01 00:00:00")
+    esperar("bajado hace mucho: sí, con cuántos días",
+            ns["hay_que_recordar_el_backup"]() > 300, True)
     ns["guardar_config"]("copia_frenada_sin_cifrar", "")
     ns["invalidar_salud"]()
     esperar("sin la copia frenada, no está", _bajar_backup(sesion_nueva("clave-duenio-1")), [])
+    ns["guardar_config"]("ultimo_backup_github", ns["datetime"].now().strftime(
+        "%Y-%m-%d %H:%M:%S"))
+    esperar("y con la copia andando, el recordatorio tampoco",
+            ns["hay_que_recordar_el_backup"](), False)
 
     # 10. LO NUEVO DE ESTA VERSIÓN (ver LO_NUEVO): al administrador una vez; «Entendido» lo
     # guarda, y no vuelve. Al operador, nunca.

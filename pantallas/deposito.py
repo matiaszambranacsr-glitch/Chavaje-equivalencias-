@@ -316,3 +316,10 @@ if pagina == PAGINAS[8]:
                                "Pidió": r["pedido_por"] or "",
                                "Lo resolvió": r["resuelto_por"] or ""}
                               for r in _ultimos], hide_index=True, width="stretch")
+
+
+# ============================================================
+# 📦 ENTRÓ MERCADERÍA: el stock propio (ver esa sección en logica/deposito.py)
+# ============================================================
+if pagina == PAGINAS[8] and sub_deposito == SUB_DEPOSITO[4]:
+    mostrar_entro_mercaderia()

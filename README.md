@@ -7800,6 +7800,25 @@ cualquiera del personal; avisa si no sirve para WhatsApp). Con eso:
 
 Un taller no puede cambiar el teléfono de una cuenta; el cambio queda en el registro.
 
+## 🌙 La respuesta fuera de horario
+
+El que escribe a la noche o el domingo no sabía si alguien lo iba a leer, y se iba a otro lado.
+En 🗂️ Administrar → 💬 Mensajería y cobros → **«🌙 Respuesta fuera de horario»** se carga el
+horario como se dice («lun-vie 8:00-18:00, sab 8:30-13:00», en hora de acá; la app muestra cómo lo
+entendió) y el texto. Al que escribe con el local cerrado se le contesta solo, **una vez cada 12
+horas** (`logica/mensajes.py`, «LA RESPUESTA FUERA DE HORARIO»):
+
+- **WhatsApp, al instante**: lo hace el relevo, que recibe cada mensaje aunque la app esté
+  dormida, si tiene HORARIO, RESPUESTA y WHATSAPP_TOKEN (pasos en
+  `integraciones/relevo_de_mensajes/LEEME.md`; la app muestra las dos líneas para copiar). Lo que
+  mandó lo guarda como un eco marcado `automatica`.
+- **Facebook e Instagram** (y WhatsApp si el relevo no lo hizo): la app, cuando trae los mensajes.
+- La respuesta queda en el chat como **«🤖 respuesta automática»**, y el chat **sigue sin leer y
+  esperando**: lo contesta una persona al abrir. Contada como una respuesta común, a la mañana el
+  chat aparecía atendido.
+- Lo que se escribió **con el local abierto** no se contesta solo, aunque después se cierre: eso
+  lo contesta una persona. Con un horario que no se entiende, no se puede prender.
+
 ## 📋 Presupuestos para seguir: el que no contestó, a un mensaje de distancia
 
 Un presupuesto que se mandaba por WhatsApp y el cliente no contestaba se perdía: nadie se
@@ -7820,6 +7839,13 @@ seguir»**, arriba en el Buscador (solo para el personal: guarda teléfonos de c
   últimos ocho dígitos del teléfono.
 - El que se manda a un chat de WhatsApp con «💬 Mandárselo» ya queda guardado solo, y guardar el
   mismo dos veces deja uno.
+- **Los precios viejos**: con la inflación, «🛒 Volvió: armarlo» con los precios de hace dos
+  semanas vendía por debajo de la lista de hoy sin que nadie se diera cuenta. Ahora, si subieron,
+  la lista dice «⚠️ Los precios subieron 9% desde el presupuesto (hoy: $4.700)» y el aviso, cuáles.
+  Dentro de los `DIAS_DE_VALIDEZ_DEL_PRESUPUESTO` (7) se arma con los que se le pasaron; pasados,
+  con los de hoy; el otro botón hace lo contrario («🛒 Volvió, pero con…»). El presupuesto que se
+  manda dice «Precios válidos por 7 días», y el «¿lo pudiste ver?» de uno vencido ofrece pasarlo
+  actualizado (`lo_que_subio()`).
 
 El asistente dice en «¿qué está esperando?» a cuántos toca preguntarles. Ver «LOS PRESUPUESTOS
 PARA SEGUIR» en `logica/ventas.py`; lo controla `pruebas/pruebas_de_los_presupuestos.py`.
@@ -7843,6 +7869,46 @@ La ganancia estimada va solo si lo arma un administrador (es el único que la ve
 corregir antes de mandarlo. El **WhatsApp del dueño** lo anota un administrador ahí mismo, una
 vez (`whatsapp_del_duenio()`, en `logica/ventas.py`); con él, el botón es «📲 Mandárselo por
 WhatsApp». La cajera lo puede mandar al cerrar, sin tener que leerle los números a nadie.
+
+**El resumen de la semana**, al lado (`resumen_de_la_semana()`): los 7 días que terminan en el
+día elegido, lo vendido contra la semana anterior («📈 +12%»), la ganancia (solo si lo arma un
+administrador), **lo que más salió** y, sobre todo, **lo que más pidieron y no había** (lo buscado
+sin resultado, en el Buscador y en los pedidos del chat), con los clientes que esperan algo, los
+presupuestos para seguir y lo vencido. Sale siempre, aunque ese día no haya ventas: el lunes a la
+mañana es cuando sirve. Es para decidir qué comprar: eso estaba repartido en tres pantallas.
+
+## 📦 Entró mercadería: el stock propio
+
+En la copia de la base real, **ninguno de los 86.946 productos tenía stock**: entraba solo si la
+lista del proveedor traía esa columna (y ese es el del proveedor) o leyendo la foto del remito con
+la IA, que pide una clave. Sin stock no andan «⏳ Anotar que lo espera» con su «📲 Avisarle», el
+«sin stock» de los pedidos del chat ni el orden por lo que hay. En 📦 Depósito → **«📦 Entró
+mercadería»** (`logica/deposito.py`, «ENTRÓ MERCADERÍA: EL STOCK PROPIO»):
+
+- **Escaneado o escrito**: el cursor ya está en la caja del código (para el lector de códigos de
+  barras); código, cantidad, Enter. Lo mismo dos veces suma dos. Un código que está en varias
+  marcas pregunta cuál entró (sumarlo a la primera era cargarle stock a otra marca); las
+  referencias de fábrica no cuentan.
+- **El remito en Excel o CSV**: se elige qué columna es el código y cuál la cantidad (la app
+  adivina por el título: «Código», «Artículo», «Cant.», «Unidades»). Dice cuántos encontró, cuáles
+  no están en el catálogo y cuáles tienen varias marcas (esos se escanean de a uno).
+- Todo va a una lista para revisar (cantidades, sacar algo) y **«✅ Sumar al stock»** la suma de
+  una, en una transacción, con una línea por producto en el registro de cambios. **La misma
+  entrada dos veces** (los mismos productos y cantidades) avisa y no se suma sin decir que es otra.
+- **Si alguien esperaba algo de lo que entró**, lo dice: «📲 2 cliente(s) esperaban algo de lo que
+  entró: avisales en 📊 Estadísticas → 📌 Para pedir».
+- Las ventas y lo entregado por el depósito ya descontaban. Lo controla
+  `pruebas/pruebas_de_la_mercaderia.py`.
+
+## 💾 El backup, una vez por semana, a la vista
+
+Con la copia automática frenada (sin `clave_copia` no sube a un repositorio público), la
+campanita avisaba con el botón para bajar el backup, pero adentro del 🔔: pasaron semanas sin
+que nadie lo bajara. Ahora, si la copia no se está haciendo (frenada, o la última de hace más de
+tres días) y el último backup bajado tiene más de `DIAS_PARA_RECORDAR_EL_BACKUP` (7) días, al
+administrador le sale **arriba de todo**: «💾 Hace 12 días que no bajás un backup…» con **«⬇️
+Bajarlo ahora»** y **«Más tarde»** (vuelve en una semana). No se manda a ningún lado: se baja a la
+compu (`hay_que_recordar_el_backup()`, en `logica/importar.py`).
 
 ## 🔧 Garantías: lo que volvió fallado, para reclamarle al proveedor
 
