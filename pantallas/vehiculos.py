@@ -13,7 +13,7 @@ if pagina == PAGINAS[6]:
 
     # A QUIÉN AVISAR: un mensaje por cliente con todo lo que le toca, y «✅ Ya le avisé» lo saca
     # de la lista por unos días. Ver avisos_por_cliente().
-    _avisar = avisos_por_cliente(dias_de_aviso=30)
+    _avisar = avisos_por_cliente()
     # Plegados: abiertos empujaban la búsqueda por patente —lo que se viene a hacer— abajo de
     # todo. El título ya dice cuántos hay (lo señaló la revisión de usabilidad con Gemini).
     with st.expander(f"📞 A quién avisar ({len(_avisar)} cliente(s))" + (" 🔴" if _avisar else ""), key="exp_quien_avisar_cliente_s"):
@@ -21,7 +21,8 @@ if pagina == PAGINAS[6]:
             "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
             "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
             "vez que se anotó el km). Aparecen las piezas que ya pasaron su vida útil o que llegan "
-            "en los próximos 30 días. Sin ritmo conocido, las que están a menos del 15% de su "
+            f"en los próximos {DIAS_PARA_AVISAR_EL_SERVICE} días. Sin ritmo conocido, las que están "
+            "a menos del 15% de su "
             "vida útil. Si la pieza tiene «cada cuántos meses», vence también por fecha: lo que "
             "llegue primero.\n\nUn solo mensaje por cliente, con todo lo que le toca. Después de "
             f"mandarlo, **✅ Ya le avisé** lo saca de la lista por {DIAS_SIN_REPETIR_EL_AVISO} "

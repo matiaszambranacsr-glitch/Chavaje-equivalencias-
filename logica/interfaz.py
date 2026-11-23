@@ -605,8 +605,9 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-23c"
+VERSION_DE_LO_NUEVO = "2026-11-23d"
 LO_NUEVO = (
+    ("⏱️ Los tiempos de la página, a tu elección: cada plazo (cuándo un pedido al proveedor está atrasado, cuánto vale un presupuesto, cuándo vuelve sola a Mostrador la cuenta elegida, cada cuánto se recuerda cobrar, cuánto queda lo borrado en la papelera…) se cambia en un solo lugar, para todos. Por ejemplo, el pedido atrasado a los 7 días en vez de 5. Está en «⏱️ Los tiempos de la página».", "🗂️ Administrar → 👥 Usuarios"),
     ("🚚 Pedidos a proveedores con seguimiento: después de mandar el mensaje, «📝 Anotar como pedido». Llega solo cuando lo cargás en «Entró mercadería» (si viene en partes, cuando llegó todo); lo que no llegó en 5 días va a la campanita, con «⏰ Reclamarle». Las listas marcan lo ya pedido, para no pedirlo dos veces, y «⏱️ Cuánto tarda cada proveedor» dice cuántos días tarda cada uno.", "📊 Estadísticas → 📌 Para pedir"),
     ("🔁 «Lo que suele llevar»: con la cuenta de un taller elegida, lo que compra siempre, para sumarlo con un toque.", "🧾 Ventas"),
     ("🛒 «Se está por terminar»: lo que, al ritmo al que se vende, alcanza menos de 15 días, con cuánto pedir para cubrir un mes, al mismo mensaje para el proveedor. La campanita avisa lo que se termina en menos de una semana.", "📊 Estadísticas → 📌 Para pedir"),
@@ -772,6 +773,285 @@ LO_NUEVO = (
     ("⬇️ Con la copia frenada, el backup se baja desde la campanita, y si la app arranca desde "
      "una copia vieja lo avisa con las fechas.", "🔔 la campanita"),
 )
+
+
+# ============================================================================================
+# LOS TIEMPOS QUE ELIGE EL ADMINISTRADOR
+# ============================================================================================
+# Lo pidió el dueño: «lo de los pedidos, en vez de 5 días que sean 7, y así con todo». Cada
+# plazo de la página (cuándo un pedido al proveedor está atrasado, cuánto vale un presupuesto,
+# cuándo vuelve sola a Mostrador la cuenta elegida…) estaba fijo en el código. Ahora está en
+# esta lista con su valor de siempre, y el administrador lo cambia en 🗂️ Administrar → 👥
+# Usuarios, en «⏱️ Los tiempos de la página». Lo elegido se guarda en la configuración
+# («tiempos_elegidos», solo lo que no es el de siempre) y se aplica en cada toque
+# (aplicar_los_tiempos_elegidos(), desde app.py): las funciones leen el nombre al usarlo, así
+# que cambia en todas las pantallas, en la campanita, en el asistente y en las tareas de fondo.
+# Lo que no está es técnico (cuánto se espera a internet, cada cuánto se reintenta una fuente
+# de afuera) o lo fija otro (las 24 horas de Meta para contestar un chat).
+TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR = (
+    # (grupo, nombre —con [n] si es una parte de un par—, qué es, unidad, mínimo, máximo)
+    ("🧾 Ventas y caja", "SEGUNDOS_PARA_VENTA_REPETIDA",
+     "La misma venta otra vez pregunta si es repetida, dentro de", "segundos", 10, 3600),
+    ("🧾 Ventas y caja", "MINUTOS_PARA_DESHACER_LA_PROPIA",
+     "El vendedor puede deshacer su venta sin cobrar durante", "minutos", 1, 240),
+    ("🧾 Ventas y caja", "HORAS_DE_LA_CUENTA_ELEGIDA",
+     "La cuenta elegida en «Atendiendo a» vuelve sola a Mostrador a las", "horas", 1, 24),
+    ("🧾 Ventas y caja", "DIAS_DE_LO_QUE_SUELE_LLEVAR",
+     "«🔁 Lo que suele llevar» mira lo comprado en los últimos", "días", 7, 730),
+    ("📋 Presupuestos y clientes", "DIAS_DE_VALIDEZ_DEL_PRESUPUESTO",
+     "Un presupuesto vale (después se arma con los precios de hoy)", "días", 1, 90),
+    ("📋 Presupuestos y clientes", "DIAS_PARA_VOLVER_A_PREGUNTAR",
+     "«📋 Presupuestos para seguir»: volver a preguntarle al cliente a los", "días", 1, 60),
+    ("📋 Presupuestos y clientes", "DIAS_PARA_VOLVER_A_AVISAR",
+     "Al que se le avisó que llegó lo que esperaba y no vino, otra vez a los", "días", 1, 60),
+    ("📋 Presupuestos y clientes", "DIAS_PARA_AVISAR_EL_SERVICE",
+     "A un auto «le toca pronto» un cambio cuando faltan menos de", "días", 1, 180),
+    ("📋 Presupuestos y clientes", "DIAS_SIN_REPETIR_EL_AVISO",
+     "A quien se le avisó del service, no volver a avisarle por", "días", 1, 180),
+    ("📋 Presupuestos y clientes", "DIAS_VENCIMIENTO_RESERVA",
+     "Una reserva de stock se libera sola a los", "días", 1, 90),
+    ("🛒 Para pedir y proveedores", "DIAS_DE_VENTAS_PARA_REPONER",
+     "«🛒 Se está por terminar» mira lo vendido en los últimos", "días", 7, 365),
+    ("🛒 Para pedir y proveedores", "DIAS_QUE_TIENE_QUE_ALCANZAR",
+     "«🛒 Se está por terminar» muestra lo que alcanza menos de", "días", 1, 180),
+    ("🛒 Para pedir y proveedores", "DIAS_QUE_CUBRE_EL_PEDIDO",
+     "Lo que sugiere pedir tiene que alcanzar para", "días", 1, 365),
+    ("🛒 Para pedir y proveedores", "DIAS_QUE_AVISA_LO_QUE_SE_TERMINA",
+     "La campanita avisa lo que se termina en menos de", "días", 1, 180),
+    ("🛒 Para pedir y proveedores", "DIAS_PARA_RECLAMAR_EL_PEDIDO",
+     "Un pedido al proveedor está atrasado (⏰ y campanita) a los", "días", 1, 90),
+    ("🛒 Para pedir y proveedores", "DIAS_DE_CUANTO_TARDA",
+     "«⏱️ Cuánto tarda cada proveedor» mira lo pedido en los últimos", "días", 30, 730),
+    ("🛒 Para pedir y proveedores", "DIAS_PARA_AVISAR_UNA_GARANTIA",
+     "Una garantía sin reclamarle al proveedor va a la campanita a los", "días", 1, 180),
+    ("🛒 Para pedir y proveedores", "DIAS_PARA_AVISAR_PRECIO_VIEJO",
+     "Una lista de precios se avisa como vieja a los", "días", 7, 365),
+    ("📦 Depósito", "MINUTOS_PARA_AVISAR[0]",
+     "Un pedido que espera en el depósito se marca 🟡 a los", "minutos", 1, 240),
+    ("📦 Depósito", "MINUTOS_PARA_AVISAR[1]",
+     "…y se marca 🔴 a los", "minutos", 2, 480),
+    ("📦 Depósito", "HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA",
+     "Lo entregado que sigue afuera se marca en rojo y se avisa a las", "horas", 1, 720),
+    ("💳 Cuentas corrientes", "DIAS_PARA_VOLVER_A_RECORDAR",
+     "«📲 Cobrar lo vencido»: volver a recordarle a una cuenta a los", "días", 1, 90),
+    ("💳 Cuentas corrientes", "HORAS_QUE_VALE_UN_PERMISO",
+     "Un permiso para pasar el límite de crédito vale", "horas", 1, 720),
+    ("💳 Cuentas corrientes", "VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS",
+     "El código de retiro que genera el taller vale", "horas", 1, 168),
+    ("💬 Mensajes", "MINUTOS_QUE_QUEDA_EN_CURSO_UN_CHAT",
+     "El chat abierto sigue «en curso» (para mandarle la cotización) durante", "minutos", 5,
+     480),
+    ("💬 Mensajes", "HORAS_ENTRE_RESPUESTAS_AUTOMATICAS",
+     "La respuesta fuera de horario, al mismo cliente, una vez cada", "horas", 1, 72),
+    ("💾 Copias y avisos", "MINUTOS_ENTRE_COPIAS",
+     "Se mira si hay algo nuevo para la copia automática cada", "minutos", 5, 240),
+    ("💾 Copias y avisos", "DIAS_PARA_RECORDAR_EL_BACKUP",
+     "Recordar bajar el backup si el último tiene más de", "días", 1, 60),
+    ("💾 Copias y avisos", "HORAS_DE_ATRASO_PARA_AVISAR",
+     "Arrancar desde una copia atrasada se avisa desde las", "horas", 1, 72),
+    ("💾 Copias y avisos", "HORAS_DE_ATRASO_GRAVE",
+     "…y es grave desde las", "horas", 2, 720),
+    ("💾 Copias y avisos", "DIAS_QUE_SE_AVISA_EL_ARRANQUE",
+     "Que la app arrancó desde una copia se avisa durante", "días", 1, 60),
+    ("💾 Copias y avisos", "DIAS_EN_LA_PAPELERA",
+     "Lo borrado queda en la papelera (después se borra solo)", "días", 1, 365),
+    ("💾 Copias y avisos", "DIAS_DE_BUSQUEDAS_GUARDADAS",
+     "Las búsquedas se guardan (para las estadísticas) durante", "días", 30, 3650),
+)
+# Los que van de a dos: el primero tiene que ser menor que el segundo (si no, el 🔴 llegaría
+# antes que el 🟡). Y lo que avisa la campanita sale de «🛒 Se está por terminar»: más días que
+# los de esa lista no encontraría nada nuevo.
+TIEMPOS_QUE_VAN_EN_ORDEN = (
+    ("MINUTOS_PARA_AVISAR[0]", "MINUTOS_PARA_AVISAR[1]"),
+    ("HORAS_DE_ATRASO_PARA_AVISAR", "HORAS_DE_ATRASO_GRAVE"),
+    ("DIAS_QUE_AVISA_LO_QUE_SE_TERMINA", "DIAS_QUE_TIENE_QUE_ALCANZAR"),
+)
+# Estos dos son de cada pasada de la lógica a propósito, no del proceso: van con los tiempos de
+# ESTA carga del código. Si se sube código nuevo con otro valor de siempre, el de siempre es el
+# nuevo, y lo elegido se vuelve a aplicar sobre él en el toque siguiente.
+_TIEMPOS_DE_SIEMPRE = {}
+_TIEMPOS_YA_APLICADOS = set()
+_RE_PARTE_DEL_TIEMPO = re.compile(r"^([A-Z_]+)\[(\d)\]$")
+
+
+def _nombre_y_parte(clave):
+    """«MINUTOS_PARA_AVISAR[1]» → («MINUTOS_PARA_AVISAR», 1); «DIAS_X» → («DIAS_X», None)."""
+    hallada = _RE_PARTE_DEL_TIEMPO.match(clave)
+    return (hallada.group(1), int(hallada.group(2))) if hallada else (clave, None)
+
+
+def tiempo_de_siempre(clave):
+    """El valor con el que viene la app. Se toma la primera vez que se pregunta, antes de que
+    nada lo cambie (aplicar_los_tiempos_elegidos() pregunta antes de aplicar)."""
+    nombre, parte = _nombre_y_parte(clave)
+    if nombre not in _TIEMPOS_DE_SIEMPRE:
+        _TIEMPOS_DE_SIEMPRE[nombre] = globals()[nombre]
+    valor = _TIEMPOS_DE_SIEMPRE[nombre]
+    return valor[parte] if parte is not None else valor
+
+
+def tiempo_de_ahora(clave):
+    nombre, parte = _nombre_y_parte(clave)
+    valor = globals()[nombre]
+    return valor[parte] if parte is not None else valor
+
+
+def tiempos_elegidos():
+    """{clave: valor} de lo que el administrador cambió (lo que no está, va el de siempre).
+    Lo que no se entiende o quedó fuera de su rango no cuenta: una base vieja o tocada a mano
+    no puede dejar un plazo en cero."""
+    try:
+        guardados = json.loads(obtener_config("tiempos_elegidos", "") or "{}")
+    except ValueError:
+        return {}
+    rangos = {t[1]: (t[4], t[5]) for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR}
+    return {clave: int(valor) for clave, valor in (guardados or {}).items()
+            if clave in rangos and isinstance(valor, int) and not isinstance(valor, bool)
+            and rangos[clave][0] <= valor <= rangos[clave][1]}
+
+
+def aplicar_los_tiempos_elegidos(elegidos=None):
+    """Deja cada tiempo en lo elegido, o en el de siempre si no hay nada elegido (o se volvió
+    a lo de siempre). Lo llama app.py en cada toque: una consulta chica."""
+    elegidos = tiempos_elegidos() if elegidos is None else elegidos
+    por_nombre = {}
+    for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR:
+        nombre, parte = _nombre_y_parte(t[1])
+        if t[1] in elegidos or t[1] in _TIEMPOS_YA_APLICADOS:
+            por_nombre.setdefault(nombre, {})[parte] = elegidos.get(t[1], tiempo_de_siempre(t[1]))
+    for nombre, partes in por_nombre.items():
+        if None in partes:
+            globals()[nombre] = partes[None]
+        else:
+            valor = list(globals()[nombre])
+            for parte, nuevo in partes.items():
+                valor[parte] = nuevo
+            globals()[nombre] = tuple(valor)
+    _TIEMPOS_YA_APLICADOS.update(elegidos)
+
+
+def guardar_los_tiempos(nuevos):
+    """Guarda {clave: valor} (los que vengan; los demás quedan como estaban). Devuelve los
+    rótulos de lo que cambió. ValueError si algo está fuera de su rango o de su orden."""
+    exigir_nivel("admin", "cambiar los tiempos de la página")
+    por_clave = {t[1]: t for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR}
+    antes = {clave: tiempo_de_ahora(clave) for clave in por_clave}
+    quedan = dict(antes)
+    for clave, valor in nuevos.items():
+        if clave not in por_clave:
+            continue
+        _g, _n, que, unidad, minimo, maximo = por_clave[clave]
+        if valor is None or int(valor) != valor or not minimo <= int(valor) <= maximo:
+            raise ValueError(f"«{que}»: tiene que ser entre {miles(minimo)} y {miles(maximo)} "
+                             f"{unidad}.")
+        quedan[clave] = int(valor)
+    for primero, segundo in TIEMPOS_QUE_VAN_EN_ORDEN:
+        if quedan[primero] > quedan[segundo] or (
+                primero.startswith(("MINUTOS_PARA", "HORAS_DE_ATRASO"))
+                and quedan[primero] == quedan[segundo]):
+            raise ValueError(f"«{por_clave[primero][2]}» ({miles(quedan[primero])}) tiene que "
+                             f"ser menos que «{por_clave[segundo][2]}» "
+                             f"({miles(quedan[segundo])}).")
+    elegidos = {clave: valor for clave, valor in quedan.items()
+                if valor != tiempo_de_siempre(clave)}
+    cambiaron = [clave for clave in por_clave if quedan[clave] != antes[clave]]
+    with db_lock:
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('tiempos_elegidos', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (json.dumps(elegidos, sort_keys=True),))
+        for clave in cambiaron:
+            anotar_cambio("cambió un tiempo de la página", "configuracion", clave,
+                          antes=antes[clave], despues=quedan[clave])
+        conn.commit()
+    aplicar_los_tiempos_elegidos(elegidos)
+    return [f"{por_clave[k][2]} {miles(quedan[k])} {por_clave[k][3]}" for k in cambiaron]
+
+
+def volver_a_los_tiempos_de_siempre():
+    """«↩️ Todos como venían» (va como on_click)."""
+    try:
+        cambiaron = guardar_los_tiempos({t[1]: tiempo_de_siempre(t[1])
+                                         for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR})
+    except (PermissionError, ValueError) as _err:
+        error = el_error_en_castellano(_err)
+    else:
+        error = ""
+    if error:
+        avisar("error", error)
+    else:
+        avisar("success", f"↩️ Volvieron a los de siempre {miles(len(cambiaron))} tiempo(s).")
+
+
+def con_los_tiempos_de_ahora(texto):
+    """Un texto con «{DIAS_PARA_RECLAMAR_EL_PEDIDO}» adentro, con el número de ahora (lo usa
+    el asistente, cuyas respuestas están escritas una vez y no pueden quedar con el viejo)."""
+    claves = {t[1] for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR}
+    return re.sub(r"\{([A-Z_]+(?:\[\d\])?)\}",
+                  lambda m: miles(tiempo_de_ahora(m.group(1))) if m.group(1) in claves
+                  else m.group(0), str(texto or ""))
+
+
+def _clave_del_campo_de_tiempo(clave):
+    """La caja de cada tiempo lleva el valor de ahora en la clave: al guardar (o al volver a lo
+    de siempre) se dibuja una caja nueva con lo nuevo, en vez de quedarse con lo de antes."""
+    return f"tiempo_{re.sub(r'[^A-Z0-9_]', '_', clave)}_{tiempo_de_ahora(clave)}"
+
+
+def guardar_los_tiempos_del_formulario():
+    """«💾 Guardar los tiempos» (va como on_click): lo de las cajas, todo junto."""
+    nuevos = {}
+    for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR:
+        valor = st.session_state.get(_clave_del_campo_de_tiempo(t[1]))
+        if valor is not None:
+            nuevos[t[1]] = valor
+    try:
+        cambiaron = guardar_los_tiempos(nuevos)
+    except (PermissionError, ValueError) as _err:
+        error = el_error_en_castellano(_err)
+    else:
+        error = ""
+    if error:
+        avisar("error", error)
+    elif cambiaron:
+        avisar("success", "⏱️ Guardado: " + "; ".join(cambiaron[:4])
+               + (f" y {miles(len(cambiaron) - 4)} más" if len(cambiaron) > 4 else "") + ".")
+    else:
+        avisar("info", "No cambiaste ningún tiempo.")
+
+
+def mostrar_los_tiempos_de_la_pagina():
+    """«⏱️ Los tiempos de la página», en 👥 Usuarios (solo el administrador llega)."""
+    distintos = sum(1 for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR
+                    if tiempo_de_ahora(t[1]) != tiempo_de_siempre(t[1]))
+    plegable = st.expander("⏱️ Los tiempos de la página", key="exp_tiempos_de_la_pagina",
+                           on_change="rerun")
+    if not plegable.open:
+        return
+    with plegable:
+        st.caption("Cada plazo de la página, con el de siempre en la ayuda (?). Cambiá los que "
+                   "quieras y «💾 Guardar los tiempos»: vale para todos desde el toque siguiente."
+                   + (f" Hoy hay {miles(distintos)} distinto(s) de los de siempre."
+                      if distintos else ""))
+        # Por tema, en pestañas: son más de treinta, y en el celular uno abajo del otro eran
+        # varias pantallas de bajar. Las pestañas dibujan todo igual, así que se guardan juntos.
+        grupos = list(dict.fromkeys(t[0] for t in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR))
+        with st.form("form_tiempos_de_la_pagina", border=False):
+            pestanias = dict(zip(grupos, st.tabs(grupos)))
+            for grupo, clave, que, unidad, minimo, maximo in TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR:
+                de_siempre = tiempo_de_siempre(clave)
+                pestanias[grupo].number_input(
+                    f"{que} ({unidad})" + ("" if tiempo_de_ahora(clave) == de_siempre
+                                           else " ✏️"),  # rótulo fijo: cambia solo al guardar
+                    min_value=minimo, max_value=maximo, step=1,
+                    value=tiempo_de_ahora(clave), key=_clave_del_campo_de_tiempo(clave),
+                    help=f"El de siempre: {miles(de_siempre)} {unidad}. Entre {miles(minimo)} y "
+                         f"{miles(maximo)}.")
+            st.form_submit_button("💾 Guardar los tiempos", type="primary",
+                                  on_click=guardar_los_tiempos_del_formulario)
+        if distintos:
+            st.button("↩️ Todos como venían", key="tiempos_como_venian",
+                      on_click=volver_a_los_tiempos_de_siempre,
+                      help="Vuelve cada tiempo a su valor de siempre.")
 
 
 # ============================================================================================

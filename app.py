@@ -108,6 +108,7 @@ específico, y las pantallas quedan todas al final:
         · PIEZAS DE INTERFAZ QUE SE REPITEN
         · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
         · LO NUEVO DE ESTA VERSIÓN
+        · LOS TIEMPOS QUE ELIGE EL ADMINISTRADOR
         · LA AYUDA DE CADA PANTALLA
         · EL CLICK DERECHO, LAS TECLAS Y EL PITIDO (en el navegador)
         · LOS GRÁFICOS, CON LOS NÚMEROS Y LAS FECHAS COMO SE ESCRIBEN ACÁ
@@ -271,6 +272,13 @@ if _cambio is None or _cambio():
     importlib.import_module("pantallas")
 logica, pantallas = sys.modules["logica"], sys.modules["pantallas"]
 
+# Los tiempos que eligió el administrador (ver «LOS TIEMPOS QUE ELIGE EL ADMINISTRADOR» en
+# logica/interfaz.py), antes de pasarle los nombres a las pantallas. Con la base ilegible no
+# hay de dónde leerlos: van los de siempre.
+try:
+    logica.aplicar_los_tiempos_elegidos()
+except Exception:        # noqa: BLE001 — la base ilegible tiene su propio aviso, abajo
+    pass
 globals().update(logica.todo_lo_de_la_logica())
 _corte("cargar la lógica")
 

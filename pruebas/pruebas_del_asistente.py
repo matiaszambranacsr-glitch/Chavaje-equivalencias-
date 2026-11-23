@@ -88,6 +88,8 @@ ENTIENDE = (
     ("importe mal una lista", "como:deshacer_lista"),
     ("llego mercaderia nueva", "como:remito"),
     ("no llego lo que le pedi al proveedor", "como:pedido_proveedor"),
+    ("cambiar los tiempos de la pagina", "como:tiempos"),
+    ("configurar los plazos de los avisos", "como:tiempos"),
     ("reclamarle un pedido atrasado al proveedor", "como:pedido_proveedor"),
     ("lo que suele llevar el taller", "como:suele_llevar"),
     ("lo de siempre de este cliente", "como:suele_llevar"),

@@ -267,7 +267,7 @@ def _dato_de_lo_pendiente(contexto):
                           "reclamarle al proveedor: «🔧 Garantías», en ↩️ Devoluciones.")
             botones += _asis_ir_a(_DEVOLUCIONES, contexto)
     if _VEHICULOS in visibles:
-        avisar_a = avisos_por_cliente(dias_de_aviso=30)
+        avisar_a = avisos_por_cliente()
         if avisar_a:
             lineas.append(f"📞 A **{miles(len(avisar_a))}** cliente(s) les toca un cambio en su "
                           "auto: están en 🚗 Vehículos, arriba de todo.")

@@ -538,7 +538,16 @@ def barrer_en_el_telefono(url, clave):
             caja.evaluate("e => e.blur()")
             _esperar(pagina, 3)
 
+        def abrir_los_tiempos():
+            pagina.locator(barra).filter(has_text="Administrar").first.tap()
+            _esperar(pagina, 2)
+            pagina.locator(solapas_de).filter(has_text="Usuarios").first.tap()
+            _esperar(pagina, 2)
+            pagina.locator(".st-key-exp_tiempos_de_la_pagina summary").first.tap()
+            _esperar(pagina, 3)
+
         for donde, abrir in (
+                ("🗂️ Administrar → 👥 Usuarios → ⏱️ Los tiempos de la página", abrir_los_tiempos),
                 ("💬 Mensajes → 🧩 Armar el presupuesto con lo que pide",
                  abrir_los_pedidos_del_chat),
                 ("🔍 Buscador → 🧩 Pegar el pedido de un cliente", abrir_el_pedido_pegado)):

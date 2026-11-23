@@ -1275,8 +1275,10 @@ def garantias(con_las_cerradas=False):
     return [dict(f) for f in c.fetchall()]
 
 
-def garantias_sin_reclamar_hace(dias=DIAS_PARA_AVISAR_UNA_GARANTIA):
-    """Las que siguen por reclamar desde hace `dias` días o más (contados en la hora de acá)."""
+def garantias_sin_reclamar_hace(dias=None):
+    """Las que siguen por reclamar desde hace `dias` días o más (contados en la hora de acá;
+    DIAS_PARA_AVISAR_UNA_GARANTIA si no se dice, que elige el administrador)."""
+    dias = DIAS_PARA_AVISAR_UNA_GARANTIA if dias is None else dias
     salida = []
     for g in garantias():
         try:

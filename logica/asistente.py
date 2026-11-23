@@ -407,7 +407,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "suele siempre habitual habitualmente frecuente repite repetir mismo siempre lleva "
      "compra de siempre lo de siempre",
      "En 🧾 Ventas, con la cuenta elegida en «🧾 Atendiendo a», abrí «🔁 Lo que suele llevar»: "
-     "lo que llevó dos veces o más en los últimos 4 meses (en ventas y en lo que le entregó el "
+     "lo que llevó dos veces o más en los últimos {DIAS_DE_LO_QUE_SUELE_LLEVAR} días (en ventas "
+     "y en lo que le entregó el "
      "depósito). «➕» lo suma a la venta. Sin precios, por si el cliente está mirando.",
      "🧾 Ventas", ""),
     ("cobrar", "Cobrar una venta",
@@ -651,7 +652,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "recordar recordatorio recordarle deben debe whatsapp cuentas",
      "Abrí «📲 Cobrar lo vencido»: están las cuentas que deben vencido, cada una con "
      "«📲 Recordarle» (abre WhatsApp con el mensaje ya escrito, al número de la cuenta). "
-     "Después de mandarlo tocá «✅ Ya se lo recordé»: pasa al final por una semana.",
+     "Después de mandarlo tocá «✅ Ya se lo recordé»: pasa al final por "
+     "{DIAS_PARA_VOLVER_A_RECORDAR} días.",
      "💳 Cuentas corrientes", ""),
     ("limite", "Cambiar el límite, el descuento o el plazo de una cuenta",
      "limite credito tope descuento plazo dias vencimiento interes mora tasa bcra punitorio "
@@ -678,6 +680,15 @@ COMO_HAGO_DEL_ASISTENTE = (
      "pero no entra.",
      "👥 Usuarios", "admin"),
     # ---- usuarios y entrar ----
+    ("tiempos", "Cambiar los tiempos de la página (plazos y avisos)",
+     "tiempo tiempos plazo plazos cambiar configurar ajustar dias horas minutos cuantos "
+     "vence vencimiento atrasado avisa campanita demora",
+     "En «⏱️ Los tiempos de la página» está cada plazo de la página, por tema: cuándo un pedido "
+     "al proveedor está atrasado, cuánto vale un presupuesto, cuándo vuelve sola a Mostrador la "
+     "cuenta elegida, cada cuánto se recuerda cobrar… Cambiá los que quieras y «💾 Guardar los "
+     "tiempos»: vale para todos desde el toque siguiente. «↩️ Todos como venían» los deja como "
+     "venían. Solo el administrador.",
+     "👥 Usuarios", "admin"),
     ("crear_usuario", "Crear el usuario de un empleado",
      "crear usuario empleado nuevo alta vendedor cajero cajera operador administrador "
      "permiso nivel",
@@ -754,8 +765,9 @@ COMO_HAGO_DEL_ASISTENTE = (
     ("reponer", "Saber qué hay que pedirle al proveedor",
      "pedir comprar reponer reposicion falta faltante stock bajo acaba termina terminar "
      "quedan poco proveedor pedido compra anotar",
-     "«🛒 Se está por terminar»: lo que, al ritmo al que se vende, alcanza menos de 15 días, con "
-     "cuánto pedir para cubrir un mes; marcalo y sale el mensaje para el proveedor. También: a "
+     "«🛒 Se está por terminar»: lo que, al ritmo al que se vende, alcanza menos de "
+     "{DIAS_QUE_TIENE_QUE_ALCANZAR} días, con cuánto pedir para cubrir {DIAS_QUE_CUBRE_EL_PEDIDO} "
+     "días; marcalo y sale el mensaje para el proveedor. También: a "
      "quién conviene comprarle y lo que no se mueve. Lo que falta se anota desde el Buscador "
      "(«📌 Reponer») o desde la venta («📌 Anotar para reponer») y aparece acá.",
      "📌 Para pedir", ""),
@@ -764,8 +776,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "seguimiento anotar pedido llegaron",
      "Después de mandarle el mensaje al proveedor en «📌 Para pedir», tocá «📝 Anotar como "
      "pedido»: queda en «🚚 Pedido y sin llegar». Al cargarlo en «📦 Entró mercadería» se da por "
-     "llegado solo (si llega en partes, cuando llegó todo). Lo que no llegó en 5 días va a la "
-     "campanita, y «⏰ Reclamarle» arma el mensaje.",
+     "llegado solo (si llega en partes, cuando llegó todo). Lo que no llegó en "
+     "{DIAS_PARA_RECLAMAR_EL_PEDIDO} días va a la campanita, y «⏰ Reclamarle» arma el mensaje.",
      "📌 Para pedir", ""),
     ("tendencias", "Ver lo que más se busca en Mercado Libre",
      "mercado libre ml meli tendencias busca gente demanda moda semana",
@@ -933,7 +945,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "devolver contestar mensajes",
      "En el chat, si mandó códigos, tocá «📋 Cotizar estos códigos»: van a 📋 Lista WhatsApp. Ahí "
      "(o en el presupuesto del Buscador) está «💬 Mandárselo a …»: se lo manda a ese chat y "
-     "vuelve ahí. Sale durante media hora después de abrir el chat.",
+     "vuelve ahí. Sale durante {MINUTOS_QUE_QUEDA_EN_CURSO_UN_CHAT} minutos después de abrir el "
+     "chat.",
      "💬 Mensajes", "empleado"),
     ("presupuesto_del_chat", "Armar el presupuesto con lo que pide el cliente en el chat",
      "armar presupuesto pide pidio pidiendo pedido pedidos separar piezas descartar elegir chat "
@@ -955,7 +968,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "respuesta automatica fuera horario cerrado noche domingo feriado contestar solo",
      "En 🗂️ Administrar → 💬 Mensajería y cobros, «🌙 Respuesta fuera de horario»: prendela y "
      "poné el horario («lun-vie 8:00-18:00, sab 8:30-13:00») y el texto. Al que escribe con el "
-     "local cerrado se le contesta solo, una vez cada 12 horas; el chat sigue sin leer.",
+     "local cerrado se le contesta solo, una vez cada {HORAS_ENTRE_RESPUESTAS_AUTOMATICAS} horas; el chat sigue "
+     "sin leer.",
      "💬 Mensajería y cobros", "admin"),
     ("cliente_espera", "Anotar que un cliente espera un repuesto, para avisarle cuando llegue",
      "anotar cliente espera esperando avisarle avisar llegue llega entra consulta consultas "
@@ -1156,10 +1170,12 @@ def _asis_palabras(texto, conocidas=None, raices=()):
 
 
 def _asis_ficha(nombre, tipo, titulo, claves, texto, destino, quien=""):
+    # «{DIAS_PARA_RECLAMAR_EL_PEDIDO}»: un tiempo que elige el administrador, que se pone al
+    # contestar (ver responder_del_asistente()). No cuenta como palabras de la ficha.
     return {"nombre": nombre, "tipo": tipo, "titulo": titulo, "texto": texto, "claves": claves,
             "destino": destino, "quien": quien,
             "_titulo": set(_asis_palabras(titulo)), "_claves": set(_asis_palabras(claves)),
-            "_texto": set(_asis_palabras(texto))}
+            "_texto": set(_asis_palabras(re.sub(r"\{[A-Z_]+(?:\[\d\])?\}", " ", texto)))}
 
 
 def fichas_del_asistente():
@@ -1585,6 +1601,15 @@ def temas_del_asistente(contexto):
 
 
 def responder_del_asistente(pregunta, contexto):
+    """Lo de _asis_responder(), con los tiempos que eligió el administrador puestos (las
+    respuestas dicen «{DIAS_PARA_RECLAMAR_EL_PEDIDO} días»: ver con_los_tiempos_de_ahora())."""
+    respuesta = _asis_responder(pregunta, contexto)
+    if "{" in str(respuesta.get("texto") or ""):
+        respuesta = {**respuesta, "texto": con_los_tiempos_de_ahora(respuesta["texto"])}
+    return respuesta
+
+
+def _asis_responder(pregunta, contexto):
     """Qué contesta el asistente. No cambia nada: ni la sesión, ni la base, ni la pantalla. Lee
     de la base solo los datos del momento, para quien los ve (ver «LO QUE PASA AHORA»).
 

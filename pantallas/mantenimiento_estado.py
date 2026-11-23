@@ -370,7 +370,7 @@ if pagina == PAGINAS[3]:
             explicar(
                 "Cuando borrás una marca entera, un combo, un alias de transferencia o un producto "
                 "puntual (por ID), queda acá guardado por si te equivocaste.",
-                "Se borra en forma permanente solo cuando vos lo pedís o pasan más de 30 días. "
+                f"Se borra en forma permanente solo cuando vos lo pedís o pasan más de {DIAS_EN_LA_PAPELERA} días. "
                 "(Fusionar marcas y restaurar un backup completo siguen siendo irreversibles — esos no "
                 "pasan por acá.)"
             )
@@ -400,8 +400,10 @@ if pagina == PAGINAS[3]:
                     colp3.button("🗑️", key=f"borrar_papelera_{item['ID']}", help="Borrar en forma permanente, sin restaurar",
                                   on_click=borrar_papelera_definitivo, args=(item["ID"],))
 
-                st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
-                st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
+                st.caption(f"También se limpia sola: lo que lleva más de {DIAS_EN_LA_PAPELERA} días acá se borra "
+                           "en forma permanente.")
+                st.button(f"🧹 Vaciar ahora lo de más de {DIAS_EN_LA_PAPELERA} días",
+                          on_click=vaciar_papelera_antigua)
 
             # LOS ERRORES QUE LA APP SE TRAGÓ, acá y no en «📌 Para pedir», donde estaban: son
             # del estado de la app, no de qué conviene pedir. Si una tarea automática viene

@@ -1312,6 +1312,8 @@ if pagina == PAGINAS[3]:
             # en logica/base.py.
             mostrar_la_llave_de_solo_con_cuenta()
             mostrar_como_se_ve_el_auto()
+            # Los plazos de toda la página (ver «LOS TIEMPOS QUE ELIGE EL ADMINISTRADOR»).
+            mostrar_los_tiempos_de_la_pagina()
             st.markdown("---")
             st.markdown("**👤 Empleados (admin / operador)**")
             explicar(
@@ -1564,7 +1566,8 @@ if pagina == PAGINAS[3]:
         explicar(
             "Lo que cada taller se lleva fiado y lo que va pagando, con plazo, límite y cheques.",
             "Para cargarle algo a la cuenta hace falta el **código de retiro** que el taller genera "
-            "en su portal (6 cifras, un solo uso, 24 horas): así nadie retira a su nombre "
+            f"en su portal (6 cifras, un solo uso, {VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS} horas): así "
+            "nadie retira a su nombre "
             "diciendo «vengo de parte de». Se puede apagar por taller, en su configuración.\n\n"
             "Los talleres son los mecánicos de **👥 Usuarios**: el que no tiene usuario no tiene "
             "portal ni código."

@@ -7946,6 +7946,47 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## ⏱️ Los tiempos de la página, a elección del administrador
+
+Lo pidió el dueño: «lo de los pedidos, en vez de 5 días que sean 7, y así con todo». Cada plazo
+de la página estaba fijo en el código. Ahora están todos en **🗂️ Administrar → 👥 Usuarios →
+«⏱️ Los tiempos de la página»** (solo el administrador), agrupados por tema, cada uno con su
+valor de siempre en la ayuda (?):
+
+- **🧾 Ventas y caja**: la venta repetida (120 segundos), deshacer la propia (10 minutos), la
+  cuenta elegida que vuelve sola a Mostrador (3 horas), «🔁 Lo que suele llevar» (120 días).
+- **📋 Presupuestos y clientes**: validez del presupuesto (7 días), volver a preguntar (3), volver
+  a avisar que llegó (3), «le toca pronto» un service (30), no repetir el aviso del service (15),
+  reservas de stock (7).
+- **🛒 Para pedir y proveedores**: lo vendido que mira «Se está por terminar» (60 días), lo que
+  tiene que alcanzar (15), para cuánto pedir (30), lo que avisa la campanita (7), el pedido
+  atrasado (5), «Cuánto tarda cada proveedor» (180), garantías sin reclamar (14), la lista de
+  precios vieja (60).
+- **📦 Depósito**: el 🟡 y el 🔴 de lo que espera (10 y 20 minutos), lo que sigue afuera (24 horas).
+- **💳 Cuentas corrientes**: volver a recordar lo vencido (7 días), el permiso para pasar el
+  límite (24 horas), el código de retiro (24 horas).
+- **💬 Mensajes**: el chat «en curso» (30 minutos), la respuesta fuera de horario (12 horas; la
+  del relevo de Cloudflare, al instante, sigue con 12).
+- **💾 Copias y avisos**: cada cuánto se mira la copia (15 minutos), recordar el backup (7 días),
+  la copia atrasada (1 y 24 horas), el aviso de arranque desde una copia (7 días), la papelera
+  (30 días) y las búsquedas guardadas (365 días).
+
+Cómo anda: la lista está en `TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR` (en `logica/interfaz.py`), con
+el rango de cada uno; lo elegido se guarda en la configuración (`tiempos_elegidos`, solo lo que
+no es el de siempre) y `aplicar_los_tiempos_elegidos()` lo pone en cada toque, desde `app.py`.
+Las funciones leen el nombre al usarlo, así que cambia en todas las pantallas, en la campanita,
+en las tareas de fondo y en el asistente (sus respuestas dicen `{DIAS_PARA_RECLAMAR_EL_PEDIDO}` y
+`con_los_tiempos_de_ahora()` pone el número). No se puede poner fuera de rango ni con el 🔴
+antes que el 🟡; queda en el registro de cambios; **«↩️ Todos como venían»** vuelve a lo de
+siempre. Lo que no está es técnico (cuánto se espera a internet, cada cuánto se reintenta una
+fuente) o lo fija otro (las 24 horas de Meta). De paso: la papelera decía «también se limpia
+sola» y nada la limpiaba; ahora lo hacen las tareas de cada día.
+
+`pruebas/pruebas_de_los_tiempos.py` controla que cada tiempo exista, esté en su rango y se use,
+que **un tiempo nuevo del código no quede afuera sin decir por qué** (o va a la lista, o a los
+técnicos de la prueba, con el motivo), que lo elegido se aplique (también después de un
+reinicio), los rangos y el orden, la pantalla y que solo el administrador lo cambie.
+
 ## 💾 El backup, una vez por semana, a la vista
 
 Con la copia automática frenada (sin `clave_copia` no sube a un repositorio público), la

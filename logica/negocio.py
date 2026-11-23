@@ -2617,11 +2617,21 @@ def cb_restaurar_papelera(item_id):
     st.session_state["resultado_papelera"] = ("ok", texto or "Restaurado.") if ok else ("error", texto)
 
 
-def vaciar_papelera_antigua(dias=30):
-    """Borra en forma permanente lo que ya lleva más de `dias` en la papelera."""
+# Cuánto queda lo borrado en la papelera. 🩺 Estado y papelera decía «también se limpia sola:
+# lo que lleva más de 30 días se borra», y nada la limpiaba: ahora lo hacen las tareas de cada
+# día (ver tareas_de_mantenimiento()), con este plazo, que elige el administrador.
+DIAS_EN_LA_PAPELERA = 30
+
+
+def vaciar_papelera_antigua(dias=None):
+    """Borra en forma permanente lo que ya lleva más de `dias` (DIAS_EN_LA_PAPELERA, si no se
+    dice) en la papelera. Devuelve cuánto."""
+    dias = DIAS_EN_LA_PAPELERA if dias is None else int(dias)
     with db_lock:
         c.execute("DELETE FROM papelera WHERE eliminado_en < datetime('now', ?)", (f"-{dias} days",))
+        borrados = c.rowcount
         conn.commit()
+    return borrados
 
 
 def restaurar_de_papelera(item_id):

@@ -2687,9 +2687,19 @@ def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
         try:
             n_busq = borrar_busquedas_viejas()
             if n_busq:
-                hecho.append(f"{miles(n_busq)} búsqueda(s) de hace más de un año borradas")
+                hecho.append(f"{miles(n_busq)} búsqueda(s) de hace más de "
+                             f"{miles(DIAS_DE_BUSQUEDAS_GUARDADAS)} días borradas")
         except Exception as _err:
             anotar_error("tareas/busquedas_viejas", _err)
+
+    # 2b''. Lo que lleva más de DIAS_EN_LA_PAPELERA en la papelera (ver vaciar_papelera_antigua()).
+    if queda_tiempo():
+        try:
+            n_pap = vaciar_papelera_antigua()
+            if n_pap:
+                hecho.append(f"{miles(n_pap)} cosa(s) de la papelera borradas para siempre")
+        except Exception as _err:
+            anotar_error("tareas/papelera", _err)
 
     # 2c. Los reemplazos que las listas ya traen escritos («40011 (reemplaza a 40035)»). Van
     # antes de cruzarlos, así el paso de abajo ya los usa. Ver

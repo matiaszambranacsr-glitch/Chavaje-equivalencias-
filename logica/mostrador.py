@@ -1574,6 +1574,8 @@ def ejemplos_de_la_linea(marca_id, que_dice, tope=3):
 DIAS_DE_VENTAS_PARA_REPONER = 60
 DIAS_QUE_TIENE_QUE_ALCANZAR = 15
 DIAS_QUE_CUBRE_EL_PEDIDO = 30
+# Y la campanita avisa lo que se termina antes de esto (ver diagnostico_de_salud()).
+DIAS_QUE_AVISA_LO_QUE_SE_TERMINA = 7
 
 
 def se_esta_por_terminar(limite=100):

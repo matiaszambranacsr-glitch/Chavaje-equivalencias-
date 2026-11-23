@@ -503,7 +503,11 @@ def listar_historial_vehiculo(vehiculo_id):
 DIAS_SIN_REPETIR_EL_AVISO = 15
 
 
-def avisos_por_cliente(dias_de_aviso=30):
+# «Le toca pronto»: lo que va a tocar dentro de estos días, al ritmo del auto o por la fecha.
+DIAS_PARA_AVISAR_EL_SERVICE = 30
+
+
+def avisos_por_cliente(dias_de_aviso=None):
     """Uno por auto: lo que le toca (o le toca pronto) y todavía no se le avisó en los últimos
     DIAS_SIN_REPETIR_EL_AVISO días, con el mensaje de WhatsApp de todo junto. [dict], el más
     urgente primero. La cuenta de cada pieza es la de a_quien_avisar()."""
@@ -678,7 +682,7 @@ def vida_util_de_referencia(pieza):
     return None, None
 
 
-def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
+def estado_de_cada_pieza(vehiculo, dias_de_aviso=None, km_hoy=None):
     """Cuánto le falta a cada pieza del auto, una fila por pieza. [dict], lo más urgente primero.
 
     Mira la ÚLTIMA vez que se cambió cada pieza (la de más km: no cuántas veces —si el filtro se
@@ -694,6 +698,7 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
     «Le toca pronto» es dentro de `dias_de_aviso` días: al ritmo del auto, o por la fecha. Sin
     ritmo conocido, a menos del 15% de su vida útil en km. Con km_hoy, la cuenta va con ese y no
     con el estimado."""
+    dias_de_aviso = DIAS_PARA_AVISAR_EL_SERVICE if dias_de_aviso is None else dias_de_aviso
     km_estimado, por_dia = km_estimado_hoy(vehiculo)
     km_hoy = km_estimado if km_hoy is None else km_hoy
     hoy = datetime.now()
@@ -779,10 +784,11 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
     return salida
 
 
-def a_quien_avisar(dias_de_aviso=30, limite=100):
+def a_quien_avisar(dias_de_aviso=None, limite=100):
     """Los clientes a los que ya les toca —o les va a tocar en `dias_de_aviso` días— cambiar una
     pieza, por km o por tiempo, con el mensaje de WhatsApp armado. [dict]. La cuenta de cada
     pieza es la de estado_de_cada_pieza()."""
+    dias_de_aviso = DIAS_PARA_AVISAR_EL_SERVICE if dias_de_aviso is None else dias_de_aviso
     c.execute("""SELECT id, patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto,
                         km_registro, km_actual, km_actualizado_fecha, created_at FROM vehiculos
                  WHERE id IN (SELECT vehiculo_id FROM historial_piezas)""")

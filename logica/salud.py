@@ -511,9 +511,12 @@ def diagnostico_de_salud():
     # se_esta_por_terminar() en logica/mostrador.py): pedirlo hoy es no quedarse sin.
     try:
         _se_terminan = [x for x in se_esta_por_terminar()
-                        if x["Alcanza (días)"] < 7 and not x["Ya pedido"]]
+                        if x["Alcanza (días)"] < DIAS_QUE_AVISA_LO_QUE_SE_TERMINA
+                        and not x["Ya pedido"]]
         if _se_terminan:
-            sumar("medio", f"🛒 {len(_se_terminan)} producto(s) se terminan en menos de una semana",
+            sumar("medio", f"🛒 {len(_se_terminan)} producto(s) se terminan en menos de "
+                           + ("una semana" if DIAS_QUE_AVISA_LO_QUE_SE_TERMINA == 7 else
+                              f"{miles(DIAS_QUE_AVISA_LO_QUE_SE_TERMINA)} días"),
                   "Al ritmo al que se venden: " + ", ".join(
                       f"{x['Marca']} {x['Codigo']} (quedan {miles(x['Stock'])})"
                       for x in _se_terminan[:3]) + (" …" if len(_se_terminan) > 3 else "")
