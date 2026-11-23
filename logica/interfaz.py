@@ -605,8 +605,10 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-23b"
+VERSION_DE_LO_NUEVO = "2026-11-23c"
 LO_NUEVO = (
+    ("🚚 Pedidos a proveedores con seguimiento: después de mandar el mensaje, «📝 Anotar como pedido». Llega solo cuando lo cargás en «Entró mercadería» (si viene en partes, cuando llegó todo); lo que no llegó en 5 días va a la campanita, con «⏰ Reclamarle». Las listas marcan lo ya pedido, para no pedirlo dos veces.", "📊 Estadísticas → 📌 Para pedir"),
+    ("🔁 «Lo que suele llevar»: con la cuenta de un taller elegida, lo que compra siempre, para sumarlo con un toque.", "🧾 Ventas"),
     ("🛒 «Se está por terminar»: lo que, al ritmo al que se vende, alcanza menos de 15 días, con cuánto pedir para cubrir un mes, al mismo mensaje para el proveedor. La campanita avisa lo que se termina en menos de una semana.", "📊 Estadísticas → 📌 Para pedir"),
     ("🔢 Conteo, en «Entró mercadería»: para la primera carga o para corregir, escaneás cada unidad que hay y deja el stock en lo contado, con la diferencia anotada.", "📦 Depósito → 📦 Entró mercadería"),
     ("📦 «Entró mercadería»: cargá el stock escaneando cada cosa (o con el remito en Excel), revisalo y «✅ Sumar al stock». Si un cliente esperaba algo de lo que entró, te avisa para escribirle.", "📦 Depósito → 📦 Entró mercadería"),

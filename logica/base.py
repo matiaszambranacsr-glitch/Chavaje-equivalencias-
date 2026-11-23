@@ -91,6 +91,12 @@ def dia_de_aca(valor):
     return aca.strftime("%Y-%m-%d") if aca else str(valor or "")[:10]  # fecha de afuera: sin hora
 
 
+def dia_y_mes_de_aca(valor):
+    """«23/11»: el día de acá (ver dia_de_aca()) corto, para decir cuándo se pidió algo."""
+    dia = dia_de_aca(valor)
+    return f"{dia[8:10]}/{dia[5:7]}" if len(dia) >= 10 else dia
+
+
 def utc_de_la_hora_de_aca(momento):
     """Lo contrario: una fecha y hora de acá, en UTC, para guardarla."""
     return momento - DIFERENCIA_CON_LA_HORA_DE_ACA
@@ -615,6 +621,11 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   [class*="st-key-fila_pedido_"] [data-testid="stColumn"] {
     min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
   [class*="st-key-fila_pedido_"] [data-testid="stColumn"]:last-child { flex: 0 0 92px !important; }
+  /* Lo mismo para «🔁 Lo que suele llevar»: el «➕» al lado de cada producto, no abajo. */
+  [class*="st-key-fila_suele_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+  [class*="st-key-fila_suele_"] [data-testid="stColumn"] {
+    min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
+  [class*="st-key-fila_suele_"] [data-testid="stColumn"]:last-child { flex: 0 0 56px !important; }
 }
 
 /* Los renglones de productos (los del menú del click derecho): una lista con separadores,

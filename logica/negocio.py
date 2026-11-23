@@ -2236,6 +2236,7 @@ NOMBRES_DE_LA_HISTORIA = {
     "instalaciones_confirmadas": "instalación(es) que anduvieron",
     "historial_precios": "precio(s) anteriores", "producto_fotos": "foto(s)",
     "reservas_stock": "reserva(s)", "pedidos_reposicion": "pedido(s) para reponer",
+    "pedidos_a_proveedores": "pedido(s) a proveedores",
     "historial_piezas": "auto(s) que la llevan", "consultas_cliente": "consulta(s) de clientes",
     "historial_de_medidas": "cambio(s) de medidas", "auditoria_diaria": "conteo(s) de stock",
     "esquema_puntos": "punto(s) en esquemas", "puentes_aprobados": "aprobación(es) como puente",

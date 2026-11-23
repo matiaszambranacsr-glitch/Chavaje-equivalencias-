@@ -8,7 +8,9 @@ que lo espera» con su «📲 Avisarle», el «sin stock» de los pedidos ni el 
 Esto controla que escanear sume (dos veces, dos), que un código de varias marcas se elija, que
 «✅ Sumar al stock» sume y lo anote, que la misma entrada no se sume dos veces sin querer, que
 avise si alguien esperaba algo de lo que entró, que el remito se lea bien y que solo el personal
-sume (ver «ENTRÓ MERCADERÍA: EL STOCK PROPIO» en logica/deposito.py).
+sume (ver «ENTRÓ MERCADERÍA: EL STOCK PROPIO» en logica/deposito.py). Y, del otro lado del
+mostrador, que «🔁 Lo que suele llevar» muestre en Ventas lo que la cuenta compra siempre, y
+que lo pedido al proveedor quede anotado, llegue solo al entrar y se reclame si no llega.
 
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
@@ -16,6 +18,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -172,6 +175,100 @@ def probar():
                any("E1 (FILTRO) — quedan 6 — pedir 9" in t.value for t in at.text_area),
                [t.value for t in at.text_area][:2])
 
+        # 4d. «📝 ANOTAR COMO PEDIDO»: queda en «🚚 Pedido y sin llegar», con lo que se pidió,
+        # y la lista lo marca; anotarlo otra vez no lo duplica.
+        _anotar = [b for b in at.button if (b.key or "").startswith("anotar_pedido_")]
+        cierto("en el mensaje al proveedor, «📝 Anotar como pedido»", _anotar)
+        if _anotar:
+            _anotar[0].click().run()
+            esperar("anotado como pedido",
+                    [(x["Codigo"], x["Cantidad"], x["Llegaron"], x["Atrasado"])
+                     for x in ns["pedidos_sin_llegar"]()], [("E1", 9, 0, False)])
+            cierto("y avisa",
+                   any("Anotado: 1 producto(s) pedidos a MARCA ENTRA" in str(x.value)
+                       for x in at.success), [str(x.value)[:80] for x in at.success])
+            cierto("y en «🛒 Se está por terminar» dice que ya está pedido",
+                   any(x.key == f"chk_porterminar_{e1}" and "🚚 pedido el" in x.label
+                       for x in at.checkbox))
+            cierto("y se ve en «🚚 Pedido y sin llegar»",
+                   any(b.key and b.key.startswith("llego_prov_") for b in at.button))
+            [b for b in at.button if (b.key or "").startswith("anotar_pedido_")][0].click().run()
+            esperar("anotado otra vez: no se duplica", len(ns["pedidos_sin_llegar"]()), 1)
+
+    # 4e. LO QUE ENTRA LO DA POR LLEGADO: en partes, hasta completar lo pedido.
+    _pp = {x["Codigo"]: x for x in ns["pedidos_sin_llegar"]()}
+    if "E1" not in _pp:
+        c.execute("INSERT INTO pedidos_a_proveedores (producto_id, cantidad) VALUES (?, 9)", (e1,))
+    _, _, _llegaron = ns["sumar_al_stock"]({str(e1): 4})
+    esperar("llegó una parte", _llegaron, ["MARCA ENTRA E1 (llegaron 4 de 9)"])
+    esperar("y sigue pedido lo que falta",
+            [(x["Codigo"], x["Llegaron"]) for x in ns["pedidos_sin_llegar"]()], [("E1", 4)])
+    _, _, _llegaron = ns["sumar_al_stock"]({str(e1): 6})
+    esperar("llegó el resto", _llegaron, ["MARCA ENTRA E1"])
+    esperar("y ya no está pedido", ns["pedidos_sin_llegar"](), [])
+    esperar("queda como llegado, con todo lo pedido",
+            [tuple(f) for f in c.execute("SELECT estado, llegaron, llego_en IS NOT NULL FROM "
+                                         "pedidos_a_proveedores WHERE producto_id = ?", (e1,))],
+            [("llego", 9, 1)])
+    _, _, _llegaron = ns["sumar_al_stock"]({str(e1): 1})
+    esperar("lo que entra sin pedido no toca nada", _llegaron, [])
+
+    # 4f. LO MARCADO CON «📌 PEDIR», AL ANOTARLO, SALE DE «🙋 PEDIDOS MARCADOS»; lo que no llega
+    # en DIAS_PARA_RECLAMAR_EL_PEDIDO va a la campanita, con el mensaje para reclamarlo.
+    ns["solicitar_reposicion"](e2)
+    _marcado = ns["listar_pedidos_reposicion"]("pendiente")[0]["ID"]
+    at.session_state["pagina_actual"] = ns["PAGINAS"][4]
+    at.session_state["sub_stats"] = "📌 Para pedir"
+    at.run()
+    _chk_m = [x for x in at.checkbox if x.key == f"chk_pedido_{_marcado}"]
+    cierto("en «🙋 Pedidos marcados», el E2", _chk_m)
+    if _chk_m:
+        _chk_m[0].check().run()
+        _anotar = [b for b in at.button if (b.key or "").startswith("anotar_pedido_")]
+        cierto("y su «📝 Anotar como pedido»", _anotar)
+        if _anotar:
+            _anotar[0].click().run()
+    esperar("anotado lo marcado (el producto, no el número del pedido)",
+            [(x["Codigo"], x["Cantidad"]) for x in ns["pedidos_sin_llegar"]()], [("E2", None)])
+    esperar("y deja de estar marcado para pedir",
+            [x["Codigo"] for x in ns["listar_pedidos_reposicion"]("pendiente")], [])
+    c.execute("UPDATE pedidos_a_proveedores SET pedido_en = datetime('now', ?) "
+              "WHERE producto_id = ? AND estado = 'pedido'",
+              (f"-{ns['DIAS_PARA_RECLAMAR_EL_PEDIDO'] + 2} days", e2))
+    ns["conn"].commit()
+    esperar("uno de hoy, otra vez", ns["anotar_el_pedido_al_proveedor"]([(e1, 3)]), (1, 0))
+    _atr = ns["pedidos_sin_llegar"]()
+    esperar("el atrasado primero, y el de hoy sin reclamar",
+            [(x["Codigo"], x["Atrasado"]) for x in _atr], [("E2", True), ("E1", False)])
+    esperar("la campanita",
+            [p["titulo"] for p in ns["diagnostico_de_salud"]() if "sin llegar" in p["titulo"]],
+            [f"🚚 1 pedido(s) a proveedores sin llegar hace más de "
+             f"{ns['DIAS_PARA_RECLAMAR_EL_PEDIDO']} días"])
+    _reclamo = ns["mensaje_para_reclamar_el_pedido"](_atr[:1])
+    cierto("el mensaje para reclamarlo", "- E2 (FILTRO) — pedido el " in _reclamo
+           and _reclamo.startswith("Hola! Todavía no me llegó"), _reclamo)
+    at.session_state["pagina_actual"] = ns["PAGINAS"][4]
+    at.session_state["sub_stats"] = "📌 Para pedir"
+    at.run()
+    cierto("en 📌 Para pedir, «⏰ Reclamarle a MARCA ENTRA (1)»",
+           any("Reclamarle a MARCA ENTRA (1)" in str(getattr(x, "label", "")) or
+               "Reclamarle a MARCA ENTRA (1)" in str(x.proto) for x in at.get("link_button")),
+           [str(x.proto)[:120] for x in at.get("link_button")][:3])
+    _cancelar = [b for b in at.button if b.key == f"cancelar_prov_{_atr[0]['ID']}"]
+    cierto("y su «🗑️ No va a venir»", _cancelar)
+    if _cancelar:
+        _cancelar[0].click().run()
+    esperar("cancelado, ya no está pedido",
+            [x["Codigo"] for x in ns["pedidos_sin_llegar"]()], ["E1"])
+    _llego = [b for b in at.button if b.key == f"llego_prov_{_atr[1]['ID']}"]
+    cierto("y el «✅ Llegó» del otro", _llego)
+    if _llego:
+        _llego[0].click().run()
+    esperar("llegado a mano, tampoco", ns["pedidos_sin_llegar"](), [])
+    esperar("y quedan así",
+            [tuple(f) for f in c.execute("SELECT estado FROM pedidos_a_proveedores "
+                                         "ORDER BY id DESC LIMIT 2")], [("llego",), ("cancelado",)])
+
     _filas = [["Artículo", "Descripción", "Cant."], ["E2", "FILTRO", "5"],
               ["NOPE", "X", "1"], ["DUP1", "FILTRO", "2"], ["E1", "FILTRO", "0"], ["", "", ""]]
     esperar("la columna de la cantidad, por su título",
@@ -179,18 +276,50 @@ def probar():
     esperar("el remito: lo que está se suma; lo que no, y lo de varias marcas, se dice",
             ns["leer_el_remito_de_entrada"](_filas, 0, 2), ([(e2, 5)], ["NOPE"], ["DUP1"]))
 
-    # 6. SOLO EL PERSONAL suma al stock.
+    # 5b. LO QUE SUELE LLEVAR la cuenta que se atiende, en 🧾 Ventas: a la vista y a un toque.
+    _taller = ns["crear_mecanico"]("Taller Suele")
+    for _dias in (3, 1):
+        c.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada, "
+                  "mecanico_id) VALUES (datetime('now', ?), 'ana', 'Cuenta', 0, 0, 0, ?)",
+                  (f"-{_dias} days", _taller))
+        c.execute("INSERT INTO ventas_items (venta_id, producto_id, codigo, marca, cantidad, "
+                  "precio) VALUES (?, ?, 'E2', 'MARCA ENTRA', 1, 100)", (c.lastrowid, e2))
+    ns["conn"].commit()
+    at.session_state["cuenta_elegida"] = {"id": _taller, "nombre": "Taller Suele",
+                                          "desde": time.time()}
+    at.session_state["pagina_actual"] = ns["PAGINAS"][9]
+    at.session_state["exp_lo_que_suele_llevar"] = True
+    at.run()
+    _suele = [b for b in at.button if b.key == f"suele_{e2}"]
+    cierto("en 🧾 Ventas, «🔁 Lo que suele llevar» con el E2",
+           _suele and any("Lo que suele llevar Taller Suele" in x.label for x in at.expander),
+           [x.label for x in at.expander][:6])
+    if _suele:
+        _suele[0].click().run()
+        esperar("y el ➕ lo suma a la venta",
+                [(x["codigo"], x["cantidad"]) for x in at.session_state["venta_items"]],
+                [("E2", 1)])
+    at.session_state["cuenta_elegida"] = None
+    at.session_state["venta_items"] = []
+
+    # 6. SOLO EL PERSONAL suma al stock y anota o cierra los pedidos a los proveedores.
     _g = ns["sumar_al_stock"].__globals__
     _antes = (_g["_nivel_de_quien_esta_adentro"], _g["hay_claves_configuradas"])
     try:
         _g["hay_claves_configuradas"] = lambda: True
         for _nivel in ("", "mecanico"):
             _g["_nivel_de_quien_esta_adentro"] = lambda n=_nivel: n
-            try:
-                ns["sumar_al_stock"]({str(e2): 1})
-                fallas.append(f"«{_nivel or 'invitado'}» pudo sumar al stock")
-            except PermissionError:
-                pass
+            for _que, _hacer in (
+                    ("sumar al stock", lambda: ns["sumar_al_stock"]({str(e2): 1})),
+                    ("anotar un pedido al proveedor",
+                     lambda: ns["anotar_el_pedido_al_proveedor"]([(e2, 1)])),
+                    ("cerrar un pedido al proveedor",
+                     lambda: ns["cerrar_el_pedido_al_proveedor"](1))):
+                try:
+                    _hacer()
+                    fallas.append(f"«{_nivel or 'invitado'}» pudo {_que}")
+                except PermissionError:
+                    pass
     finally:
         _g["_nivel_de_quien_esta_adentro"], _g["hay_claves_configuradas"] = _antes
     fallas += [f"se rompió: {e.value}" for e in at.exception][:2]

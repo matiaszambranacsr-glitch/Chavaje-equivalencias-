@@ -403,6 +403,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "un taller. Para cerrar, «✅ Terminar la venta» —o «📤 Mandar a la caja» si cobra otra "
      "persona—: también con F9. Pregunta con el total antes de grabar.",
      "🧾 Ventas", ""),
+    ("suele_llevar", "Ver lo que suele llevar un taller",
+     "suele siempre habitual habitualmente frecuente repite repetir mismo siempre lleva "
+     "compra de siempre lo de siempre",
+     "En 🧾 Ventas, con la cuenta elegida en «🧾 Atendiendo a», abrí «🔁 Lo que suele llevar»: "
+     "lo que llevó dos veces o más en los últimos 4 meses (en ventas y en lo que le entregó el "
+     "depósito). «➕» lo suma a la venta. Sin precios, por si el cliente está mirando.",
+     "🧾 Ventas", ""),
     ("cobrar", "Cobrar una venta",
      "cobrar cobro cobranza pago pagar efectivo debito credito tarjeta cuotas transferencia "
      "qr f10 medio forma como pago",
@@ -751,6 +758,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "cuánto pedir para cubrir un mes; marcalo y sale el mensaje para el proveedor. También: a "
      "quién conviene comprarle y lo que no se mueve. Lo que falta se anota desde el Buscador "
      "(«📌 Reponer») o desde la venta («📌 Anotar para reponer») y aparece acá.",
+     "📌 Para pedir", ""),
+    ("pedido_proveedor", "Saber si llegó lo que le pedí al proveedor",
+     "pedi pedido proveedor reclamar reclamo atrasado demora tarda no vino no llego "
+     "seguimiento anotar pedido llegaron",
+     "Después de mandarle el mensaje al proveedor en «📌 Para pedir», tocá «📝 Anotar como "
+     "pedido»: queda en «🚚 Pedido y sin llegar». Al cargarlo en «📦 Entró mercadería» se da por "
+     "llegado solo (si llega en partes, cuando llegó todo). Lo que no llegó en 5 días va a la "
+     "campanita, y «⏰ Reclamarle» arma el mensaje.",
      "📌 Para pedir", ""),
     ("tendencias", "Ver lo que más se busca en Mercado Libre",
      "mercado libre ml meli tendencias busca gente demanda moda semana",

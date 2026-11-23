@@ -1321,6 +1321,20 @@ def _esquema_gestion(c):
         UNIQUE(producto_id)
     )""")
 
+    # Lo que se le pidió a cada proveedor y si llegó (ver «LOS PEDIDOS A LOS PROVEEDORES» en
+    # logica/deposito.py): el mensaje al proveedor se mandaba y no quedaba en ningún lado.
+    # `llegaron` va sumando lo que entra por «📦 Entró mercadería»; con todo lo pedido, «llegó».
+    c.execute("""CREATE TABLE IF NOT EXISTS pedidos_a_proveedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        cantidad INTEGER,
+        llegaron INTEGER DEFAULT 0,
+        pedido_en TEXT DEFAULT (datetime('now')),
+        pedido_por TEXT,
+        llego_en TEXT,
+        estado TEXT DEFAULT 'pedido'
+    )""")
+
     # Historial de precios: cada vez que se cambia el precio de un producto queda un registro,
     # para poder ver cómo fue variando en el tiempo.
     c.execute("""CREATE TABLE IF NOT EXISTS historial_precios (
@@ -2900,6 +2914,8 @@ def _datos_precargados_y_migraciones(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_hist_busq_usuario ON historial_busquedas(usuario)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_hist_precios_prod ON historial_precios(producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_repo_estado ON pedidos_reposicion(estado)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_prov_estado "
+              "ON pedidos_a_proveedores(estado, producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_uso_ia_fecha ON uso_ia(fecha)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_presup_mecanico ON presupuestos_mecanico(mecanico_id)")
 

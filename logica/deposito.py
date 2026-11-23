@@ -945,6 +945,49 @@ def _dejar_la_cuenta():
     st.session_state.pop("cuenta_elegida", None)
 
 
+# LO QUE SUELE LLEVAR UNA CUENTA. Un taller compra casi siempre lo mismo (los filtros, las
+# pastillas, el aceite de los autos que atiende), y cada vez había que buscarlo de nuevo. Con la
+# cuenta elegida, «🔁 Lo que suele llevar» muestra lo que llevó dos veces o más en los últimos
+# DIAS_DE_LO_QUE_SUELE_LLEVAR (en ventas a su nombre y en lo que el depósito le entregó), y se
+# suma con un toque.
+DIAS_DE_LO_QUE_SUELE_LLEVAR = 120
+
+
+def lo_que_suele_llevar(mecanico_id, limite=8):
+    """[dict] con ID, Marca, Codigo, Descripcion, Veces y Ultima (cuándo, como está guardado):
+    lo que la cuenta llevó dos veces o más, lo de más veces primero."""
+    hace = f"-{DIAS_DE_LO_QUE_SUELE_LLEVAR} days"
+    filas = c.execute(
+        """SELECT s.producto_id AS id, COUNT(*) AS veces, MAX(s.cuando) AS ultima
+           FROM (SELECT vi.producto_id, v.fecha AS cuando FROM ventas_items vi
+                 JOIN ventas v ON v.id = vi.venta_id
+                 WHERE v.anulada = 0 AND v.mecanico_id = ? AND v.fecha >= datetime('now', ?)
+                 UNION ALL
+                 SELECT d.producto_id, COALESCE(d.resuelto_en, d.pedido_en) FROM pedidos_deposito d
+                 WHERE d.estado = 'entregado' AND d.mecanico_id = ?
+                   AND COALESCE(d.resuelto_en, d.pedido_en) >= datetime('now', ?)) s
+           WHERE s.producto_id IS NOT NULL
+           GROUP BY s.producto_id HAVING COUNT(*) >= 2
+           ORDER BY veces DESC, ultima DESC LIMIT ?""",
+        (int(mecanico_id), hace, int(mecanico_id), hace, int(limite))).fetchall()
+    salida = []
+    for f in filas:
+        actual = item_de_venta(f["id"])
+        if actual:
+            salida.append({"ID": f["id"], "Marca": actual["marca"], "Codigo": actual["codigo"],
+                           "Descripcion": actual["descripcion"], "Veces": f["veces"],
+                           "Ultima": f["ultima"]})
+    return salida
+
+
+def sumar_lo_que_suele_llevar(producto_id):
+    """«➕» de «🔁 Lo que suele llevar» (va como on_click): a la venta, uno más."""
+    sumado = sumar_a_la_venta({"ID": int(producto_id)})
+    if sumado:
+        avisar("success", f"➕ Sumado: {sumado['marca']} {sumado['codigo']} "
+                          f"(van {sumado['cantidad']}).")
+
+
 def mostrar_cuenta_elegida(clave):
     """«🧾 Atendiendo a: …», arriba del buscador y de la lista de WhatsApp. Un toque abre el
     recuadro para elegir la cuenta (y poner el código de retiro, si lo pide) o volver a
@@ -1209,7 +1252,8 @@ def cuando_se_sumo_la_entrada(lista):
 
 def sumar_al_stock(lista):
     """Suma lo que entró al stock: `lista` es {producto_id: cantidad}. Devuelve (productos
-    sumados, consultas de clientes que esperaban algo de esto y ahora tienen stock)."""
+    sumados, consultas de clientes que esperaban algo de esto y ahora tienen stock, lo que se
+    le había pedido al proveedor y con esto llegó: ver dar_por_llegado_lo_que_entro())."""
     exigir_nivel("empleado", "sumar mercadería al stock")
     ya_estaban = {x["_id"] for x in consultas_que_ahora_hay_en_stock()}
     sumados = 0
@@ -1231,8 +1275,9 @@ def sumar_al_stock(lista):
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('entradas_sumadas', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (json.dumps(dict(list(sumadas.items())[-ENTRADAS_RECORDADAS:])),))
+        llegaron = dar_por_llegado_lo_que_entro(lista)
     ahora = [x for x in consultas_que_ahora_hay_en_stock() if x["_id"] not in ya_estaban]
-    return sumados, ahora
+    return sumados, ahora, llegaron
 
 
 def dejar_el_stock_en_lo_contado(lista):
@@ -1462,7 +1507,7 @@ def mostrar_entro_mercaderia():
     if _b1.button("✅ Sumar al stock", key="entro_sumar", type="primary", width="stretch",
                   disabled=not _igual):
         try:
-            sumados, esperaban = sumar_al_stock(dict(lista))
+            sumados, esperaban, llegaron = sumar_al_stock(dict(lista))
         except PermissionError as _err:
             st.error(el_error_en_castellano(_err))
         else:
@@ -1471,6 +1516,11 @@ def mostrar_entro_mercaderia():
             lista.clear()
             st.session_state.pop("entro_igual", None)
             avisar("success", f"✅ Sumado al stock: {miles(sumados)} producto(s).")
+            if llegaron:
+                avisar("info", "🚚 De lo pedido a los proveedores: " + "; ".join(llegaron[:4])
+                       + (f" y {miles(len(llegaron) - 4)} más" if len(llegaron) > 4 else "")
+                       + f". Lo que falta sigue en {miga_hasta('Para pedir')} → «🚚 Pedido y "
+                         "sin llegar».")
             if esperaban:
                 avisar("info", f"📲 {miles(len(esperaban))} cliente(s) esperaban algo de lo que "
                                f"entró: avisales en {miga_hasta('Para pedir')} → «📞 Consultas "
@@ -1478,3 +1528,142 @@ def mostrar_entro_mercaderia():
             st.rerun()
     _b2.button("Vaciar", key="entro_vaciar", width="stretch",
                on_click=lambda: st.session_state.get("entro_lista", {}).clear())
+
+
+# ============================================================================================
+# LOS PEDIDOS A LOS PROVEEDORES
+# ============================================================================================
+# El mensaje al proveedor se armaba en «📌 Para pedir», se mandaba por WhatsApp y no quedaba en
+# ningún lado: a la semana nadie se acordaba si el filtro que faltaba se había pedido, y se
+# pedía dos veces o ninguna. «📝 Anotar como pedido» lo deja anotado; cuando entra por «📦 Entró
+# mercadería» se da por llegado solo (lo que llega en partes, cuando llegó todo), y lo que no
+# llegó en DIAS_PARA_RECLAMAR_EL_PEDIDO sale en la campanita con el mensaje para reclamarlo.
+DIAS_PARA_RECLAMAR_EL_PEDIDO = 5
+# Sin tilde: el auditor controla que lo que se escribe y lo que se busca coincida, y solo mira
+# letras sin tilde (un «llegó» se le escapaba).
+ESTADOS_DEL_PEDIDO_AL_PROVEEDOR = ("pedido", "llego", "cancelado")
+
+
+def anotar_el_pedido_al_proveedor(items):
+    """`items`: [(producto_id, cantidad o None)]. Lo que ya estaba pedido y sin llegar no se
+    anota otra vez; lo que un empleado había marcado con «📌 Pedir» sale de «🙋 Pedidos
+    marcados» (ya está pedido). Devuelve (anotados, ya estaban pedidos)."""
+    exigir_nivel("empleado", "anotar un pedido al proveedor")
+    anotados = ya = 0
+    with db_lock, transaccion():
+        for pid, cantidad in items:
+            pid = int(pid)
+            if c.execute("SELECT 1 FROM pedidos_a_proveedores WHERE producto_id = ? "
+                         "AND estado = 'pedido'", (pid,)).fetchone():
+                ya += 1
+                continue
+            if not c.execute("SELECT 1 FROM productos WHERE id = ?", (pid,)).fetchone():
+                continue
+            cantidad = int(cantidad) if cantidad and int(cantidad) > 0 else None
+            c.execute("INSERT INTO pedidos_a_proveedores (producto_id, cantidad, pedido_por) "
+                      "VALUES (?, ?, ?)", (pid, cantidad, obtener_usuario_actual()))
+            c.execute("UPDATE pedidos_reposicion SET estado = 'resuelto' "
+                      "WHERE producto_id = ? AND estado = 'pendiente'", (pid,))
+            anotar_cambio("pidió al proveedor", "producto", pid, despues=cantidad)
+            anotados += 1
+    return anotados, ya
+
+
+def anotar_el_pedido_y_avisar(marca, items):
+    """«📝 Anotar como pedido» (va como on_click)."""
+    try:
+        anotados, ya = anotar_el_pedido_al_proveedor(items)
+    except PermissionError as _err:
+        error = el_error_en_castellano(_err)
+    else:
+        error = ""
+    if error:
+        avisar("error", error)
+        return
+    if anotados:
+        avisar("success", f"📝 Anotado: {miles(anotados)} producto(s) pedidos a {marca}. Cuando "
+                          "entren por «📦 Entró mercadería» se dan por llegados solos.")
+    if ya:
+        avisar("info", f"{miles(ya)} ya estaba(n) pedido(s) y sin llegar: no se anotó otra vez.")
+
+
+def lo_pedido_sin_llegar():
+    """{producto_id: (cuándo se pidió, como está guardado)} de lo pedido y sin llegar, para
+    marcarlo en las listas de «📌 Para pedir» y no pedirlo dos veces."""
+    return {f["producto_id"]: f["pedido_en"] for f in c.execute(
+        "SELECT producto_id, MIN(pedido_en) AS pedido_en FROM pedidos_a_proveedores "
+        "WHERE estado = 'pedido' GROUP BY producto_id")}
+
+
+def pedidos_sin_llegar():
+    """[dict] con ID, ProductoID, Marca, Codigo, Descripcion, Cantidad, Llegaron, Pedido (como
+    está guardado), Dias y Atrasado: lo pedido y sin llegar, lo más viejo primero."""
+    salida = []
+    for f in c.execute(
+            """SELECT pp.id, pp.producto_id, m.nombre AS marca, p.codigo_raw, p.descripcion,
+                      pp.cantidad, COALESCE(pp.llegaron, 0) AS llegaron, pp.pedido_en,
+                      CAST(julianday('now') - julianday(pp.pedido_en) AS INTEGER) AS dias
+               FROM pedidos_a_proveedores pp
+               JOIN productos p ON p.id = pp.producto_id
+               JOIN marcas m ON m.id = p.marca_id
+               WHERE pp.estado = 'pedido'
+               ORDER BY pp.pedido_en, m.nombre, p.codigo_raw""").fetchall():
+        salida.append({"ID": f["id"], "ProductoID": f["producto_id"], "Marca": f["marca"],
+                       "Codigo": f["codigo_raw"], "Descripcion": f["descripcion"],
+                       "Cantidad": f["cantidad"], "Llegaron": f["llegaron"],
+                       "Pedido": f["pedido_en"], "Dias": f["dias"] or 0,
+                       "Atrasado": (f["dias"] or 0) >= DIAS_PARA_RECLAMAR_EL_PEDIDO})
+    return salida
+
+
+def dar_por_llegado_lo_que_entro(lista):
+    """Lo que entró ({producto_id: cantidad}) se descuenta de lo pedido: lo que completa lo
+    pedido (o lo pedido sin cantidad) queda «llego». Lo llama sumar_al_stock(), adentro de su
+    transacción. Devuelve [«MARCA CÓDIGO» o «MARCA CÓDIGO (llegaron 2 de 5)»]."""
+    salida = []
+    for pid, cantidad in lista.items():
+        cantidad = int(cantidad or 0)
+        if cantidad <= 0:
+            continue
+        for f in c.execute(
+                """SELECT pp.id, pp.cantidad, COALESCE(pp.llegaron, 0) AS llegaron,
+                          m.nombre AS marca, p.codigo_raw FROM pedidos_a_proveedores pp
+                   JOIN productos p ON p.id = pp.producto_id
+                   JOIN marcas m ON m.id = p.marca_id
+                   WHERE pp.producto_id = ? AND pp.estado = 'pedido' ORDER BY pp.pedido_en""",
+                (int(pid),)).fetchall():
+            if cantidad <= 0:
+                break
+            llegaron = f["llegaron"] + cantidad
+            completo = not f["cantidad"] or llegaron >= f["cantidad"]
+            cantidad = llegaron - f["cantidad"] if f["cantidad"] and completo else 0
+            c.execute("UPDATE pedidos_a_proveedores SET llegaron = ?, estado = ?, "
+                      "llego_en = CASE WHEN ? THEN datetime('now') ELSE llego_en END "
+                      "WHERE id = ?", (min(llegaron, f["cantidad"] or llegaron),
+                                       "llego" if completo else "pedido", completo, f["id"]))
+            salida.append(f"{f['marca']} {f['codigo_raw']}" + (
+                "" if completo else f" (llegaron {miles(llegaron)} de {miles(f['cantidad'])})"))
+    return salida
+
+
+def cerrar_el_pedido_al_proveedor(pedido_id, llego=True):
+    """«✅» (llegó, sin cargar el stock: para eso, «📦 Entró mercadería») o «🗑️» (no va a
+    venir). Va como on_click."""
+    exigir_nivel("empleado", "cerrar un pedido al proveedor")
+    with db_lock, transaccion():
+        c.execute("UPDATE pedidos_a_proveedores SET estado = ?, "
+                  "llego_en = CASE WHEN ? THEN datetime('now') ELSE llego_en END "
+                  "WHERE id = ? AND estado = 'pedido'",
+                  ("llego" if llego else "cancelado", bool(llego), int(pedido_id)))
+
+
+def mensaje_para_reclamar_el_pedido(pedidos):
+    """El mensaje al proveedor por lo que no llegó (los de una marca)."""
+    lineas = ["Hola! Todavía no me llegó esto que te pedí:"]
+    for p in pedidos:
+        falta = (p["Cantidad"] - p["Llegaron"]) if p["Cantidad"] else None
+        lineas.append(f"- {p['Codigo']} ({p['Descripcion'] or ''})"
+                      + (f" — faltan {falta}" if falta else "")
+                      + f" — pedido el {dia_y_mes_de_aca(p['Pedido'])}")
+    lineas.append("¿Me decís cuándo llega? Gracias.")
+    return "\n".join(lineas)

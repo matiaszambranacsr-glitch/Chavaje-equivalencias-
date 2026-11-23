@@ -148,6 +148,25 @@ if pagina == PAGINAS[9]:
         # ARMAR LA VENTA. A quién: Mostrador o la cuenta de un taller, la misma que en el
         # buscador (ver mostrar_cuenta_elegida()); va en el cartel de la caja.
         mostrar_cuenta_elegida("venta")
+        # LO QUE SUELE LLEVAR la cuenta elegida (ver lo_que_suele_llevar()), a un toque. Sin
+        # precios: el cliente puede estar mirando, como en «Atendiendo a».
+        _cuenta_suele = cuenta_elegida()
+        _suele = lo_que_suele_llevar(_cuenta_suele["id"]) if _cuenta_suele else []
+        if _suele:
+            with st.expander("🔁 Lo que suele llevar "
+                             f"{texto_para_markdown(_cuenta_suele['nombre'])}",
+                             key="exp_lo_que_suele_llevar"):
+                for _x in _suele:
+                    _s1, _s2 = st.container(key=f"fila_suele_{_x['ID']}").columns(
+                        [6, 1], vertical_alignment="center")
+                    _s1.markdown(f"**{texto_para_markdown(_x['Marca'])} "
+                                 f"{texto_para_markdown(_x['Codigo'])}** — "
+                                 f"{texto_para_markdown(str(_x['Descripcion'] or '')[:45])}")
+                    _s1.caption(f"{miles(_x['Veces'])} veces · la última el "
+                                f"{dia_y_mes_de_aca(_x['Ultima'])}")
+                    _s2.button("➕", key=f"suele_{_x['ID']}", width="stretch",
+                               on_click=sumar_lo_que_suele_llevar, args=(_x["ID"],),
+                               help="Sumarlo a la venta.")
         # «📍 ¿Dónde está?» en el menú de cada producto, si el depósito tiene su mapa.
         _con_mapa = hay_mapa()
         # Se limpia al buscar: el lector de códigos de barras escribe encima de lo que haya.

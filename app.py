@@ -143,6 +143,7 @@ específico, y las pantallas quedan todas al final:
         · ELEGIR UNA CUENTA ENTRE MILES
         · A QUIÉN SE ESTÁ ATENDIENDO
         · ENTRÓ MERCADERÍA: EL STOCK PROPIO
+        · LOS PEDIDOS A LOS PROVEEDORES
     logica/ventas.py
         · VENTAS DEL MOSTRADOR
         · DEVOLVER ALGO DE UNA VENTA

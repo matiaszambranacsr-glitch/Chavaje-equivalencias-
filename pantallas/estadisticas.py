@@ -668,6 +668,44 @@ a traer solas desde Administrar → Mantenimiento.
         else:
             st.caption("Ningún empleado marcó nada para pedir todavía.")
 
+        # LO PEDIDO Y SIN LLEGAR (ver «LOS PEDIDOS A LOS PROVEEDORES» en logica/deposito.py):
+        # lo que se anotó con «📝 Anotar como pedido». Llega solo al entrar por «📦 Entró
+        # mercadería»; lo atrasado, con el mensaje para reclamarlo.
+        _sin_llegar = pedidos_sin_llegar()
+        if _sin_llegar:
+            st.markdown("---")
+            st.markdown(f"**🚚 Pedido y sin llegar ({miles(len(_sin_llegar))})**",
+                        help="Lo que anotaste como pedido. Se da por llegado solo cuando lo "
+                             "cargás en 📦 Depósito → «📦 Entró mercadería»; con ✅, sin cargar "
+                             f"el stock. Con ⏰, lo que no llegó en {DIAS_PARA_RECLAMAR_EL_PEDIDO} "
+                             "días.")
+            for _pp in _sin_llegar:
+                _q1, _q2, _q3 = st.columns([4, 1, 1])
+                _q1.markdown(("⏰ " if _pp["Atrasado"] else "")
+                             + f"{texto_para_markdown(_pp['Marca'])} - "
+                               f"{texto_para_markdown(_pp['Codigo'])} — "
+                               f"{texto_para_markdown(_pp['Descripcion'] or '')}")
+                _q1.caption((f"{miles(_pp['Cantidad'])} u." if _pp["Cantidad"] else "sin cantidad")
+                            + (f", llegaron {miles(_pp['Llegaron'])}" if _pp["Llegaron"] else "")
+                            + f" · pedido el {dia_y_mes_de_aca(_pp['Pedido'])}"
+                            + (f", hace {miles(_pp['Dias'])} día(s)" if _pp["Dias"] else ", hoy"))
+                _q2.button("✅", key=f"llego_prov_{_pp['ID']}",
+                           help="Llegó (sin cargar el stock: para eso, «📦 Entró mercadería»)",
+                           on_click=cerrar_el_pedido_al_proveedor, args=(_pp["ID"], True))
+                _q3.button("🗑️", key=f"cancelar_prov_{_pp['ID']}", help="No va a venir",
+                           on_click=cerrar_el_pedido_al_proveedor, args=(_pp["ID"], False))
+            _por_reclamar = {}
+            for _pp in _sin_llegar:
+                if _pp["Atrasado"]:
+                    _por_reclamar.setdefault(_pp["Marca"], []).append(_pp)
+            for _marca_r, _pps in _por_reclamar.items():
+                _tel_r = whatsapp_del_proveedor(_marca_r)
+                st.link_button(f"⏰ Reclamarle a {_marca_r} ({len(_pps)})",
+                               link_de_whatsapp(_tel_r, mensaje_para_reclamar_el_pedido(_pps)),
+                               key=f"reclamo_prov_{hashlib.md5(_marca_r.encode()).hexdigest()[:8]}",
+                               help="Abre WhatsApp con lo que falta, al número del proveedor si "
+                                    "está anotado (si no, elegís a quién).")
+
         st.markdown("---")
         # LO QUE SE ESTÁ POR TERMINAR al ritmo al que se vende (ver se_esta_por_terminar()),
         # con cuánto pedir: va al mismo mensaje para el proveedor que los favoritos.
@@ -683,18 +721,23 @@ a traer solas desde Administrar → Mantenimiento.
         for f in _por_terminar:
             if st.checkbox(f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (quedan "
                            f"{miles(f['Stock'])}, alcanza {miles(f['Alcanza (días)'])} día(s): "
-                           f"pedir {miles(f['Pedir'])})", key=f"chk_porterminar_{f['ID']}"):
+                           f"pedir {miles(f['Pedir'])})"
+                           + (f" — 🚚 pedido el {dia_y_mes_de_aca(f['Ya pedido'])}"
+                              if f["Ya pedido"] else ""), key=f"chk_porterminar_{f['ID']}"):
                 seleccionados.append(f)
 
         st.markdown("**📦 Favoritos con poco stock**")
         umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1,
                                         key="umbral_para_pedir")
         stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
+        _ya_pedidos = lo_pedido_sin_llegar() if stock_bajo else {}
         if stock_bajo:
             for f in stock_bajo:
                 stock_txt_f = f["Stock"] if f["Stock"] is not None else "s/d"
                 marcado_f = st.checkbox(
-                    f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (stock: {stock_txt_f})",
+                    f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (stock: {stock_txt_f})"
+                    + (f" — 🚚 pedido el {dia_y_mes_de_aca(_ya_pedidos[f['ID']])}"
+                       if f["ID"] in _ya_pedidos else ""),
                     key=f"chk_stockbajo_{f['ID']}"
                 )
                 if marcado_f:
@@ -707,10 +750,12 @@ a traer solas desde Administrar → Mantenimiento.
             st.markdown(f"**📲 Armar mensaje para el proveedor ({len(seleccionados)} ítem(s) elegidos)**")
             por_marca, _ya_va = {}, set()
             for item in seleccionados:
-                # El mismo producto marcado en dos listas (favorito y por terminar), una vez.
-                if item.get("ID") in _ya_va:
+                # El mismo producto marcado en dos listas (favorito y por terminar), una vez. Por
+                # el producto: en «🙋 Pedidos marcados», «ID» es el número del pedido.
+                _pid_item = item.get("ProductoID", item.get("ID"))
+                if _pid_item in _ya_va:
                     continue
-                _ya_va.add(item.get("ID"))
+                _ya_va.add(_pid_item)
                 por_marca.setdefault(item["Marca"], []).append(item)
             for marca, items in por_marca.items():
                 lineas_msg = [f"Hola! Necesito reponer estos productos de {marca}:"]
@@ -754,6 +799,14 @@ a traer solas desde Administrar → Mantenimiento.
                                    else f"📲 Abrir WhatsApp para {marca} (elegís a quién)",
                                    link_de_whatsapp(_tel_prov, _msg_final),
                                    key=f"walink__{_clave_msg}")
+                    # Y que quede anotado (ver «LOS PEDIDOS A LOS PROVEEDORES»): así llega solo
+                    # al entrar la mercadería, y lo que no llega se reclama.
+                    st.button("📝 Anotar como pedido", key=f"anotar_pedido_{_clave_msg}",
+                              on_click=anotar_el_pedido_y_avisar,
+                              args=(marca, [(it.get("ProductoID", it.get("ID")), it.get("Pedir"))
+                                            for it in items]),
+                              help="Después de mandarlo: queda en «🚚 Pedido y sin llegar» "
+                                   "hasta que entra por «📦 Entró mercadería».")
 
         st.markdown("---")
         st.markdown("**📈 Cuánto te aumentó cada proveedor**")

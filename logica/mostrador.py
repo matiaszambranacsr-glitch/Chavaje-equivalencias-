@@ -1609,6 +1609,11 @@ def se_esta_por_terminar(limite=100):
                        "Pedir": max(1, math.ceil(por_dia * DIAS_QUE_CUBRE_EL_PEDIDO
                                                  - (f["Stock"] or 0)))})
     salida.sort(key=lambda x: (x["Alcanza (días)"], -x["Vendidos"]))
+    # «Ya pedido»: cuándo se le pidió al proveedor, si está pedido y sin llegar (ver «LOS
+    # PEDIDOS A LOS PROVEEDORES» en logica/deposito.py). Sin esto se pedía dos veces.
+    pedidos = lo_pedido_sin_llegar() if salida else {}
+    for x in salida:
+        x["Ya pedido"] = pedidos.get(x["ID"])
     return salida[:limite]
 
 

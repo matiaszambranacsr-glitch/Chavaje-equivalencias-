@@ -7914,6 +7914,34 @@ WhatsApp. Lo que se vende de a uno por mes con 2 en stock está bien; lo que sal
 con 4, no. La campanita avisa lo que se termina en menos de una semana
 (`se_esta_por_terminar()`, en `logica/mostrador.py`).
 
+**Lo pedido al proveedor, con seguimiento.** El mensaje al proveedor se mandaba y no quedaba en
+ningún lado: a la semana nadie se acordaba si el filtro que faltaba se había pedido, y se pedía
+dos veces o ninguna. Ahora, al lado del mensaje, **«📝 Anotar como pedido»** lo anota (con lo
+que dice «pedir», si lo dice) y queda en **«🚚 Pedido y sin llegar»**, en la misma solapa:
+
+- **Llega solo** cuando se carga en «📦 Entró mercadería»: lo que entra se descuenta de lo
+  pedido, y si llega en partes sigue pedido hasta completar («🚚 De lo pedido a los proveedores:
+  MARCA E1 (llegaron 4 de 9)»). Con «✅», se da por llegado sin cargar el stock; con «🗑️», no
+  va a venir.
+- **Lo que no llegó en `DIAS_PARA_RECLAMAR_EL_PEDIDO` (5) días** sale con ⏰ y en la campanita
+  («🚚 1 pedido(s) a proveedores sin llegar hace más de 5 días»), y **«⏰ Reclamarle a MARCA»**
+  abre WhatsApp con lo que falta y desde cuándo, al número del proveedor si está anotado.
+- **No se pide dos veces**: lo ya pedido no se anota de nuevo, las listas de «🛒 Se está por
+  terminar» y de favoritos lo marcan («— 🚚 pedido el 23/11»), la campanita deja de insistir con
+  lo que se termina si ya está pedido, y lo que un empleado marcó con «📌 Pedir» sale de «🙋
+  Pedidos marcados» al anotarlo.
+
+Está en «LOS PEDIDOS A LOS PROVEEDORES», en `logica/deposito.py` (la tabla
+`pedidos_a_proveedores`). Lo controla `pruebas/pruebas_de_la_mercaderia.py`.
+
+**Lo que suele llevar cada taller.** Un taller compra casi siempre lo mismo y cada vez había que
+buscarlo. En 🧾 Ventas, con la cuenta elegida en «🧾 Atendiendo a», **«🔁 Lo que suele llevar»**
+muestra lo que llevó dos veces o más en los últimos `DIAS_DE_LO_QUE_SUELE_LLEVAR` (120) días
+—en ventas a su nombre y en lo que le entregó el depósito; lo anulado no cuenta—, lo de más
+veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo a»: el cliente puede
+estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
+`pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
+
 ## 💾 El backup, una vez por semana, a la vista
 
 Con la copia automática frenada (sin `clave_copia` no sube a un repositorio público), la

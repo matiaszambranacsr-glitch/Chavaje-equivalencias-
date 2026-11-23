@@ -496,6 +496,46 @@ def probar(L):
             (153000.0, (True, "Faltan $500.")))
     st.session_state.pop("venta_items", None)
 
+    # 6b. Lo que suele llevar una cuenta: lo que llevó dos veces o más, en ventas a su nombre y
+    # en lo que le entregó el depósito; no lo anulado, lo de hace mucho ni lo de otra cuenta.
+    taller = ns["crear_mecanico"]("Taller Suele")
+    otro = ns["crear_mecanico"]("Taller Otro")
+    for productos, cuenta in (([ids["F100"]], taller), ([ids["F100"]], taller),
+                              ([ids["B300"]], taller), ([ids["B300"]], otro),
+                              ([ids["B300"]], otro)):
+        ns["cerrar_venta"]([item(x) for x in productos], mecanico_id=cuenta)
+    anulada, _ = ns["cerrar_venta"]([item(ids["B300"])], mecanico_id=taller)
+    c.execute("UPDATE ventas SET anulada = 1 WHERE id = ?", (anulada,))
+    vieja, _ = ns["cerrar_venta"]([item(ids["B300"])], mecanico_id=taller)
+    c.execute("UPDATE ventas SET fecha = datetime('now', ?) WHERE id = ?",
+              (f"-{ns['DIAS_DE_LO_QUE_SUELE_LLEVAR'] + 5} days", vieja))
+    c.executemany("""INSERT INTO pedidos_deposito (producto_id, cantidad, estado, mecanico_id,
+                                               pedido_en, resuelto_en)
+                 VALUES (?, 1, 'entregado', ?, datetime('now', ?), datetime('now', ?))""",
+                  [(ids["J200"], taller, f"-{d} day", f"-{d} day") for d in (1, 2)])
+    c.execute("""INSERT INTO pedidos_deposito (producto_id, cantidad, estado, mecanico_id,
+                                               pedido_en) VALUES (?, 1, 'no_hay', ?,
+                                               datetime('now'))""", (ids["B300"], taller))
+    conn.commit()
+    suele = ns["lo_que_suele_llevar"](taller)
+    # Empatados en veces, primero el que llevó más recién (el F100 hoy, el J200 ayer).
+    esperar("lo que suele llevar", [(x["Codigo"], x["Veces"]) for x in suele],
+            [("F100", 2), ("J200", 2)])
+    esperar("lo que suele llevar, el de otra cuenta",
+            [(x["Codigo"], x["Veces"]) for x in ns["lo_que_suele_llevar"](otro)], [("B300", 2)])
+    esperar("lo que suele llevar, sin compras", ns["lo_que_suele_llevar"](otro + 99), [])
+    st.session_state.pop("venta_items", None)
+    st.session_state.pop("_avisos", None)
+    ns["sumar_lo_que_suele_llevar"](ids["J200"])
+    ns["sumar_lo_que_suele_llevar"](ids["J200"])
+    esperar("➕ de lo que suele llevar",
+            [(x["codigo"], x["cantidad"]) for x in st.session_state.get("venta_items", [])],
+            [("J200", 2)])
+    esperar("➕ avisa", [t for _, t in st.session_state.get("_avisos", [])][-1:],
+            ["➕ Sumado: PRUEBA J200 (van 2)."])
+    st.session_state.pop("venta_items", None)
+    st.session_state.pop("_avisos", None)
+
     # 7. Quién puede: vender y anotar, empleado; anular, administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])
     g["hay_claves_configuradas"] = lambda: True

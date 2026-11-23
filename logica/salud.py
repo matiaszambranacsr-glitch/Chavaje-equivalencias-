@@ -510,7 +510,8 @@ def diagnostico_de_salud():
     # LO QUE SE TERMINA EN MENOS DE UNA SEMANA al ritmo al que se vende (ver
     # se_esta_por_terminar() en logica/mostrador.py): pedirlo hoy es no quedarse sin.
     try:
-        _se_terminan = [x for x in se_esta_por_terminar() if x["Alcanza (días)"] < 7]
+        _se_terminan = [x for x in se_esta_por_terminar()
+                        if x["Alcanza (días)"] < 7 and not x["Ya pedido"]]
         if _se_terminan:
             sumar("medio", f"🛒 {len(_se_terminan)} producto(s) se terminan en menos de una semana",
                   "Al ritmo al que se venden: " + ", ".join(
@@ -520,6 +521,20 @@ def diagnostico_de_salud():
                   miga_hasta("Para pedir"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/por_terminar", _err)
+
+    # LO PEDIDO AL PROVEEDOR QUE NO LLEGÓ (ver «LOS PEDIDOS A LOS PROVEEDORES» en
+    # logica/deposito.py): lo que nadie reclama, no llega.
+    try:
+        _atrasados = [x for x in pedidos_sin_llegar() if x["Atrasado"]]
+        if _atrasados:
+            _marcas_atr = list(dict.fromkeys(x["Marca"] for x in _atrasados))
+            sumar("medio", f"🚚 {len(_atrasados)} pedido(s) a proveedores sin llegar hace más de "
+                           f"{DIAS_PARA_RECLAMAR_EL_PEDIDO} días",
+                  "De " + ", ".join(_marcas_atr[:3]) + (" …" if len(_marcas_atr) > 3 else "")
+                  + ". En «🚚 Pedido y sin llegar» está el mensaje para reclamarlo.",
+                  miga_hasta("Para pedir"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/pedidos_al_proveedor", _err)
 
     # LO FALLADO SIN RECLAMAR (ver «LAS GARANTÍAS» en logica/ventas.py): el proveedor no acepta
     # cualquier fecha, y lo que no se reclama a tiempo se pierde.
