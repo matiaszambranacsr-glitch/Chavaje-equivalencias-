@@ -1262,8 +1262,10 @@ salida.confirmar = [r.status, kv.size];
 // LA RESPUESTA FUERA DE HORARIO: contesta al instante al que escribe con el local cerrado, una
 // vez, y guarda lo mandado como eco «automatica».
 const kv2 = new Map();
+const ttls = [];
 const AVISOS2 = {
-  async put(k, v) { kv2.set(k, v); }, async get(k) { return kv2.has(k) ? kv2.get(k) : null; },
+  async put(k, v, o) { kv2.set(k, v); if (k.startsWith("auto:")) ttls.push(o && o.expirationTtl); },
+  async get(k) { return kv2.has(k) ? kv2.get(k) : null; },
   async delete(k) { kv2.delete(k); },
   async list({ prefix }) { return { keys: [...kv2.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })) }; },
 };
@@ -1288,6 +1290,13 @@ salida.fuera_de_horario = [r.status, llamadas.length, llamadas[0] && llamadas[0]
   ecos[0] && ecos[0].entry[0].changes[0].value.message_echoes[0].automatica];
 r = await pedirFH(conNumero.replace("wamid.9", "wamid.10"), envFH);
 salida.una_vez = llamadas.length;
+// Cada cuántas horas: las 12 de siempre, las que diga HORAS_ENTRE_RESPUESTAS, y 12 si no se
+// entiende o se pasa de 72.
+for (const horas of ["24", "abc", "500"]) {
+  kv2.clear();
+  await pedirFH(conNumero, { ...envFH, HORAS_ENTRE_RESPUESTAS: horas });
+}
+salida.horas = ttls;
 llamadas.length = 0; kv2.clear();
 r = await pedirFH(conNumero, { ...envFH, HORARIO: "lun-dom 0:00-24:00" });
 salida.abierto = [r.status, llamadas.length];
@@ -1307,6 +1316,7 @@ _LO_QUE_TIENE_QUE_DAR_EL_RELEVO = {
     "fuera_de_horario": [200, 1, "https://graph.facebook.com/v26.0/NUM1/messages",
                          "5491100000001", "Estamos cerrados", "Bearer permiso-de-prueba", 1, True],
     "una_vez": 1, "abierto": [200, 0], "sin_permiso": [200, 0],
+    "horas": [43200, 86400, 43200, 43200],
 }
 
 

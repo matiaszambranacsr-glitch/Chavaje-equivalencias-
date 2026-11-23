@@ -847,7 +847,8 @@ TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR = (
      "El chat abierto sigue «en curso» (para mandarle la cotización) durante", "minutos", 5,
      480),
     ("💬 Mensajes", "HORAS_ENTRE_RESPUESTAS_AUTOMATICAS",
-     "La respuesta fuera de horario, al mismo cliente, una vez cada", "horas", 1, 72),
+     "La respuesta fuera de horario, al mismo cliente, una vez cada (si cambia, también en "
+     "el relevo: HORAS_ENTRE_RESPUESTAS)", "horas", 1, 72),
     ("💾 Copias y avisos", "MINUTOS_ENTRE_COPIAS",
      "Se mira si hay algo nuevo para la copia automática cada", "minutos", 5, 240),
     ("💾 Copias y avisos", "DIAS_PARA_RECORDAR_EL_BACKUP",

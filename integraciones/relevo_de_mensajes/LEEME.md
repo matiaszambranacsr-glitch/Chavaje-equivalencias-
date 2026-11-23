@@ -51,6 +51,8 @@ leer, para que lo conteste una persona al abrir.
    - **RESPUESTA** (texto común): lo que se le contesta.
    - **WHATSAPP_TOKEN** (**Secret**): el mismo permiso que `whatsapp_token` en los secretos de
      Streamlit.
+   - **HORAS_ENTRE_RESPUESTAS** (texto común, si querés otra cosa que 12): cada cuántas horas se
+     le contesta al mismo cliente, igual que en la app («⏱️ Los tiempos de la página»).
 3. **Deploy**. Sin alguna de las tres, el relevo no contesta nada (la app igual contesta cuando
    trae los mensajes, y Facebook e Instagram los contesta siempre la app).
 

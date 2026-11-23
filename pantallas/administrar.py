@@ -1264,7 +1264,11 @@ if pagina == PAGINAS[3]:
                                "dormida, en el relevo (Cloudflare → el Worker → Settings → "
                                "Variables) van estas dos, y el permiso WHATSAPP_TOKEN como "
                                "«Secret» (pasos en integraciones/relevo_de_mensajes/LEEME.md):")
-                    st.code(f"HORARIO = {_conf_fh['horario']}\nRESPUESTA = {_conf_fh['texto']}",
+                    # Y las horas entre respuestas, si no son las 12 de siempre (ver
+                    # horasEntreRespuestas() en el relevo).
+                    st.code(f"HORARIO = {_conf_fh['horario']}\nRESPUESTA = {_conf_fh['texto']}"
+                            + (f"\nHORAS_ENTRE_RESPUESTAS = {HORAS_ENTRE_RESPUESTAS_AUTOMATICAS}"
+                               if HORAS_ENTRE_RESPUESTAS_AUTOMATICAS != 12 else ""),
                             language=None, wrap_lines=True)
 
     if sub_admin == SUB_ADMIN[3]:

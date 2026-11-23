@@ -18,7 +18,8 @@
 //
 // LA RESPUESTA FUERA DE HORARIO (si se quiere): con HORARIO y RESPUESTA (variables, las que
 // muestra la app en Administrar → 🌙 Respuesta fuera de horario) y WHATSAPP_TOKEN (Secret), al
-// que escribe con el local cerrado se le contesta al instante, una vez cada 12 horas. Lo que se
+// que escribe con el local cerrado se le contesta al instante, una vez cada 12 horas (o las
+// que diga HORAS_ENTRE_RESPUESTAS, variable común, si se quiere otra cosa). Lo que se
 // mandó se guarda como un aviso más (un «eco» marcado "automatica"), así la app lo muestra en el
 // chat sin darlo por atendido y no contesta otra vez. Sin esas tres, no contesta nada.
 
@@ -65,7 +66,12 @@ function traeMensajes(aviso) {
 // «lun-vie 8:00-18:00, sab 8:30-13:00», en hora de Argentina (UTC-3, sin cambio de hora).
 const DIAS = { lun: 1, mar: 2, mie: 3, jue: 4, vie: 5, sab: 6, dom: 0 };
 const UN_TRAMO = /^([a-z]{3})[a-z]*(?:\s*(?:-|\ba\b)\s*([a-z]{3})[a-z]*)?\s+(\d{1,2})(?:[:.](\d{2}))?\s*(?:-|\ba\b)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs?)?$/;
-const DOCE_HORAS = 12 * 60 * 60;
+// Cada cuántas horas al mismo cliente: HORAS_ENTRE_RESPUESTAS (la misma que en la app, en
+// «⏱️ Los tiempos de la página»), entre 1 y 72; si no está o no se entiende, 12.
+function horasEntreRespuestas(env) {
+  const horas = Math.round(Number(env.HORAS_ENTRE_RESPUESTAS));
+  return horas >= 1 && horas <= 72 ? horas : 12;
+}
 
 function abierto(horario, ahora) {
   const aca = new Date(ahora.getTime() - 3 * 60 * 60 * 1000);
@@ -98,7 +104,7 @@ async function contestarFueraDeHorario(aviso, env) {
       const numeroId = valor.metadata && valor.metadata.phone_number_id;
       for (const m of valor.messages || []) {
         if (!numeroId || !m || !m.from || await env.AVISOS.get("auto:" + m.from)) continue;
-        await env.AVISOS.put("auto:" + m.from, "1", { expirationTtl: DOCE_HORAS });
+        await env.AVISOS.put("auto:" + m.from, "1", { expirationTtl: horasEntreRespuestas(env) * 60 * 60 });
         try {
           const r = await fetch(`https://graph.facebook.com/v26.0/${numeroId}/messages`, {
             method: "POST",

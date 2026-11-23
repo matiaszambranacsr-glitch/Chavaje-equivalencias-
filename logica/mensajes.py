@@ -889,7 +889,8 @@ def probar_los_canales():
 # ============================================================================================
 # El que escribe a la noche o el domingo no sabía si alguien lo iba a leer, y se iba a otro
 # lado. Con el horario cargado (en Administrar), al que escribe con el local cerrado se le
-# contesta solo, una vez cada HORAS_ENTRE_RESPUESTAS_AUTOMATICAS: «Ahora estamos cerrados, te
+# contesta solo, una vez cada HORAS_ENTRE_RESPUESTAS_AUTOMATICAS (que elige el administrador; en
+# el relevo, HORAS_ENTRE_RESPUESTAS): «Ahora estamos cerrados, te
 # contestamos apenas abramos». Lo hacen dos: el relevo de WhatsApp, al instante (recibe cada
 # mensaje aunque la app esté dormida; ver integraciones/relevo_de_mensajes/), y la app al traer
 # los mensajes (Facebook, Instagram, y WhatsApp si el relevo no lo hizo). La respuesta queda en
