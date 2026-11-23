@@ -43,6 +43,9 @@ ENTIENDE = (
     ("como hago una devolucion", "como:devolucion_cliente"),
     ("como le reclamo la garantia al proveedor", "como:garantia_proveedor"),
     ("le mande un presupuesto y no contesto", "como:seguir_presupuesto"),
+    ("como armo el presupuesto con lo que me pide el cliente en el chat",
+     "como:presupuesto_del_chat"),
+    ("como anoto que un cliente espera un repuesto que no tengo", "como:cliente_espera"),
     ("como hago el seguimiento de los presupuestos", "como:seguir_presupuesto"),
     ("vino fallada una bomba, como se la reclamo a la marca", "como:garantia_proveedor"),
     ("debolucion", "como:devolucion_cliente"),
@@ -1009,10 +1012,14 @@ def probar(L):
     c.execute("INSERT INTO pedidos_deposito (producto_id, cantidad, estado, pedido_por, "
               "pedido_en) VALUES (?, 1, 'pendiente', 'ana *pide*', datetime('now'))",
               (_prod_d[0],))
-    # Y un chat sin leer, con un nombre con formato y un texto que no se tiene que decir.
-    c.execute("INSERT INTO chats (canal, externo, nombre, ultimo_texto, ultimo_en, sin_leer) "
+    # Y un chat sin leer, con un nombre con formato y un texto que no se tiene que decir. Rosa
+    # escribió después del presupuesto que se le mandó ayer: le contestó.
+    c.execute("INSERT INTO chats (canal, externo, nombre, ultimo_texto, ultimo_en, sin_leer, "
+              "ultimo_del_cliente_en) "
               "VALUES ('whatsapp', '5491100000000', 'Rosa *Pro* [x](http://x.example)', "
-              "'el secreto de Rosa', datetime('now'), 2)")
+              "'el secreto de Rosa', datetime('now'), 2, datetime('now'))")
+    c.execute("INSERT INTO presupuestos_para_seguir (cliente, telefono, items, total, creado_en) "
+              "VALUES ('Rosa', '11 0000-0000', '[]', 0, datetime('now', '-1 day'))")
     ns["conn"].commit()
     _todas_d = list(ns["ORDEN_DE_LAS_PAGINAS"])
     _roles_d = {
@@ -1078,6 +1085,9 @@ def probar(L):
     cierto("lo pendiente junta la caja, el depósito y las cuentas vencidas",
            all(x in _pend_d["texto"] for x in ("esperan en la caja", "depósito",
                                                "saldo vencido")), _pend_d["texto"])
+    cierto("y los que contestaron por el chat sobre su presupuesto (sin decir qué escribieron)",
+           "**1** cliente(s) te contestaron por el chat" in _pend_d["texto"]
+           and "secreto" not in _pend_d["texto"], _pend_d["texto"])
     _msj_d = responder("hay mensajes sin leer", _roles_d["operador"])
     cierto("los mensajes: cuántos chats y de quién (escapado), nunca lo que escribieron",
            "**1** chat" in _msj_d["texto"] and "Rosa \\*Pro\\*" in _msj_d["texto"]

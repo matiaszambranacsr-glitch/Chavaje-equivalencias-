@@ -239,10 +239,16 @@ def _dato_de_lo_pendiente(contexto):
     if _BUSCADOR in visibles and contexto.get("nivel") in ("operador", "admin"):
         _presus = presupuestos_para_seguir()
         _tocan_p = sum(1 for p in _presus if p["toca"])
+        _contestaron_p = sum(1 for p in _presus if p["contesto"])
+        if _contestaron_p:
+            lineas.append(f"💬 **{miles(_contestaron_p)}** cliente(s) te contestaron por el chat "
+                          "sobre el presupuesto que se les mandó: «💬 Te contestó», en "
+                          "«📋 Presupuestos para seguir».")
         if _tocan_p:
             lineas.append(f"📋 A **{miles(_tocan_p)}** cliente(s) les toca preguntarles por el "
                           "presupuesto que se les mandó: «📋 Presupuestos para seguir», en el "
                           "🔍 Buscador.")
+        if _tocan_p or _contestaron_p:
             botones += _asis_ir_a(_BUSCADOR, contexto)
     if _DEVOLUCIONES in visibles:
         _por_reclamar = [g for g in garantias() if not g["reclamo"]]
