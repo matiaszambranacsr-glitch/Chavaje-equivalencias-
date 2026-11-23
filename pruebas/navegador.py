@@ -6,7 +6,9 @@ Uso:
 
 --barrido no corre los pasos de siempre: entra como administrador a una COPIA de esa base y
 recorre todas las pantallas y solapas en un teléfono simulado, diciendo en cuáles algo se sale
-de la pantalla o un botón quedó aplastado (ver barrer_en_el_telefono()).
+de la pantalla o un botón quedó aplastado (ver barrer_en_el_telefono()). Al final abre también
+los paneles que llegan cerrados y tienen campos lado a lado (los pedidos del chat y lo pegado en
+el Buscador). Con CAPTURAS_DEL_BARRIDO=<carpeta> guarda una captura de cada uno, para mirarlas.
 
 El JavaScript de AYUDAS_DEL_NAVEGADOR (logica/interfaz.py) no lo corre AppTest: el cursor en la
 caja de búsqueda al entrar a cada pantalla, F2, el menú del click derecho y los textos de
@@ -25,6 +27,7 @@ Corre en una carpeta temporal: nunca toca la base de trabajo. La contraseña de 
 se inventa en cada corrida y se borra con la carpeta.
 """
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -307,33 +310,35 @@ def probar(url, clave, carpeta):
             if _url != "https://wa.me/5491145678901?text=te%20pido%204%20unidades":
                 fallas.append("el link de WhatsApp no lleva lo recién escrito: abrió " + _url)
 
-        #  · «🧩 Armar el presupuesto con lo que pide» (los filtros de aire y el de aceite): se
-        #    descarta un pedido y se cambia la cantidad del otro sin salir del campo, y se toca
-        #    directo «🛒 Armar». Lo que va es lo que se ve en ese momento (el botón lee los
+        #  · «🧩 Armar el presupuesto con lo que pide» (el F100, los filtros de aire y el de
+        #    aceite, que también es el F100): se descarta un pedido y se cambia la cantidad de
+        #    otro sin salir del campo, y se toca directo «🛒 Armar». Lo que va es lo que se ve en ese momento (el botón lee los
         #    campos al tocarlo: sus args se arman en la pasada anterior, con lo de antes).
         pagina.locator('[class*="st-key-exp_presu_chat_"] summary').first.click()
         _selec = pagina.locator('[class*="st-key-pedido_chat_"]:not([class*="_cant"])')
-        if not _hasta(lambda: _selec.count() == 2, 15):
+        if not _hasta(lambda: _selec.count() == 3, 15):
             fallas.append("en el chat, «🧩 Armar el presupuesto con lo que pide» no muestra los "
-                          f"dos pedidos (el filtro de aire y el de aceite): {_selec.count()}")
+                          f"tres pedidos (el F100, el filtro de aire y el de aceite): "
+                          f"{_selec.count()}")
         else:
             # Antes a la vista: Playwright mueve la pantalla al tocar, y el selector se cierra
             # solo cuando la página se mueve (una persona no mueve la página al tocar).
-            _selec.nth(0).evaluate("e => e.scrollIntoView({block: 'center'})")
+            _selec.nth(1).evaluate("e => e.scrollIntoView({block: 'center'})")
             _esperar(pagina, 1)
-            _selec.nth(0).locator('button[aria-haspopup="listbox"]').click()
+            _selec.nth(1).locator('button[aria-haspopup="listbox"]').click()
             pagina.get_by_role("option", name="🗑️ Descartar este pedido").click()
             _esperar(pagina, 2)
-            _cant = pagina.locator('[class*="st-key-pedido_chat_"][class*="_cant"] input').nth(1)
+            _cant = pagina.locator('[class*="st-key-pedido_chat_"][class*="_cant"] input').nth(2)
             _cant.fill("3")
             pagina.get_by_role("button", name="🛒 Armar el presupuesto con lo elegido").click()
             _armado = pagina.locator(".st-key-exp_presupuesto_armado_item_s summary")
             if not _hasta(lambda: _armado.count() == 1, 15):
                 fallas.append("«🛒 Armar el presupuesto con lo elegido» no lleva al presupuesto "
                               f"del Buscador: quedó en {pagina.evaluate(_marcada)!r}")
-            elif "1 ítem(s) · $3.000" not in _armado.inner_text():
-                fallas.append("el presupuesto armado desde el chat no es el filtro de aceite ×3 "
-                              f"(sin el descartado): {_armado.inner_text()!r}")
+            elif "1 ítem(s) · $4.000" not in _armado.inner_text():
+                # El F100 ×1 (el código) y ×3 (el filtro de aceite) van juntos: ×4.
+                fallas.append("el presupuesto armado desde el chat no es el F100 ×4 (sin el "
+                              f"descartado): {_armado.inner_text()!r}")
 
         # 7c. 📁 CARGAR EXCEL: la fila de los títulos es la de CADA archivo. Al cambiar de lista,
         # la app borraba la clave del campo, pero el navegador seguía mostrando el número de la
@@ -468,6 +473,26 @@ def barrer_en_el_telefono(url, clave):
         for entendido in pagina.get_by_role("button", name="Entendido").all():
             entendido.tap()
             _esperar(pagina, 1)
+        capturas = os.environ.get("CAPTURAS_DEL_BARRIDO")
+
+        def revisar(donde, problemas=()):
+            medido = pagina.evaluate(_MEDIR_LA_PANTALLA)
+            problemas = (
+                list(problemas)
+                + ([f"la página se corre {medido['corrida']} px de costado"]
+                   if medido["corrida"] > 3 else [])
+                + [f"se sale de la pantalla: {x}" for x in medido["fuera"]]
+                + [f"botón aplastado: {x}" for x in medido["chicos"]]
+                + [f"la pantalla se rompió: {x}" for x in medido["rota"]])
+            print(("   ✗ " if problemas else "   ✓ ") + donde)
+            for problema in problemas:
+                print("       ", problema)
+            if problemas:
+                con_algo.append(donde)
+            if capturas:
+                pagina.screenshot(path=os.path.join(
+                    capturas, re.sub(r"\W+", "_", donde).strip("_")[:80] + ".png"), full_page=True)
+
         for seccion in [x.strip() for x in pagina.locator(barra).all_inner_texts()]:
             pagina.locator(barra).filter(has_text=seccion).first.tap()
             _esperar(pagina, 2)
@@ -475,19 +500,37 @@ def barrer_en_el_telefono(url, clave):
                 if solapa:
                     pagina.locator(solapas_de).filter(has_text=solapa).first.tap()
                     _esperar(pagina, 2)
-                donde = seccion + (f" → {solapa}" if solapa else "")
-                medido = pagina.evaluate(_MEDIR_LA_PANTALLA)
-                problemas = (
-                    ([f"la página se corre {medido['corrida']} px de costado"]
-                     if medido["corrida"] > 3 else [])
-                    + [f"se sale de la pantalla: {x}" for x in medido["fuera"]]
-                    + [f"botón aplastado: {x}" for x in medido["chicos"]]
-                    + [f"la pantalla se rompió: {x}" for x in medido["rota"]])
-                print(("   ✗ " if problemas else "   ✓ ") + donde)
-                for problema in problemas:
-                    print("       ", problema)
-                if problemas:
-                    con_algo.append(donde)
+                revisar(seccion + (f" → {solapa}" if solapa else ""))
+
+        # LOS PANELES QUE LLEGAN CERRADOS, con selectores y cantidades lado a lado: el recorrido
+        # de arriba los ve cerrados. El chat y el pedido son los de PREPARAR.
+        def abrir_los_pedidos_del_chat():
+            pagina.locator(barra).filter(has_text="Mensajes").first.tap()
+            _esperar(pagina, 2)
+            pagina.get_by_role("button", name="Cliente Del Navegador").first.tap()
+            _esperar(pagina, 2)
+            pagina.locator('[class*="st-key-exp_presu_chat_"] summary').first.tap()
+            _esperar(pagina, 3)
+
+        def abrir_el_pedido_pegado():
+            pagina.locator(barra).filter(has_text="Buscador").first.tap()
+            _esperar(pagina, 2)
+            pagina.locator(".st-key-exp_pedido_pegado summary").first.tap()
+            _esperar(pagina, 2)
+            caja = pagina.locator(".st-key-pedido_pegado textarea")
+            caja.fill("necesito 2 filtros de aire para el gol, un filtro de aceite y el F100")
+            caja.evaluate("e => e.blur()")
+            _esperar(pagina, 3)
+
+        for donde, abrir in (
+                ("💬 Mensajes → 🧩 Armar el presupuesto con lo que pide",
+                 abrir_los_pedidos_del_chat),
+                ("🔍 Buscador → 🧩 Pegar el pedido de un cliente", abrir_el_pedido_pegado)):
+            try:
+                abrir()
+                revisar(donde)
+            except Exception as error:      # que no se abra también es algo que decir
+                revisar(donde, [f"no se pudo abrir: {str(error).splitlines()[0][:120]}"])
         navegador.close()
     return con_algo
 

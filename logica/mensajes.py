@@ -939,6 +939,9 @@ _NO_ES_DETALLE = PALABRAS_DE_RELLENO | {
     "VALE", "VALEN", "COTIZACION", "PRESUPUESTO", "QUERIA", "QUISIERA", "SABER", "GRACIAS",
     "TENDRAS", "TENDRIAS", "AUTO", "COCHE", "CAMIONETA", "MODELO", "ANO", "JUEGO", "JGO", "KIT",
     "PAR", "TODO", "TODOS", "LADO", "LADOS", "MARCA", "ORIGINAL", "BUENA", "BUENO"}
+# Las cantidades dichas con palabras: «un par de amortiguadores», «dos bujías».
+_CANTIDAD_EN_PALABRAS = {"UN": 1, "UNA": 1, "UNO": 1, "DOS": 2, "TRES": 3, "CUATRO": 4,
+                         "CINCO": 5, "SEIS": 6, "OCHO": 8, "DIEZ": 10, "PAR": 2}
 # Cuántos candidatos se ofrecen por pedido, y cuántos pedidos se leen de una vez.
 CANDIDATOS_POR_PEDIDO = 5
 PEDIDOS_DE_UN_CHAT = 8
@@ -953,6 +956,24 @@ def _en_singular(palabra):
     if len(palabra) > 4 and palabra.endswith("ES") and palabra[-3] in "RLNDZ":
         return palabra[:-2]
     return palabra[:-1] if len(palabra) > 3 and palabra.endswith("S") else palabra
+
+
+def _lo_que_sigue_a_cada_pieza():
+    """{«FILTRO»: {«ACEITE», «AIRE», …}}: lo que dice qué pieza es, sacado de las formas de las
+    familias. Para «filtro de aire y aceite», donde el segundo es «filtro de aceite»."""
+    sigue = {}
+    for forma in _BUSCADOR_DE_FAMILIAS[1]:
+        palabras = [_en_singular(w) for w in forma.split() if w not in _UNEN_PALABRAS]
+        if len(palabras) >= 2:
+            sigue.setdefault(palabras[0], set()).add(palabras[1])
+    return sigue
+
+
+_LO_QUE_SIGUE_A = _lo_que_sigue_a_cada_pieza()
+# Las palabras de las piezas («MOTOR», «AGUA»…): nunca son la marca del repuesto, aunque alguna
+# lista se llame así.
+_PALABRAS_DE_LAS_PIEZAS = {_en_singular(w) for forma in _BUSCADOR_DE_FAMILIAS[1]
+                           for w in forma.split()}
 
 
 def auto_del_texto(texto):
@@ -974,21 +995,39 @@ def auto_del_texto(texto):
 def pedidos_del_mensaje(texto):
     """Lo que pide el texto, separado: [dict] con tipo («codigo» o «pieza»), texto (lo que se
     entendió), buscar (lo que se le pide al catálogo), nucleo (las palabras que tiene que tener
-    la descripción), lados, modelos, cantidad y auto (el auto del mensaje, para decirlo)."""
+    la descripción), lados, modelos, prefiere (lo que dice además de la pieza: la marca, «bujías
+    NGK», o la medida, «batería 12x65»), cantidad y auto (el auto del mensaje, para decirlo)."""
+    texto = str(texto or "")[:2000]        # un chat larguísimo no frena la pantalla
     modelos, motor, anio = auto_del_texto(texto)
+    # «PARA LA F100» es la camioneta; «EL F100», si está cargado, el código (ver más abajo).
+    palabras_del_texto = re.findall(r"[A-Z0-9]+", normalizar_texto(texto).upper())
+    modelos_que_son_codigo = {
+        p for i, p in enumerate(palabras_del_texto)
+        if p in MODELOS_COMUNES and re.search(r"\d", p) and existe_el_codigo(p)
+        and (i == 0 or palabras_del_texto[i - 1] not in {"PARA", "LA", "UNA", "MI", "DE", "DEL"})}
+    modelos = [m for m in modelos if m not in modelos_que_son_codigo]
     del_auto = modelos + motor + ([anio] if anio else [])
     auto = " ".join(del_auto)
     del_modelo = [m for m in modelos if m not in _MARCAS_DEL_AUTO]
     pedidos = []
-    for codigo in codigos_del_mensaje(texto, tope=PEDIDOS_DE_UN_CHAT):
-        # «pastillas para la F100»: en un pedido, F100 es la camioneta, no un código.
-        if codigo.upper() in MODELOS_COMUNES:
+    # LOS CÓDIGOS DE SOLO NÚMEROS, largos («33001980», «0986452041»), son muy comunes, pero un
+    # número largo también es un teléfono o un CUIT: van solo si están en el catálogo. Lo mismo
+    # los cortos de solo números, que pueden ser plata («lo tenés a 15000?»).
+    largos = re.findall(r"(?<![\w$/.-])(\d{8,13})(?![\w/-]|[.,]\d)", str(texto or ""))
+    for codigo in codigos_del_mensaje(texto, tope=PEDIDOS_DE_UN_CHAT) + largos:
+        # «pastillas para la F100»: en un pedido, F100 es la camioneta, no un código; salvo
+        # «tenés el F100?», con el código cargado.
+        if codigo.upper() in MODELOS_COMUNES and codigo.upper() not in modelos_que_son_codigo:
+            continue
+        if codigo.isdigit() and not any(existe_el_codigo(x) for x in
+                                        {codigo, codigo.lstrip("0"), "0" + codigo} if x):
             continue
         pedidos.append({"tipo": "codigo", "texto": codigo, "buscar": codigo, "nucleo": [],
-                        "lados": [], "modelos": [], "cantidad": 1, "auto": auto})
+                        "lados": [], "modelos": [], "prefiere": "", "cantidad": 1, "auto": auto})
     patron = _BUSCADOR_DE_FAMILIAS[0]
-    no_se_tocan = set(del_auto) | MODELOS_COMUNES
-    base = normalizar_texto(str(texto or "")).upper()
+    no_se_tocan = set(del_auto) | MODELOS_COMUNES | set(_CANTIDAD_EN_PALABRAS)
+    base = normalizar_texto(texto).upper()
+    cabeza = ""             # la última pieza nombrada: «filtro de aire y ACEITE»
     for pedazo in _SEPARA_PEDIDOS.split(f" {base} "):
         # En singular, menos el auto («FOCUS» no es el plural de nada).
         palabras = [p if p in no_se_tocan or p in MODELOS_CONOCIDOS else _en_singular(p)
@@ -996,12 +1035,47 @@ def pedidos_del_mensaje(texto):
         norm = f" {' '.join(palabras)} "
         lados = [p for p in palabras if any(p.startswith(k) for k in _LADOS_DEL_PEDIDO)]
         hasta = 0
-        for m in patron.finditer(norm):
+        piezas_del_pedazo = list(patron.finditer(norm))
+        if not piezas_del_pedazo:
+            # LA PIEZA DICHA A MEDIAS. «pastillas y discos»: «disco» solo no es una familia (lo
+            # son «disco de freno» y «disco de embrague»), y se perdía. Y «filtro de aire y
+            # aceite»: el pedazo «aceite», sin pieza, es otro filtro.
+            resto = [p for p in palabras
+                     if not (p in _NO_ES_DETALLE or p in _UNEN_PALABRAS or p in no_se_tocan
+                             or re.search(r"\d", p) or p in lados)]
+            sueltas = [p for p in resto if p in _LO_QUE_SIGUE_A]
+            if sueltas:
+                i = resto.index(sueltas[0])
+                nucleo = [sueltas[0]] + [p for p in resto[i + 1:i + 2]
+                                         if p in _LO_QUE_SIGUE_A[sueltas[0]]]
+            elif cabeza and resto and len(resto) <= 2 and all(
+                    p in _LO_QUE_SIGUE_A.get(cabeza, ()) for p in resto):
+                nucleo = [cabeza] + resto
+            else:
+                continue
+            cabeza = nucleo[0]
+            numero = [p for p in palabras if (p.isdigit() and len(p) <= 2)
+                      or p in _CANTIDAD_EN_PALABRAS]
+            cantidad = (int(numero[0]) if numero and numero[0].isdigit()
+                        else _CANTIDAD_EN_PALABRAS.get(numero[0], 1) if numero else 1)
+            pedidos.append({
+                "tipo": "pieza",
+                "texto": (nucleo[0] + (" de " + " ".join(nucleo[1:]) if nucleo[1:] else "")
+                          + (" " + " ".join(lados) if lados else "")).lower(),
+                "buscar": " ".join(nucleo + del_auto), "nucleo": nucleo,
+                "lados": [_LADOS_DEL_PEDIDO[k] for k in _LADOS_DEL_PEDIDO
+                          if any(l.startswith(k) for l in lados)],
+                "modelos": del_modelo, "prefiere": "", "auto": auto,
+                "cantidad": min(cantidad, CANTIDAD_MAXIMA_POR_PEDIDO) if 1 <= cantidad <= 20 else 1})
+            continue
+        for m in piezas_del_pedazo:
             if m.start() < hasta:      # «correa de ALTERNADOR»: ya es parte de la correa
                 continue
             nucleo = [p for p in m.group(1).split() if p not in _UNEN_PALABRAS]
+            cabeza = nucleo[0] if nucleo else cabeza
             dicho = m.group(1).split()
             hasta = m.end()
+            prefiere = ""
             # Las palabras que siguen y dicen qué pieza es («filtro de ACEITE»), hasta dos.
             sigue, sumadas = norm[m.end():].split(), 0
             for k, p in enumerate(sigue):
@@ -1011,26 +1085,54 @@ def pedidos_del_mensaje(texto):
                         or p in _MARCAS_DEL_AUTO
                         or any(p.startswith(x) for x in _LADOS_DEL_PEDIDO)):
                     break
-                nucleo.append(p)
                 dicho.append(p)
-                sumadas += 1
                 hasta = m.end() + len(" ".join(sigue[:k + 1])) + 1
-            cantidad = re.search(r"(?:^| )(\d{1,2}) $", norm[:m.start()])
-            cantidad = int(cantidad.group(1)) if cantidad else 1
+                # LO QUE NO ES DE LA PIEZA ORDENA, NO FILTRA. «filtro de aceite Mann»: la marca
+                # va en su columna (o en la del fabricante), casi nunca en la descripción, y
+                # exigida ahí no aparecía nada; «batería 12x65»: si no está esa, las otras
+                # sirven para ofrecer. Lo que define la pieza son las palabras de sus familias.
+                if p not in _PALABRAS_DE_LAS_PIEZAS:
+                    prefiere = prefiere or p
+                    continue
+                nucleo.append(p)
+                sumadas += 1
+            # Lo que va antes («2 amortiguadores», «un par de amortiguadores»; en «2 juegos de
+            # pastillas» el juego no es la cantidad) o después («amortiguadores x2»).
+            antes = norm[:m.start()].split()
+            while antes and antes[-1] in _UNEN_PALABRAS | {"JUEGO", "JUEGOS", "JGO", "JGOS"}:
+                antes = antes[:-1]
+            despues = re.match(r" ?(?:(?:DELANTER|TRASER|IZQUIERD|DERECH)[A-Z]* )*"
+                               r"(?:X ?|POR )(\d{1,2})(?= |$)", norm[hasta:])
+            if antes and antes[-1].isdigit() and len(antes[-1]) <= 2:
+                cantidad = int(antes[-1])
+            elif antes and antes[-1] in _CANTIDAD_EN_PALABRAS:
+                cantidad = _CANTIDAD_EN_PALABRAS[antes[-1]]
+            elif despues:
+                cantidad = int(despues.group(1))
+            else:
+                cantidad = 1
             pedidos.append({
                 "tipo": "pieza", "texto": " ".join(dict.fromkeys(dicho + lados)).lower(),
-                "buscar": " ".join(nucleo + del_auto), "nucleo": nucleo,
+                "buscar": " ".join(nucleo + ([prefiere] if prefiere else []) + del_auto),
+                "nucleo": nucleo,
                 "lados": [_LADOS_DEL_PEDIDO[k] for k in _LADOS_DEL_PEDIDO
                           if any(l.startswith(k) for l in lados)],
-                "modelos": del_modelo, "auto": auto,
+                "modelos": del_modelo, "prefiere": prefiere, "auto": auto,
                 "cantidad": min(cantidad, CANTIDAD_MAXIMA_POR_PEDIDO) if 1 <= cantidad <= 20 else 1})
     # «la batería 12x65»: el 12x65 es de la batería, no un código aparte (salía dos veces).
-    de_las_piezas = {n for p in pedidos if p["tipo"] == "pieza" for n in p["nucleo"]}
+    de_las_piezas = {n for p in pedidos if p["tipo"] == "pieza"
+                     for n in p["nucleo"] + [p["prefiere"]]}
     pedidos = [p for p in pedidos
                if p["tipo"] != "codigo" or p["texto"].upper() not in de_las_piezas]
     # El mismo pedido dos veces («las pastillas … sí, las pastillas»), una sola.
     unicos = list({p["buscar"]: p for p in pedidos}.values())
     return unicos[:PEDIDOS_DE_UN_CHAT]
+
+
+def _dice_la_palabra(descripcion_normalizada, palabra):
+    """Si la descripción (ya normalizada) tiene la palabra entera, o en plural. Como pedazo de
+    texto, «DISCO» encontraba «DISCOVERY» y se ofrecía una bobina de Land Rover."""
+    return re.search(rf" {re.escape(palabra)}(?:S|ES)? ", descripcion_normalizada) is not None
 
 
 def candidatos_del_pedido(pedido):
@@ -1040,14 +1142,24 @@ def candidatos_del_pedido(pedido):
     if pedido["tipo"] == "codigo":
         limpio = codigo_para_buscar(pedido["buscar"])
         filas = buscar_con_variantes_del_cero(limpio, "Todas", 3)[0] if limpio else []
+        # Con sus equivalentes. Lo que no se vende (la referencia de fábrica, sin precio) no
+        # sirve para un presupuesto: salía primero y elegido, con un equivalente con precio
+        # abajo. Primero lo que tiene precio, y de eso lo que hay en stock.
+        filas = [f for f in filas if not f.get("_sin_salida")] or filas
+        filas = sorted(filas, key=lambda f: (not f.get("Precio"),
+                                             not (f.get("Stock") or 0) > 0))
     else:
         def orden(fila):
             desc = _normalizar_desc(fila.get("Descripcion"))
+            prefiere = pedido.get("prefiere")
+            lo_prefiere = bool(prefiere) and prefiere in _normalizar_desc(
+                f"{fila.get('Marca') or ''} {fila.get('Fabricante') or ''} {desc}").split()
             return (not any(f" {m} " in desc for m in pedido["modelos"]),
+                    not lo_prefiere,
                     -sum(l in desc for l in pedido["lados"]),
                     not (fila.get("Stock") or 0) > 0)
         filas = sorted((f for f in buscar_por_texto(pedido["buscar"])
-                        if all(f" {n}" in _normalizar_desc(f.get("Descripcion"))
+                        if all(_dice_la_palabra(_normalizar_desc(f.get("Descripcion")), n)
                                for n in pedido["nucleo"])), key=orden)
     # «para_el_auto»: si nombra el auto del mensaje. El que no lo nombra se ofrece igual (muchas
     # descripciones no dicen el auto), pero marcado, y no viene elegido.
@@ -1277,7 +1389,8 @@ def mostrar_los_pedidos(texto, base, chat_id=None):
             continue
         _por_id = {x["ID"]: x for x in _cands}
         _primero = _cands[0]
-        _col_que, _col_cant = st.columns([5, 1], vertical_alignment="bottom")
+        _col_que, _col_cant = st.container(key=f"fila_pedido_{_clave}").columns(
+            [5, 1], vertical_alignment="bottom")
         _opciones = list(_por_id) + [DESCARTAR_EL_PEDIDO]
         _col_que.selectbox(
             _titulo, _opciones, key=_clave, index=0 if _primero["para_el_auto"] else

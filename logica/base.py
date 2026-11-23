@@ -607,6 +607,15 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   .st-key-nav_principal [role="radiogroup"] label p { font-size: 0.85rem; }
 }
 
+/* LOS PEDIDOS DEL CHAT, en el celular: el selector y la cantidad en el mismo renglón. Apiladas,
+   la cantidad ocupaba todo el ancho debajo de cada pedido (se vio en un teléfono simulado). */
+@media (max-width: 640px) {
+  [class*="st-key-fila_pedido_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+  [class*="st-key-fila_pedido_"] [data-testid="stColumn"] {
+    min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
+  [class*="st-key-fila_pedido_"] [data-testid="stColumn"]:last-child { flex: 0 0 92px !important; }
+}
+
 /* Los renglones de productos (los del menú del click derecho): una lista con separadores,
    como una tabla, en vez de texto suelto. */
 [class*="st-key-conmenu_"] { border-bottom: 1px solid var(--border); padding: 4px 6px 6px 6px;

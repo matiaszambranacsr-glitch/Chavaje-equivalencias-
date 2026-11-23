@@ -7701,6 +7701,21 @@ seguirlo», y «💬 Mandárselo» lo devuelve a ese chat (`pedidos_del_mensaje(
 - **«correa de alternador»** es una pieza, no dos; «AMORTIGUADORES» se busca como
   «AMORTIGUADOR» (las formas de las piezas suman solo una S); un código al final de una oración
   («…el W712/80.») se reconoce sin el punto.
+- **Las cantidades**: «2 amortiguadores», «un par de amortiguadores», «dos bujías», «amortiguadores
+  x2», «2 juegos de pastillas».
+- **Lo dicho a medias**: «filtro de aire y aceite» son dos filtros; en «pastillas y discos», «disco»
+  solo no es una familia (lo son «disco de freno» y «disco de embrague»), pero se toma igual. La
+  palabra de la pieza se busca entera (o en plural): como pedazo, «disco» encontraba «DISCOVERY».
+- **Lo que no es de la pieza ordena, no filtra**: la marca («bujías NGK», «filtro Mann») va en su
+  columna, casi nunca en la descripción, y exigida ahí no aparecía nada; la medida («batería
+  12x65») también, porque si no está esa, las otras sirven para ofrecer. Lo que define la pieza
+  son las palabras de sus familias (`_PALABRAS_DE_LAS_PIEZAS`).
+- **Los códigos**: van con sus equivalentes, primero lo que tiene precio y stock (la referencia de
+  fábrica, sin precio, salía primera y elegida). Los de solo números largos («33001980») van si
+  están cargados (un número largo también es un teléfono o un CUIT). «Pastillas para la F100» es
+  la camioneta; «¿tenés el F100?», con el código cargado, el código.
+- En el celular, el selector y la cantidad van en el mismo renglón (apiladas, la cantidad ocupaba
+  todo el ancho). `pruebas/navegador.py --barrido` abre también este panel y el de lo pegado.
 - Las elecciones van con una clave que lleva la huella de lo leído: si el cliente escribe otra
   cosa, son pedidos nuevos y no se quedan con lo elegido para los de antes.
 

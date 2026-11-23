@@ -37,7 +37,8 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
   rompió el cursor de Ventas sin tocar ese código). GitHub lo corre en cada subida (trabajo
   «navegador»). **«En el celular» no es achicar la ventana**: `… navegador.py --barrido --base
   <copia>` recorre todas las pantallas en un teléfono simulado y dice dónde algo se sale o
-  queda aplastado (así se vio la burbuja del asistente de 16 px). Si dice que falta Playwright para Python,
+  queda aplastado (así se vio la burbuja del asistente de 16 px); con `CAPTURAS_DEL_BARRIDO=<carpeta>`
+  guarda una captura de cada pantalla para mirarla. Si dice que falta Playwright para Python,
   armarlo aparte con la versión del de Node (`cd /tmp && node -e
   "console.log(require('playwright/package.json').version)"`):
   `python3 -m venv /tmp/pw && /tmp/pw/bin/pip install -q "playwright==<esa versión>"`, y

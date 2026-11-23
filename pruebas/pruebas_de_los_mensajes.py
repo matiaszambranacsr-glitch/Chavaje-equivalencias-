@@ -697,6 +697,55 @@ def probar():
                 [(p["tipo"], p["texto"]) for p in ns["pedidos_del_mensaje"](
                     "precio de la bateria 12x65 para un fiesta")],
                 [("pieza", "bateria 12x65")])
+        esperar("las cantidades dichas de otras formas",
+                [(p["texto"], p["cantidad"]) for t in (
+                    "un par de amortiguadores traseros", "dos bujias y tres filtros de aire",
+                    "amortiguadores traseros x2", "2 juegos de pastillas")
+                 for p in ns["pedidos_del_mensaje"](t)],
+                [("amortiguador trasero", 2), ("bujia", 2), ("filtro de aire", 3),
+                 ("amortiguador trasero", 2), ("pastilla", 2)])
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "SELECT '33001980', '33001980', 'JUNTAS MOTOR', id FROM marcas "
+                  "WHERE nombre = 'MARCA PEDIDO'")
+        # Una marca que sale antes por nombre, sin precio: el orden lo tiene que poner la app.
+        c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('A SIN PRECIO', 'PROVEEDOR')")
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "SELECT 'W712/80', 'W71280', 'FILTRO ACEITE', id FROM marcas "
+                  "WHERE nombre = 'A SIN PRECIO'")
+        ns["conn"].commit()
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "SELECT 'F100', 'F100', 'FILTRO', id FROM marcas WHERE nombre = 'MARCA PEDIDO'")
+        ns["conn"].commit()
+        esperar("«para la F100» es la camioneta; «tenés el F100?», con el código cargado, el código",
+                [[(p["tipo"], p["texto"], p["auto"]) for p in ns["pedidos_del_mensaje"](t)]
+                 for t in ("pastillas para la F100", "tenés el F100?")],
+                [[("pieza", "pastilla", "F100")], [("codigo", "F100", "")]])
+        esperar("un código de solo números va si está cargado; un teléfono, no",
+                [p["texto"] for p in ns["pedidos_del_mensaje"](
+                    "mi numero es 1145678901, tenes el 33001980?")], ["33001980"])
+        esperar("del código, primero el que tiene precio",
+                [(x["Marca"], bool(x["Precio"])) for x in ns["candidatos_del_pedido"](
+                    ns["pedidos_del_mensaje"]("tenes el W712/80?")[0])],
+                [("MANN CHAT", True), ("A SIN PRECIO", False)])
+        esperar("«filtro de aire y aceite» son dos filtros; «pastillas y discos», dos piezas",
+                [[p["texto"] for p in ns["pedidos_del_mensaje"](t)]
+                 for t in ("filtro de aire y aceite para el gol", "pastillas y discos para el gol")],
+                [["filtro de aire", "filtro de aceite"], ["pastilla", "disco"]])
+        c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('NGK PRUEBA', 'PROVEEDOR')")
+        for _cod, _desc, _marca in (("DF1", "DISCO DE FRENO VW GOL", "MARCA PEDIDO"),
+                                    ("BL1", "BOBINA LAND ROVER DISCOVERY GOL", "MARCA PEDIDO"),
+                                    ("BJ1", "BUJIA VW GOL", "MARCA PEDIDO"),
+                                    ("BJ2", "BUJIA VW GOL", "NGK PRUEBA")):
+            c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                      "precio) SELECT ?, ?, ?, id, 100 FROM marcas WHERE nombre = ?",
+                      (_cod, _cod, _desc, _marca))
+        ns["conn"].commit()
+        esperar("«disco» es la palabra entera: no trae lo de la DISCOVERY",
+                [x["Codigo"] for x in ns["candidatos_del_pedido"](
+                    ns["pedidos_del_mensaje"]("discos para el gol")[0])], ["DF1"])
+        esperar("la marca que nombra ordena, no filtra (va en su columna, no en la descripción)",
+                [x["Codigo"] for x in ns["candidatos_del_pedido"](
+                    ns["pedidos_del_mensaje"]("bujias ngk para el gol")[0])][:1], ["BJ2"])
         esperar("un saludo no es un pedido", ns["pedidos_del_mensaje"]("gracias!! nos vemos"), [])
         esperar("«correa de alternador» es una pieza, no dos; «4 bujías», cuatro",
                 [(p["texto"], p["cantidad"]) for p in ns["pedidos_del_mensaje"](
