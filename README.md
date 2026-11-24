@@ -7955,7 +7955,8 @@ retiro del dueño. Cada salida hacía que el arqueo dijera «Faltan $X», y la d
 caja», **«💸 Salidas de caja»**: qué fue (🧾 gasto, 🚚 pago a un proveedor, 🏦 retiro), en qué y
 cuánto. Queda con la hora y quién, en el registro de cambios, y **lo que tiene que haber en el
 cajón** (arriba de la caja y en el arqueo) la descuenta; «💵 Vendido» no cambia. Sale en el
-resumen del día («💸 Salidas de caja: $450 (2)» y «🧮 En el cajón tendría que haber»). El «🚫»
+resumen del día («💸 Salidas de caja: $450 (2)» y «🧮 En el cajón tendría que haber») y en el de
+la semana, por tipo. El «🚫»
 la anula: el administrador siempre, quien la anotó en sus primeros `MINUTOS_PARA_DESHACER_LA_PROPIA`
 (un número mal tipeado). Está en «LAS SALIDAS DE CAJA», en `logica/ventas.py` (la tabla
 `salidas_de_caja`, por el día de acá); lo controlan `pruebas_de_la_caja.py` y
@@ -8358,6 +8359,8 @@ Eran quince herramientas una debajo de la otra, y la que hacía falta podía est
 ## 🆕 Lo nuevo de cada versión, al administrador
 
 Cada tanda de mejoras trae herramientas en pantallas que nadie vuelve a abrir («🧽 Códigos adivinados» está al fondo de «Limpiar y corregir»), y una herramienta que no se encuentra no existe. Ahora, cuando se publica una versión, el administrador ve arriba un recuadro «🆕 Lo nuevo» con cada cosa y dónde está, hasta que toca «👍 Entendido». Para la próxima, se cambia `VERSION_DE_LO_NUEVO` y la lista `LO_NUEVO` en `logica/interfaz.py`. El operador no lo ve. `pruebas_de_la_sesion.py` (10) lo controla.
+
+Con 65 novedades juntas, lo de hoy quedaba mezclado con lo de hace un mes. Ahora «Entendido» guarda también cuántas había (`lo_nuevo_cuantas_vistas`), y la vez siguiente sale **solo lo sumado desde entonces**; lo de antes queda plegado en «📜 Lo de antes (N)». Si no se sabe cuántas vio (antes de que se guardara), salen las primeras `NOVEDADES_SI_NO_SE_SABE` (6).
 
 ## 🔒 El CSV del catálogo no lleva fórmulas
 

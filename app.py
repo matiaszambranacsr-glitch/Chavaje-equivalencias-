@@ -831,15 +831,30 @@ if _problemas and _se_muestra_la_salud:
 if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
     try:
         if obtener_config("lo_nuevo_visto", "") != VERSION_DE_LO_NUEVO:
+            # Solo lo sumado desde el último «Entendido» (ahí se guarda cuántas había): con todo
+            # eran 65 renglones, y lo de hoy quedaba mezclado con lo de hace un mes. Lo de antes,
+            # plegado. Sin ese número guardado (de antes de que existiera), las primeras
+            # NOVEDADES_SI_NO_SE_SABE.
+            _vistas = obtener_config("lo_nuevo_cuantas_vistas", "")
+            _nuevas = max(1, min(len(LO_NUEVO), len(LO_NUEVO) - int(_vistas)
+                                 if _vistas.isdigit() else NOVEDADES_SI_NO_SE_SABE))
             with st.container(border=True):
-                st.markdown(f"**🆕 Lo nuevo** ({len(LO_NUEVO)})")
+                st.markdown(f"**🆕 Lo nuevo** ({_nuevas})")
                 # En una caja con su propia barra: con diez novedades ocupaba la primera pantalla
                 # entera de cada sección, hasta tocar «Entendido» (se vio en una captura).
-                with st.container(height=240 if len(LO_NUEVO) > 4 else "content", border=False):
-                    for _nuevo, _donde in LO_NUEVO:
+                with st.container(height=240 if _nuevas > 4 else "content", border=False):
+                    for _nuevo, _donde in LO_NUEVO[:_nuevas]:
                         st.markdown(f"- {_nuevo} *({_donde})*")
+                if len(LO_NUEVO) > _nuevas:
+                    _exp_antes = st.expander(f"📜 Lo de antes ({len(LO_NUEVO) - _nuevas})",
+                                             key="exp_lo_nuevo_antes", on_change="rerun")
+                    if _exp_antes.open:
+                        with _exp_antes:
+                            for _nuevo, _donde in LO_NUEVO[_nuevas:]:
+                                st.markdown(f"- {_nuevo} *({_donde})*")
                 if st.button("👍 Entendido", key="lo_nuevo_entendido"):
                     guardar_config("lo_nuevo_visto", VERSION_DE_LO_NUEVO)
+                    guardar_config("lo_nuevo_cuantas_vistas", str(len(LO_NUEVO)))
                     st.rerun()
     except Exception as _err:             # lo nuevo no puede impedir que la app abra
         anotar_error("lo_nuevo", _err)

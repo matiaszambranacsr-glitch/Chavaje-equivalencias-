@@ -598,6 +598,10 @@ def probar(L):
                                 dia="2020-01-01")
     esperar("la de otro día, aparte",
             (ns["total_de_salidas"](), ns["total_de_salidas"]("2020-01-01")), (0.0, 700.0))
+    ns["anotar_salida_de_caja"]("🧾 Gasto", "artículos de limpieza", 120)
+    esperar("y en el resumen de la semana, por tipo (lo anulado y lo de 2020, no)",
+            [r for r in ns["resumen_de_la_semana"]().split("\n") if r.startswith("💸")],
+            ["💸 Salidas de caja: 🧾 Gasto $120"])
     _claves_antes = g["hay_claves_configuradas"]
     try:
         g["hay_claves_configuradas"] = lambda: True

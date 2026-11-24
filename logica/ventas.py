@@ -321,6 +321,14 @@ def resumen_de_la_semana(hasta=None, con_ganancia=False):
                          f"{cambio}% contra la semana anterior ({plata(total_antes)})")
     if con_ganancia and ganancia:
         renglones.append(f"💰 Ganancia estimada: {plata(ganancia)} (de lo que tiene costo)")
+    # Lo que salió del cajón en la semana, por tipo (ver «LAS SALIDAS DE CAJA»).
+    _por_tipo = c.execute(
+        "SELECT tipo, SUM(importe) AS total FROM salidas_de_caja WHERE anulada = 0 "
+        "AND dia BETWEEN ? AND ? GROUP BY tipo ORDER BY total DESC",
+        (desde.isoformat(), fin.isoformat())).fetchall()
+    if _por_tipo:
+        renglones.append("💸 Salidas de caja: " + ", ".join(
+            f"{f['tipo']} {plata(f['total'])}" for f in _por_tipo))
     mas_vendidos = sorted(vendidos.items(), key=lambda x: -x[1])[:5]
     if mas_vendidos:
         renglones.append("🏆 Lo que más salió: " + ", ".join(f"{q} ×{miles(n)}"

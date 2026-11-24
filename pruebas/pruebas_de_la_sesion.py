@@ -1490,6 +1490,17 @@ def probar():
     [b for b in _adm_n.button if b.key == "lo_nuevo_entendido"][0].click().run()
     esperar("con «Entendido», no vuelve", (_lo_nuevo(_adm_n), _lo_nuevo(sesion_nueva("clave-duenio-1"))),
             (False, False))
+    # Y la próxima vez, solo lo sumado desde ese «Entendido»; lo de antes, plegado.
+    _total_n = len(ns["LO_NUEVO"])
+    esperar("guardó cuántas vio", ns["obtener_config"]("lo_nuevo_cuantas_vistas", ""),
+            str(_total_n))
+    ns["guardar_config"]("lo_nuevo_visto", "otra")
+    ns["guardar_config"]("lo_nuevo_cuantas_vistas", str(_total_n - 2))
+    _adm_n2 = sesion_nueva("clave-duenio-1")
+    esperar("solo las 2 nuevas, y lo de antes plegado",
+            ([m.value for m in _adm_n2.markdown if m.value.startswith("**🆕 Lo nuevo**")],
+             [x.label for x in _adm_n2.expander if x.label.startswith("📜 Lo de antes")]),
+            (["**🆕 Lo nuevo** (2)"], [f"📜 Lo de antes ({_total_n - 2})"]))
     return fallas
 
 
