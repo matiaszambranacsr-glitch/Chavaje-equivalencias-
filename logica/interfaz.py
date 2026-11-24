@@ -605,8 +605,10 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-23e"
+VERSION_DE_LO_NUEVO = "2026-11-24"
 LO_NUEVO = (
+    ("💸 Salidas de caja: el flete, el proveedor que cobra contra entrega o tu retiro se anotan con qué fue y quién, y lo que tiene que haber en el cajón y el arqueo los descuentan (antes el arqueo decía «Faltan»). Salen en el resumen del día.", "💵 Caja → 📋 Ventas y cierre de caja"),
+    ("🏷️ Etiquetas de lo que entró: después de «✅ Sumar al stock», el PDF con una etiqueta por unidad, con el código de barras nuestro, para pegar antes de guardar.", "📦 Depósito → 📦 Entró mercadería"),
     ("😴 «Las cuentas que dejaron de venir»: el taller que compraba seguido y hace un mes no aparece, con su WhatsApp ya escrito para preguntarle si necesita algo. Los días se cambian en «⏱️ Los tiempos de la página».", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("⏱️ Los tiempos de la página, a tu elección: cada plazo (cuándo un pedido al proveedor está atrasado, cuánto vale un presupuesto, cuándo vuelve sola a Mostrador la cuenta elegida, cada cuánto se recuerda cobrar, cuánto queda lo borrado en la papelera…) se cambia en un solo lugar, para todos. Por ejemplo, el pedido atrasado a los 7 días en vez de 5. Está en «⏱️ Los tiempos de la página».", "🗂️ Administrar → 👥 Usuarios"),
     ("🚚 Pedidos a proveedores con seguimiento: después de mandar el mensaje, «📝 Anotar como pedido». Llega solo cuando lo cargás en «Entró mercadería» (si viene en partes, cuando llegó todo); lo que no llegó en 5 días va a la campanita, con «⏰ Reclamarle». Las listas marcan lo ya pedido, para no pedirlo dos veces, y «⏱️ Cuánto tarda cada proveedor» dice cuántos días tarda cada uno.", "📊 Estadísticas → 📌 Para pedir"),

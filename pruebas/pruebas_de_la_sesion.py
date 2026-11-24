@@ -1283,6 +1283,23 @@ def probar():
     esperar("en la caja, «📲 Resumen de la semana para el dueño» con el texto de la semana",
             [t.value.split("\n")[0][:12] for t in vta.text_area
              if str(t.key).startswith("resumen_semana_")], ["📊 Semana del"])
+    # LAS SALIDAS DE CAJA en la pantalla: se anota una, el cajón la descuenta y el «🚫» la anula
+    # (la propia, enseguida). Ver «LAS SALIDAS DE CAJA».
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.session_state["pop_resumen_semana"] = False
+    vta.run()
+    _cajon_sal = ns["efectivo_esperado"]()
+    vta.text_input(key="salida_concepto").set_value("flete del cadete")
+    vta.number_input(key="salida_importe").set_value(250.0)
+    [b for b in vta.button if "Anotar la salida" in b.label][0].click().run()
+    esperar("desde la caja: la salida anotada y descontada del cajón",
+            (round(_cajon_sal - ns["efectivo_esperado"](), 2),
+             any("flete del cadete" in str(x.value) for x in vta.caption),
+             [e.value for e in vta.exception]), (250.0, True, []))
+    _anular = [b for b in vta.button if (b.key or "").startswith("salida_anular_")]
+    if _anular:
+        _anular[0].click().run()
+    esperar("y el «🚫» la anula", (len(_anular), ns["total_de_salidas"]()), (1, 0.0))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

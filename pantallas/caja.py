@@ -143,9 +143,11 @@ if pagina == PAGINAS[11]:
         # medios, lo puesto a cuenta y lo que espera. Ver resumen_de_la_caja().
         _r = resumen_de_la_caja()
         _m = fila_de_numeros(4)
-        _m[0].metric("💵 En el cajón", f"${miles(_r['efectivo'], 0)}",
-                     help="Lo cobrado hoy en efectivo, menos lo devuelto: lo que tiene que haber "
-                          "(sin el cambio con el que se abrió).")
+        _m[0].metric("💵 En el cajón", f"${miles(_r['en_el_cajon'], 0)}",
+                     help="Lo cobrado hoy en efectivo, menos lo devuelto y lo que salió (gastos, "
+                          "pagos, retiros): lo que tiene que haber (sin el cambio con el que se "
+                          "abrió)." + (f" Salió ${miles(_r['salidas'], 0)}." if _r["salidas"]
+                                      else ""))
         # Corto: de a dos en el celular, «Tarjeta y transferencia» se cortaba en «transferen…».
         _m[1].metric("💳 Tarjeta y transf.", f"${miles(_r['otros_medios'], 0)}",
                      help="Lo cobrado hoy con tarjeta, transferencia o cualquier medio que no "
@@ -465,11 +467,54 @@ if pagina == PAGINAS[11]:
                     st.dataframe([{"Hora": x["hora"], "Venta": f"#{x['venta']}", "Qué": x["que"],
                                    "Corrigió": x["quien"]} for x in _corregidos],
                                  width="stretch", hide_index=True)
+            # LAS SALIDAS DE CAJA: lo que sale del cajón (gastos, pagos, retiros), antes del
+            # arqueo, que las descuenta. Ver «LAS SALIDAS DE CAJA» en logica/ventas.py.
+            st.markdown("**💸 Salidas de caja**",
+                        help="La plata que sale del cajón: el flete del cadete, el proveedor que "
+                             "cobra contra entrega, el retiro del dueño. Se descuenta de lo que "
+                             "tiene que haber, y el arqueo cierra. La anula el administrador (o "
+                             f"quien la anotó, en los primeros {MINUTOS_PARA_DESHACER_LA_PROPIA} "
+                             "minutos).")
+            with st.form("form_salida_de_caja", clear_on_submit=True):
+                _s1, _s2, _s3 = cols([2, 3, 2])
+                _tipo_sal = _s1.selectbox("Qué fue:", TIPOS_DE_SALIDA_DE_CAJA,
+                                          key="salida_tipo")  # rótulo fijo
+                _concepto_sal = _s2.text_input("En qué:", key="salida_concepto",
+                                               placeholder="Ej: flete del cadete")
+                _importe_sal = _s3.number_input("Importe ($):", min_value=0.0, step=100.0,
+                                                value=None, key="salida_importe")
+                _anotar_sal = st.form_submit_button("💸 Anotar la salida")
+            if _anotar_sal:
+                try:
+                    _ok_sal, _texto_sal = anotar_salida_de_caja(_tipo_sal, _concepto_sal,
+                                                                _importe_sal, dia=_dia_txt)
+                except PermissionError as _err_sal:
+                    _ok_sal, _texto_sal = False, el_error_en_castellano(_err_sal)
+                if _ok_sal:
+                    avisar("success", _texto_sal)
+                    st.rerun()
+                else:
+                    st.warning(_texto_sal)
+            _salidas_dia = salidas_de_caja(_dia_txt)
+            for _sal in _salidas_dia:
+                _l1, _l2 = st.columns([8, 1], vertical_alignment="center")
+                _l1.caption(("~~" if _sal["anulada"] else "")
+                            + f"{_sal['hora']} · {_sal['tipo']} · "
+                              f"{texto_para_markdown(_sal['concepto'])} · "
+                              f"\\${miles(_sal['importe'], 0)} · "
+                              f"{texto_para_markdown(_sal['usuario'] or '')}"
+                            + ("~~ (anulada)" if _sal["anulada"] else ""))
+                if not _sal["anulada"]:
+                    _l2.button("🚫", key=f"salida_anular_{_sal['id']}",
+                               help="Anular esta salida (se equivocó el importe, no salió)",
+                               on_click=anular_salida_y_avisar, args=(_sal["id"],))
             # EL ARQUEO: lo que hay en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
             st.markdown("**🧮 Arqueo: ¿cuánto efectivo hay en el cajón?**")
-            st.caption(f"Según las ventas en efectivo (menos lo devuelto), tendría que haber "
-                       f"**${miles(efectivo_esperado(_dia_txt), 0)}**, sin contar el cambio con el "
-                       "que se abrió.")
+            _salio = total_de_salidas(_dia_txt)
+            st.caption(f"Según las ventas en efectivo (menos lo devuelto"
+                       + (f" y los \\${miles(_salio, 0)} que salieron" if _salio else "")
+                       + f"), tendría que haber **\\${miles(efectivo_esperado(_dia_txt), 0)}**, sin "
+                         "contar el cambio con el que se abrió.")
             with st.form("form_arqueo"):
                 _q1, _q2 = cols([1, 2])
                 _contado = _q1.number_input("Efectivo contado:", min_value=0.0, step=100.0,

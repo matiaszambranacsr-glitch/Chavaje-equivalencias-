@@ -7946,6 +7946,26 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 💸 Las salidas de caja
+
+Lo que tenía que haber en el cajón era «lo cobrado en efectivo menos lo devuelto», y no había
+cómo anotar la plata que sale: el flete del cadete, el proveedor que cobra contra entrega, el
+retiro del dueño. Cada salida hacía que el arqueo dijera «Faltan $X», y la diferencia de verdad
+(un vuelto mal dado) se perdía entre las que no lo eran. En 💵 Caja → «📋 Ventas y cierre de
+caja», **«💸 Salidas de caja»**: qué fue (🧾 gasto, 🚚 pago a un proveedor, 🏦 retiro), en qué y
+cuánto. Queda con la hora y quién, en el registro de cambios, y **lo que tiene que haber en el
+cajón** (arriba de la caja y en el arqueo) la descuenta; «💵 Vendido» no cambia. Sale en el
+resumen del día («💸 Salidas de caja: $450 (2)» y «🧮 En el cajón tendría que haber»). El «🚫»
+la anula: el administrador siempre, quien la anotó en sus primeros `MINUTOS_PARA_DESHACER_LA_PROPIA`
+(un número mal tipeado). Está en «LAS SALIDAS DE CAJA», en `logica/ventas.py` (la tabla
+`salidas_de_caja`, por el día de acá); lo controlan `pruebas_de_la_caja.py` y
+`pruebas_de_la_sesion.py`.
+
+**Y las etiquetas de lo que entró.** Después de «✅ Sumar al stock» en 📦 Entró mercadería sale
+**«🏷️ Etiquetas de lo que entró (N)»**: el PDF con una etiqueta por unidad, con el código de
+barras nuestro, para pegar antes de guardar (en 🏷️ Etiquetas había que buscar cada producto de
+nuevo). «Listo» lo saca.
+
 ## 😴 Las cuentas que dejaron de venir
 
 Un taller que compraba todas las semanas y hace un mes no aparece se fue a otro lado, y nadie

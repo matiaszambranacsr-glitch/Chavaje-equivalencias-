@@ -102,6 +102,17 @@ def probar():
     cierto("avisa que alguien esperaba algo de lo que entró",
            any("esperaban algo de lo que entró" in x.value for x in at.info),
            [x.value for x in at.info])
+    # Y las etiquetas de lo que entró: una por unidad (3 + 4), hasta que se toca «Listo».
+    _etiq = [x for x in at.get("download_button") if "Etiquetas de lo que entró" in x.proto.label]
+    cierto("«🏷️ Etiquetas de lo que entró (7)»",
+           _etiq and _etiq[0].proto.label.endswith("(7)"), [x.proto.label for x in _etiq])
+    esperar("lo que se va a etiquetar", at.session_state["entro_ultima"],
+            {str(e1): 3, str(dup_otra): 4})
+    _pdf = ns["pdf_de_etiquetas"]([(e1, 3), (dup_otra, 4)])
+    cierto("el PDF de las etiquetas", _pdf.startswith(b"%PDF"), _pdf[:20])
+    at.button(key="entro_etiquetas_listo").click().run()
+    cierto("«Listo» lo saca", not at.session_state["entro_ultima"]
+           if "entro_ultima" in at.session_state else True)
     esperar("y Ana sale para avisarle",
             [x["Cliente"] for x in ns["consultas_que_ahora_hay_en_stock"]()], ["Ana"])
 

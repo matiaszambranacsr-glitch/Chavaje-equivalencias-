@@ -3139,6 +3139,20 @@ def _esquema_ventas(c):
         usuario TEXT,
         fecha TEXT DEFAULT (datetime('now', 'localtime'))
     )""")
+    # LO QUE SALE DEL CAJÓN: gastos, pagos a proveedores, retiros. Ver «LAS SALIDAS DE CAJA» en
+    # logica/ventas.py. `dia` es el de acá (el de la caja), no el UTC.
+    c.execute("""CREATE TABLE IF NOT EXISTS salidas_de_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dia TEXT NOT NULL,
+        fecha TEXT DEFAULT (datetime('now')),
+        tipo TEXT,
+        concepto TEXT,
+        importe REAL NOT NULL,
+        usuario TEXT,
+        anulada INTEGER DEFAULT 0,
+        anulada_por TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_salidas_de_caja_dia ON salidas_de_caja(dia)")
     # LA FACTURA ELECTRÓNICA, a pedido de la caja: ver «LA FACTURA ELECTRÓNICA (ARCA)» en
     # logica/facturas.py. Una por comprobante —factura o nota de crédito—, y la nota apunta a la
     # factura que anula. «pendiente» es la que se pidió y no se supo si ARCA la autorizó (un

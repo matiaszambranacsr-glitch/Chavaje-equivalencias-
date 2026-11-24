@@ -252,6 +252,11 @@ def resumen_del_dia(dia=None, con_ganancia=False):
     if caja["devoluciones"]:
         renglones.append(f"↩️ Devuelto: {plata(caja['total_devuelto'])} "
                          f"({miles(caja['devoluciones'])})")
+    _salidas = [s for s in salidas_de_caja(dia) if not s["anulada"]]
+    if _salidas:
+        renglones.append(f"💸 Salidas de caja: {plata(sum(s['importe'] for s in _salidas))} "
+                         f"({miles(len(_salidas))})")
+        renglones.append(f"🧮 En el cajón tendría que haber: {plata(efectivo_esperado(dia))}")
     if caja["a_cobrar"]:
         renglones.append(f"⏳ Quedó en la caja sin cobrar: {plata(caja['total_a_cobrar'])} "
                          f"({miles(caja['a_cobrar'])})")
@@ -1187,8 +1192,10 @@ def arquear_la_caja(dia, efectivo_contado, nota=""):
 
 def efectivo_esperado(dia=None):
     """Lo que tiene que haber en el cajón por las ventas de ese día: lo cobrado en efectivo
-    menos lo devuelto de ventas en efectivo. Sin el cambio con el que se abrió."""
-    return next((t for f, _, t in cierre_de_caja(dia)["por_forma"] if f == "Efectivo"), 0.0)
+    menos lo devuelto de ventas en efectivo y menos lo que salió (ver «LAS SALIDAS DE CAJA»).
+    Sin el cambio con el que se abrió."""
+    cobrado = next((t for f, _, t in cierre_de_caja(dia)["por_forma"] if f == "Efectivo"), 0.0)
+    return round(cobrado - total_de_salidas(dia), 2)
 
 
 def resumen_de_la_caja(dia=None):
@@ -1199,7 +1206,11 @@ def resumen_de_la_caja(dia=None):
     por_forma = {f: t for f, _, t in caja["por_forma"]}
     efectivo = por_forma.pop("Efectivo", 0.0)
     a_cuenta = por_forma.pop(A_CUENTA, 0.0)
+    salidas = total_de_salidas(dia)
+    # «efectivo» es lo que entró en efectivo; «en_el_cajon», lo que tiene que haber: menos lo
+    # que salió (ver «LAS SALIDAS DE CAJA»).
     return {"efectivo": round(efectivo, 2), "otros_medios": round(sum(por_forma.values()), 2),
+            "salidas": salidas, "en_el_cajon": round(efectivo - salidas, 2),
             "a_cuenta": round(a_cuenta, 2), "ventas": caja["ventas"],
             "esperando": caja["a_cobrar"], "total_esperando": caja["total_a_cobrar"]}
 
@@ -1240,6 +1251,94 @@ def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
                            "por_semana": round(por_dia * 7, 1), "alcanza_dias": int(alcanza),
                            "anotado": bool(f["anotado"])})
     return sorted(salida, key=lambda x: (x["alcanza_dias"], -x["por_semana"]))
+
+
+# ============================================================================================
+# LAS SALIDAS DE CAJA
+# ============================================================================================
+# Lo que tenía que haber en el cajón era «lo cobrado en efectivo menos lo devuelto», y no había
+# cómo anotar la plata que sale: el flete que se paga al cadete, el proveedor que cobra contra
+# entrega, el retiro del dueño a la tarde. Cada salida hacía que el arqueo dijera «Faltan $X»,
+# y la diferencia de verdad (un vuelto mal dado) se perdía entre las que no lo eran. Ahora se
+# anota con qué fue y quién, y el cajón y el arqueo la descuentan. Anularla: el administrador,
+# o quien la anotó en sus primeros MINUTOS_PARA_DESHACER_LA_PROPIA (un número mal tipeado).
+TIPOS_DE_SALIDA_DE_CAJA = ("🧾 Gasto", "🚚 Pago a un proveedor", "🏦 Retiro")
+SALIDA_DE_CAJA_MAXIMA = 50_000_000      # más que esto es un número mal escrito
+
+
+def anotar_salida_de_caja(tipo, concepto, importe, dia=None):
+    """(ok, texto). `dia`: el de la caja (hoy, si no se dice)."""
+    exigir_nivel("empleado", "anotar una salida de caja")
+    concepto = " ".join(str(concepto or "").split())[:120]
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "Escribí cuánto salió."
+    if tipo not in TIPOS_DE_SALIDA_DE_CAJA:
+        return False, "Elegí qué fue: un gasto, un pago a un proveedor o un retiro."
+    if not concepto:
+        return False, "Escribí en qué se fue (ej.: flete del cadete)."
+    if not 0 < importe <= SALIDA_DE_CAJA_MAXIMA:
+        return False, "El importe tiene que ser más que cero."
+    dia = dia or hoy_aca().isoformat()
+    with db_lock, transaccion():
+        c.execute("INSERT INTO salidas_de_caja (dia, tipo, concepto, importe, usuario) "
+                  "VALUES (?, ?, ?, ?, ?)", (dia, tipo, concepto, importe,
+                                              obtener_usuario_actual()))
+        anotar_cambio("salida de caja", "caja", c.lastrowid, despues=importe,
+                      detalle=f"{tipo}: {concepto}")
+    queda = efectivo_esperado(dia)
+    return True, (f"💸 Anotado: {tipo} de ${miles(importe, 0)} ({concepto}). En el cajón tendría "
+                  f"que haber ${miles(queda, 0)}"
+                  + (" (¿se abrió con cambio? lo cobrado en efectivo no alcanza)." if queda < 0
+                     else "."))
+
+
+def salidas_de_caja(dia=None):
+    """Las salidas de un día (hoy, si no se dice), la última primero. [dict] con id, hora,
+    tipo, concepto, importe, usuario, anulada, minutos (desde que se anotó)."""
+    dia = dia or hoy_aca().isoformat()
+    return [dict(f) for f in c.execute(
+        """SELECT id, substr(datetime(fecha, '-3 hours'), 12, 5) AS hora, tipo, concepto,
+                  importe, usuario, anulada,
+                  CAST((julianday('now') - julianday(fecha)) * 1440 AS INTEGER) AS minutos
+           FROM salidas_de_caja WHERE dia = ? ORDER BY id DESC""", (dia,))]
+
+
+def total_de_salidas(dia=None):
+    dia = dia or hoy_aca().isoformat()
+    fila = c.execute("SELECT COALESCE(SUM(importe), 0) FROM salidas_de_caja "
+                     "WHERE dia = ? AND anulada = 0", (dia,)).fetchone()
+    return round(float(fila[0] or 0), 2)
+
+
+def anular_salida_de_caja(salida_id):
+    """(ok, texto): el administrador siempre; quien la anotó, en sus primeros minutos."""
+    exigir_nivel("empleado", "anular una salida de caja")
+    fila = c.execute("""SELECT usuario, anulada, importe, concepto,
+                               (julianday('now') - julianday(fecha)) * 1440 AS minutos
+                        FROM salidas_de_caja WHERE id = ?""", (int(salida_id),)).fetchone()
+    if not fila or fila["anulada"]:
+        return False, "Esa salida ya no está."
+    if not es_admin() and (fila["usuario"] != obtener_usuario_actual()
+                           or fila["minutos"] > MINUTOS_PARA_DESHACER_LA_PROPIA):
+        return False, (f"Una salida la anula el administrador (o quien la anotó, en los primeros "
+                       f"{MINUTOS_PARA_DESHACER_LA_PROPIA} minutos).")
+    with db_lock, transaccion():
+        c.execute("UPDATE salidas_de_caja SET anulada = 1, anulada_por = ? WHERE id = ?",
+                  (obtener_usuario_actual(), int(salida_id)))
+        anotar_cambio("anuló una salida de caja", "caja", salida_id, antes=fila["importe"],
+                      detalle=fila["concepto"])
+    return True, f"🚫 Anulada la salida de ${miles(fila['importe'], 0)} ({fila['concepto']})."
+
+
+def anular_salida_y_avisar(salida_id):
+    """El «🚫» de cada salida (va como on_click)."""
+    try:
+        ok, texto = anular_salida_de_caja(salida_id)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
 
 
 # ============================================================================================

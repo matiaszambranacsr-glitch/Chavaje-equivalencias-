@@ -205,7 +205,8 @@ def probar(L):
     v_a, _ = ns["cerrar_venta"]([item("A1")], mecanico_id=taller, a_la_caja=True)
     ns["poner_a_cuenta"](v_a)
     esperar("lo de arriba de la caja", ns["resumen_de_la_caja"](),
-            {"efectivo": 999.0, "otros_medios": 5150.0, "a_cuenta": 900.0, "ventas": 6,
+            {"efectivo": 999.0, "otros_medios": 5150.0, "salidas": 0.0, "en_el_cajon": 999.0,
+             "a_cuenta": 900.0, "ventas": 6,
              "esperando": 1, "total_esperando": 1000.0})
 
     # 9d. Lo que le avisa la app a quien vende: su venta cobrada o puesta a cuenta por el
@@ -542,6 +543,74 @@ def probar(L):
         fallas.append("un taller pudo anotar un reclamo de garantía")
     except PermissionError:
         pass
+    finally:
+        g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = g_adentro, _claves_antes
+
+    # LAS SALIDAS DE CAJA: se descuentan del cajón y del arqueo, salen en el resumen del día, y
+    # las anula el administrador (o quien las anotó, en sus primeros minutos).
+    cs = ns["c"]
+    st.session_state["admin_nombre"], st.session_state["nivel_usuario"] = "ana", "operador"
+    _hoy = ns["hoy_aca"]().isoformat()
+    _cajon_antes = ns["efectivo_esperado"]()
+    esperar("sin en qué, sin importe o de otro tipo, no",
+            [ns["anotar_salida_de_caja"](t, q, i)[0] for t, q, i in (
+                ("🧾 Gasto", "  ", 100), ("🧾 Gasto", "flete", 0), ("Regalo", "flete", 100),
+                ("🧾 Gasto", "flete", "mucho"))], [False] * 4)
+    ok_s, texto_s = ns["anotar_salida_de_caja"]("🧾 Gasto", "  flete   del cadete ", 150)
+    esperar("anotada, con el concepto prolijo",
+            (ok_s, texto_s.startswith("💸 Anotado: 🧾 Gasto de $150 (flete del cadete).")),
+            (True, True))
+    ns["anotar_salida_de_caja"]("🏦 Retiro", "retiro del dueño", 300)
+    esperar("el cajón las descuenta", round(_cajon_antes - ns["efectivo_esperado"](), 2),
+            450.0)
+    _r = ns["resumen_de_la_caja"]()
+    esperar("arriba de la caja: lo que entró en efectivo queda, el cajón baja",
+            (_r["salidas"], round(_r["efectivo"] - _r["en_el_cajon"], 2)), (450.0, 450.0))
+    esperar("y el arqueo cierra", ns["arquear_la_caja"](_hoy, ns["efectivo_esperado"]()),
+            (True, "✅ Cierra justo."))
+    _sal = ns["salidas_de_caja"]()
+    esperar("las del día, la última primero",
+            [(x["tipo"], x["importe"], x["usuario"]) for x in _sal],
+            [("🏦 Retiro", 300.0, "ana"), ("🧾 Gasto", 150.0, "ana")])
+    _resumen = ns["resumen_del_dia"]()
+    esperar("en el resumen del día", ("💸 Salidas de caja: $450 (2)" in _resumen,
+                                      "🧮 En el cajón tendría que haber: $" in _resumen),
+            (True, True))
+    st.session_state["admin_nombre"] = "beto"
+    esperar("la de otro, no", ns["anular_salida_de_caja"](_sal[0]["id"])[0], False)
+    st.session_state["admin_nombre"] = "ana"
+    esperar("la propia, enseguida, sí; anulada, ya no",
+            (ns["anular_salida_de_caja"](_sal[0]["id"])[0],
+             ns["anular_salida_de_caja"](_sal[0]["id"])[0]), (True, False))
+    esperar("y deja de descontarse", ns["total_de_salidas"](), 150.0)
+    cs.execute("UPDATE salidas_de_caja SET fecha = datetime('now', '-60 minutes') WHERE id = ?",
+               (_sal[1]["id"],))
+    esperar("la propia de hace una hora, no", ns["anular_salida_de_caja"](_sal[1]["id"])[0],
+            False)
+    st.session_state["nivel_usuario"] = "admin"
+    esperar("el administrador, sí", ns["anular_salida_de_caja"](_sal[1]["id"])[0], True)
+    st.session_state["nivel_usuario"] = "operador"
+    esperar("todo anulado", ns["total_de_salidas"](), 0.0)
+    esperar("en el registro de cambios, las dos y sus anulaciones",
+            cs.execute("SELECT COUNT(*) FROM registro_de_cambios WHERE accion IN "
+                       "('salida de caja', 'anuló una salida de caja')").fetchone()[0], 4)
+    ns["anotar_salida_de_caja"]("🚚 Pago a un proveedor", "contra entrega", 700,
+                                dia="2020-01-01")
+    esperar("la de otro día, aparte",
+            (ns["total_de_salidas"](), ns["total_de_salidas"]("2020-01-01")), (0.0, 700.0))
+    _claves_antes = g["hay_claves_configuradas"]
+    try:
+        g["hay_claves_configuradas"] = lambda: True
+        for _nivel in ("", "mecanico"):
+            g["_nivel_de_quien_esta_adentro"] = lambda n=_nivel: n
+            for _que, _hacer in (("anotar", lambda: ns["anotar_salida_de_caja"](
+                                    "🧾 Gasto", "x", 1)),
+                                 ("anular", lambda: ns["anular_salida_de_caja"](1))):
+                try:
+                    _hacer()
+                    fallas.append(f"«{_nivel or 'invitado'}» pudo {_que} una salida de caja")
+                except PermissionError:
+                    pass
     finally:
         g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = g_adentro, _claves_antes
     return fallas

@@ -429,8 +429,18 @@ COMO_HAGO_DEL_ASISTENTE = (
      "vendi hoy ayer anteriores historial quien vendio recaudacion planilla zeta",
      "Abajo de la caja, abrí «📋 Ventas y cierre de caja»: están las ventas del día con quién "
      "vendió, cómo se pagó cada una y los totales (con «Día:» se mira otro día). Contá el "
-     "efectivo, escribilo y tocá «🧮 Guardar el arqueo»: queda anotado con la diferencia. Las "
-     "ventas del día se bajan en Excel desde ahí.",
+     "efectivo, escribilo y tocá «🧮 Guardar el arqueo»: queda anotado con la diferencia. Lo "
+     "que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
+     "descuenta. Las ventas del día se bajan en Excel desde ahí.",
+     "💵 Caja", ""),
+    ("salida_de_caja", "Anotar un gasto, un pago o un retiro de la caja",
+     "gasto gastos salida salidas sacar saque retiro retirar pago pagar flete cadete proveedor "
+     "contra entrega efectivo cajon caja plata",
+     "En la caja, abrí «📋 Ventas y cierre de caja» y en «💸 Salidas de caja» elegí qué fue "
+     "(gasto, pago a un proveedor o retiro), en qué y cuánto, y «💸 Anotar la salida». Lo que "
+     "tiene que haber en el cajón y el arqueo la descuentan, y sale en el resumen del día. Si "
+     "te equivocaste, el «🚫» la anula en los primeros {MINUTOS_PARA_DESHACER_LA_PROPIA} "
+     "minutos (después, el administrador).",
      "💵 Caja", ""),
     ("corregir_cobro", "Corregir un cobro mal cargado",
      "corregir equivoque equivocado error mal cobrado cambiar medio forma pago anular cobro "

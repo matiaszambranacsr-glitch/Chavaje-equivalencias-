@@ -1432,6 +1432,23 @@ def mostrar_entro_mercaderia():
                           key=f"entro_remito_{_huella}", disabled=not para_sumar,
                           on_click=_sumar_el_remito, args=(para_sumar,))
 
+    # LAS ETIQUETAS DE LO QUE ENTRÓ: lo recién sumado, una por unidad con el código de barras
+    # nuestro, para pegar antes de guardarlo (en 🏷️ Etiquetas había que buscar cada producto de
+    # nuevo y decir cuántas). Queda hasta la próxima entrada.
+    _ultima = st.session_state.get("entro_ultima") or {}
+    if _ultima:
+        _u1, _u2 = st.columns([3, 1], vertical_alignment="center")
+        _u1.download_button(
+            f"🏷️ Etiquetas de lo que entró ({miles(sum(_ultima.values()))})",
+            data=etiquetas_para_descargar([(int(k), int(v)) for k, v in _ultima.items()]),
+            file_name=f"etiquetas_entrada_{ahora_aca():%Y%m%d_%H%M}.pdf",
+            mime="application/pdf", key="entro_etiquetas", width="stretch",
+            help="Una por unidad, con el código de barras nuestro, para pegar en cada pieza. "
+                 "Un lector las escanea en la venta y en el depósito.")
+        _u2.button("Listo", key="entro_etiquetas_listo", width="stretch",
+                   on_click=lambda: st.session_state.pop("entro_ultima", None),
+                   help="Ya las imprimí: sacar el botón.")
+
     # LA LISTA, PARA REVISAR ANTES DE SUMAR.
     if not lista:
         st.caption("Todavía no cargaste nada.")
@@ -1513,6 +1530,7 @@ def mostrar_entro_mercaderia():
         else:
             for pid in list(lista):
                 st.session_state.pop(f"entro_cant_{pid}", None)
+            st.session_state["entro_ultima"] = {k: v for k, v in lista.items() if int(v or 0) > 0}
             lista.clear()
             st.session_state.pop("entro_igual", None)
             avisar("success", f"✅ Sumado al stock: {miles(sumados)} producto(s).")
