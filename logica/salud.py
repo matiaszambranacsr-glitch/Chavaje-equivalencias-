@@ -510,9 +510,10 @@ def diagnostico_de_salud():
     # LO QUE SE TERMINA EN MENOS DE UNA SEMANA al ritmo al que se vende (ver
     # se_esta_por_terminar() en logica/mostrador.py): pedirlo hoy es no quedarse sin.
     try:
+        # Lo que todavía tiene (lo que está en cero va en «están sin stock», más abajo).
         _se_terminan = [x for x in se_esta_por_terminar()
                         if x["Alcanza (días)"] < DIAS_QUE_AVISA_LO_QUE_SE_TERMINA
-                        and not x["Ya pedido"]]
+                        and not x["Ya pedido"] and (x["Stock"] or 0) > 0]
         if _se_terminan:
             sumar("medio", f"🛒 {len(_se_terminan)} producto(s) se terminan en menos de "
                            + ("una semana" if DIAS_QUE_AVISA_LO_QUE_SE_TERMINA == 7 else
@@ -1020,16 +1021,16 @@ def diagnostico_de_salud():
         pass
 
     try:
+        # Lo que se vende seguido y está en cero. Lo que se va a acabar pero todavía tiene, lo
+        # dice el aviso de «🛒 Se está por terminar» (con cuánto pedir y sin lo ya pedido): los
+        # dos juntos decían lo mismo dos veces («se acaban en menos de 2 semanas» y «se terminan
+        # en menos de una semana»).
         quiebres = productos_por_quebrar(dias_aviso=14)
         en_cero = [x for x in quiebres if x["Stock"] <= 0]
         if en_cero:
             sumar("alto", f"{len(en_cero)} producto(s) que se venden seguido están sin stock",
                   "Se venden todos los meses y están en cero. Un cliente los va a pedir y no "
                   "van a estar.",
-                  f"{miga_hasta('Para pedir')} → ⏳ Lo que se va a acabar")
-        elif quiebres:
-            sumar("medio", f"{len(quiebres)} producto(s) se acaban en menos de 2 semanas",
-                  "Según el ritmo con que se vienen vendiendo y el stock que queda.",
                   f"{miga_hasta('Para pedir')} → ⏳ Lo que se va a acabar")
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)

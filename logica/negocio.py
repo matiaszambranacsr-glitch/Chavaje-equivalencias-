@@ -1759,7 +1759,9 @@ def productos_por_quebrar(dias_aviso=21, minimo_ventas=3, limite=100):
 
     Se calcula el ritmo real de venta de cada producto y se estima en cuántos días se termina.
     Se ignora lo que se vendió una o dos veces: con eso no se puede calcular un ritmo, solo
-    ruido."""
+    ruido. Y lo que no tiene el stock cargado (vacío, no cero): se tomaba como cero, y la
+    campanita decía «se venden seguido y están sin stock» de cosas que nadie contó (lo mismo
+    hace se_esta_por_terminar())."""
     c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                         p.descripcion AS "Descripción", p.stock AS "Stock",
                         COUNT(v.id) AS "Vendidos",
@@ -1767,7 +1769,7 @@ def productos_por_quebrar(dias_aviso=21, minimo_ventas=3, limite=100):
                  FROM productos p
                  JOIN marcas m ON m.id = p.marca_id
                  JOIN ventas_registradas v ON v.producto_id = p.id
-                 WHERE v.fecha >= datetime('now', '-180 days')
+                 WHERE v.fecha >= datetime('now', '-180 days') AND p.stock IS NOT NULL
                  GROUP BY p.id
                  HAVING COUNT(v.id) >= ?
                  ORDER BY COUNT(v.id) DESC LIMIT 400""", (minimo_ventas,))

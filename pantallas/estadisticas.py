@@ -580,7 +580,9 @@ a traer solas desde Administrar → Mantenimiento.
             "de lo que uno no se acuerda es justamente de lo que se vende parejo "
             "todos los días — el filtro común que nadie mira hasta que un cliente lo pide y no "
             "está.\n\nSe ignora lo que se vendió una o dos veces: con eso no se puede calcular "
-            "un ritmo, es ruido."
+            "un ritmo, es ruido. Y lo que no tiene el stock cargado (📦 Depósito → «📦 Entró "
+            "mercadería»): sin saber cuánto hay, no se sabe cuándo se acaba.\n\nMás abajo, «🛒 "
+            "Se está por terminar» mira lo mismo por cantidades y dice cuánto pedir."
         )
         cq1, cq2 = cols(2)
         st.session_state.setdefault("dias_aviso_quiebre", 21)

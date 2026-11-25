@@ -173,6 +173,26 @@ def probar():
     esperar("con 2 (alcanza 4 días), la campanita lo dice",
             [p["titulo"] for p in ns["diagnostico_de_salud"]() if "se terminan" in p["titulo"]],
             ["🛒 1 producto(s) se terminan en menos de una semana"])
+    # Y lo de «⏳ Lo que se va a acabar» (por cuántas veces se vendió): lo que no tiene el stock
+    # cargado no cuenta como cero, lo que está en cero da un solo aviso urgente, y no se repite
+    # el de «se acaban en menos de 2 semanas» (lo dice el de 🛒).
+    for _cod, _stk in (("Q0", 0), ("QN", None)):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                  "precio, stock) SELECT ?, ?, 'FILTRO', id, 100, ? FROM marcas "
+                  "WHERE nombre = 'MARCA ENTRA'", (_cod, _cod, _stk))
+        _pid_q = c.lastrowid
+        for _d in range(1, 31, 5):
+            c.execute("INSERT INTO ventas_registradas (producto_id, fecha) "
+                      "VALUES (?, datetime('now', ?))", (_pid_q, f"-{_d} days"))
+    ns["conn"].commit()
+    ns["invalidar_salud"]()
+    esperar("lo que se va a acabar: sin el de stock sin cargar",
+            [x["Código"] for x in ns["productos_por_quebrar"](14)], ["Q0"])
+    _titulos = [p["titulo"] for p in ns["diagnostico_de_salud"]()]
+    esperar("la campanita: el sin stock una vez, y ningún aviso repetido",
+            ([t for t in _titulos if "sin stock" in t],
+             [t for t in _titulos if "se acaban en menos de" in t]),
+            (["1 producto(s) que se venden seguido están sin stock"], []))
     c.execute("UPDATE productos SET stock = 6 WHERE id = ?", (e1,))
     ns["conn"].commit()
     at.session_state["pagina_actual"] = ns["PAGINAS"][4]

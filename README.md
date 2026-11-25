@@ -7957,6 +7957,17 @@ corto, con «⬇️ Bajarlo ahora» y «Más tarde» en un renglón. En «📦 E
 y «➕ Sumar» van juntos abajo del código. En 💬 Mensajes, lo recién llegado dice «recién» y no
 «hace 0 min».
 
+## ⏳ Lo que se va a acabar, sin avisos repetidos
+
+En 📌 Para pedir había dos cálculos de lo mismo: «⏳ Lo que se va a acabar» (por cuántas veces
+se vendió) y «🛒 Se está por terminar» (por cantidades, con cuánto pedir). La campanita decía
+las dos cosas («se acaban en menos de 2 semanas» y «se terminan en menos de una semana»), y el
+primero tomaba el stock sin cargar como cero: avisaba «se venden seguido y están sin stock» de
+cosas que nadie contó. Ahora el primero solo mira lo que tiene el stock cargado, y la campanita
+dice una vez cada cosa: lo que está en cero («están sin stock», urgente) y lo que todavía tiene
+pero se termina («🛒», con cuánto pedir y sin lo ya pedido). Lo controla
+`pruebas_de_la_mercaderia.py`.
+
 ## 💸 Las salidas de caja
 
 Lo que tenía que haber en el cajón era «lo cobrado en efectivo menos lo devuelto», y no había
