@@ -7966,6 +7966,11 @@ aviso («7 listas tienen 61 días», con los nombres), y la inflación solo se d
 medirla: con el INDEC publicado hasta un mes anterior a la carga decía «0,0%», que se lee como
 que no subió nada. Quedaron 13. Lo controla `pruebas_de_la_plata_y_el_stock.py`.
 
+Y el cartel del backup decía «Nunca bajaste un backup» mientras la campanita decía «desde el
+último hay 44 días»: el cartel miraba solo la marca de los bajados con el botón nuevo. Sin esa
+marca, ahora cuenta el último backup que haya (`hay_que_recordar_el_backup()`), y los dos dicen
+lo mismo.
+
 ## ↩️ La devolución de hoy, a un toque
 
 Lo que vuelve suele ser de una venta del mismo día («me llevé el que no era»), y en ↩️

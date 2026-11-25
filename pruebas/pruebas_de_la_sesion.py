@@ -1454,6 +1454,7 @@ def probar():
         return [b.proto.label for b in sesion.get("download_button")
                 if b.proto.label == "⬇️ Bajarlo ahora"]
     ns["guardar_config"]("ultimo_backup_bajado", "")
+    ns["guardar_config"]("ultimo_backup_fecha", "")
     ns["guardar_config"]("backup_recordado_en", "")
     _adm_bk = sesion_nueva("clave-duenio-1")
     esperar("copia frenada y ningún backup bajado: a la vista, arriba",
@@ -1468,6 +1469,13 @@ def probar():
     ns["guardar_config"]("ultimo_backup_bajado", "2020-01-01 00:00:00")
     esperar("bajado hace mucho: sí, con cuántos días",
             ns["hay_que_recordar_el_backup"]() > 300, True)
+    # Sin la marca de «bajado» (de antes de que existiera), cuenta el último backup que haya:
+    # el cartel no dice «Nunca» si la campanita dice «hace 44 días».
+    ns["guardar_config"]("ultimo_backup_bajado", "")
+    ns["guardar_config"]("ultimo_backup_fecha", (ns["datetime"].now() - ns["timedelta"](
+        days=44)).strftime("%Y-%m-%d %H:%M:%S"))
+    esperar("sin la marca, el último backup que haya", ns["hay_que_recordar_el_backup"](), 44)
+    ns["guardar_config"]("ultimo_backup_bajado", "2020-01-01 00:00:00")
     ns["guardar_config"]("copia_frenada_sin_cifrar", "")
     ns["invalidar_salud"]()
     esperar("sin la copia frenada, no está", _bajar_backup(sesion_nueva("clave-duenio-1")), [])

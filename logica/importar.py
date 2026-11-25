@@ -447,6 +447,11 @@ def hay_que_recordar_el_backup():
     if pospuesto is not None and pospuesto < DIAS_PARA_RECORDAR_EL_BACKUP:
         return False
     bajado = dias_desde("ultimo_backup_bajado")
+    # Sin esa marca (los bajados de antes de que existiera), el último backup que haya: el
+    # cartel decía «Nunca bajaste un backup» y la campanita, «desde el último hay 44 días»
+    # (se vio con la copia de la base real).
+    if bajado is None:
+        bajado = dias_desde("ultimo_backup_fecha")
     if bajado is not None and bajado < DIAS_PARA_RECORDAR_EL_BACKUP:
         return False
     return bajado
