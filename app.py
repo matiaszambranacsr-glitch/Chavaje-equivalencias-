@@ -747,11 +747,16 @@ try:
     elif _desc_txt and st.session_state.get("_desc_visto") != _desc_fec:
         st.session_state["_desc_visto"] = _desc_fec
         # Los números con punto de miles: los resultados guardados antes de miles() decían
-        # «1,380 par(es) de motores», que acá se lee uno coma tres.
-        st.caption(f"🧠 Búsqueda automática de relaciones ({fecha_legible(_desc_fec)}): "
-                   + re.sub(r"(?<=\d),(?=\d{3}\b)", ".", _desc_txt))
-    elif obtener_config("descubrimiento_pendiente", "") == "1":
-        st.caption("🧠 Buscando relaciones nuevas en todo el catálogo, por atrás…")
+        # «1,380 par(es) de motores», que acá se lee uno coma tres. Como aviso que se va solo y
+        # no como renglón: arriba del Buscador, en el teléfono, empujaba la caja de búsqueda
+        # fuera de la primera pantalla (se vio en el barrido con capturas).
+        st.toast(f"Búsqueda automática de relaciones ({fecha_legible(_desc_fec)}): "
+                 + re.sub(r"(?<=\d),(?=\d{3}\b)", ".", _desc_txt), icon="🧠")
+    elif (obtener_config("descubrimiento_pendiente", "") == "1"
+          and not st.session_state.get("_desc_pendiente_avisado")):
+        # Una vez por sesión: como aviso, en cada toque saldría uno nuevo.
+        st.session_state["_desc_pendiente_avisado"] = True
+        st.toast("Buscando relaciones nuevas en todo el catálogo, por atrás…", icon="🧠")
 except Exception as _err:
     anotar_error("nivel principal", _err)
 
@@ -866,11 +871,14 @@ if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
         _hace_backup = hay_que_recordar_el_backup()
         if _hace_backup is not False:
             with st.container(border=True, key="recordatorio_del_backup"):
+                # Corto y con los dos botones en un renglón (ver el CSS del celular): sale arriba de
+                # cada pantalla, y en el teléfono ocupaba un tercio con un botón abajo del otro
+                # (se vio en el barrido con capturas).
                 st.markdown("**💾 " + ("Nunca bajaste un backup" if _hace_backup is None else
-                                      f"Hace {miles(_hace_backup)} días que no bajás un backup")
-                            + "**, y la copia automática no se está haciendo: si la app se "
-                              "reinicia, se pierde lo cargado después.")
-                _bk1, _bk2 = st.columns([3, 1])
+                                      f"Hace {miles(_hace_backup)} días sin backup")
+                            + "** y la copia automática está frenada: si la app se reinicia, se "
+                              "pierde lo cargado.")
+                _bk1, _bk2 = st.columns([3, 2])
                 _bk1.download_button(
                     "⬇️ Bajarlo ahora", data=generar_backup_sin_fotos,
                     file_name=f"equivalencias_backup_{ahora_aca():%Y%m%d_%H%M}.db",

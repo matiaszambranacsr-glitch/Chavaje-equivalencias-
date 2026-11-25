@@ -597,12 +597,15 @@ def guardar_respuestas_rapidas(texto):
 
 
 def hace_cuanto_espera(momento, ahora=None):
-    """«hace 5 min», «hace 2 h», «hace 3 días»: desde lo último del cliente (guardado en UTC)."""
+    """«recién», «hace 5 min», «hace 2 h», «hace 3 días»: desde lo último del cliente (guardado
+    en UTC). «hace 0 min» se leía raro en la bandeja (se vio en el barrido con capturas)."""
     try:
         desde = datetime.strptime(str(momento or "")[:19], "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return ""
     minutos = max(0, int(((ahora or datetime.now()) - desde).total_seconds() // 60))
+    if minutos < 1:
+        return "recién"
     if minutos < 60:
         return f"hace {minutos} min"
     return f"hace {minutos // 60} h" if minutos < 48 * 60 else f"hace {minutos // 1440} días"

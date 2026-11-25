@@ -7946,6 +7946,17 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 📱 La primera pantalla del celular, para lo que se viene a hacer
+
+Mirando el barrido con capturas en un teléfono: en el 🔍 Buscador la caja de búsqueda no
+entraba en la primera pantalla. Arriba había un renglón técnico («🧠 Búsqueda automática de
+relaciones (25/09)…») y el recordatorio del backup con un botón abajo del otro, que ocupaba un
+tercio en todas las pantallas. Ahora el renglón técnico es un aviso que aparece en la esquina y
+se va solo (y su «view more» de Streamlit dice «ver más»), y el recordatorio del backup es más
+corto, con «⬇️ Bajarlo ahora» y «Más tarde» en un renglón. En «📦 Entró mercadería», la cantidad
+y «➕ Sumar» van juntos abajo del código. En 💬 Mensajes, lo recién llegado dice «recién» y no
+«hace 0 min».
+
 ## 💸 Las salidas de caja
 
 Lo que tenía que haber en el cajón era «lo cobrado en efectivo menos lo devuelto», y no había

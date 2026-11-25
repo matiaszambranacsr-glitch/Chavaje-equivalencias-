@@ -1350,7 +1350,10 @@ def mostrar_entro_mercaderia():
                          "y lo que no contaste queda como estaba.")
     contando = modo == MODOS_DE_LA_ENTRADA[1]
     with st.form("form_entro_mercaderia", clear_on_submit=True, border=False):
-        _c1, _c2, _c3 = st.columns([4, 1, 1], vertical_alignment="bottom")
+        # En el celular, el código a lo ancho y la cantidad con «Sumar» en un renglón (ver
+        # «fila_entro» en el CSS): uno abajo del otro eran tres renglones.
+        _c1, _c2, _c3 = st.container(key="fila_entro").columns([4, 1, 1],
+                                                               vertical_alignment="bottom")
         codigo = _c1.text_input("Código (escaneado o escrito):", key="entro_codigo",
                                 placeholder="Escaneá o escribí el código y Enter")
         cantidad = _c2.number_input("Cant.", 1, 9999, 1, key="entro_cant")

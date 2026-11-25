@@ -1466,6 +1466,7 @@ AYUDAS_DEL_NAVEGADOR = r"""
     "This app would like to use your camera.": "Hace falta darle permiso a la cámara.",
     "Learn how to allow access.": "Cómo darlo.",
     "Running...": "Trabajando…", "Stop": "Frenar", "Connecting": "Conectando…",
+    "view more": "ver más", "view less": "ver menos",
     "Please wait...": "Un momento…",
     "Previous month": "Mes anterior", "Next month": "Mes siguiente",
     "Vega visualization": "Gráfico", "Upload": "Elegir archivo",

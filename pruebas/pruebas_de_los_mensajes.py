@@ -420,8 +420,9 @@ def probar():
         _ahora = datetime(2026, 11, 18, 15, 0, 0)
         esperar("hace cuánto espera",
                 [ns["hace_cuanto_espera"](x, _ahora) for x in
-                 ("2026-11-18 14:55:00", "2026-11-18 12:00:00", "2026-11-14 15:00:00", "")],
-                ["hace 5 min", "hace 3 h", "hace 4 días", ""])
+                 ("2026-11-18 14:59:30", "2026-11-18 14:55:00", "2026-11-18 12:00:00",
+                  "2026-11-14 15:00:00", "")],
+                ["recién", "hace 5 min", "hace 3 h", "hace 4 días", ""])
         # Las respuestas rápidas: las de siempre, las del negocio, y vacío vuelve a las de siempre.
         esperar("las respuestas rápidas de siempre", ns["respuestas_rapidas"](),
                 list(ns["RESPUESTAS_RAPIDAS"]))

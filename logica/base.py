@@ -621,6 +621,16 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   [class*="st-key-fila_pedido_"] [data-testid="stColumn"] {
     min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
   [class*="st-key-fila_pedido_"] [data-testid="stColumn"]:last-child { flex: 0 0 92px !important; }
+  /* La carga de «Entró mercadería»: el código a lo ancho; la cantidad y «Sumar», juntos abajo. */
+  .st-key-fila_entro [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+  .st-key-fila_entro [data-testid="stColumn"] {
+    min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
+  .st-key-fila_entro [data-testid="stColumn"]:first-child { flex: 1 1 100% !important; }
+  /* El recordatorio del backup: «Bajarlo ahora» y «Más tarde» en un renglón. Uno abajo del otro,
+     arriba de cada pantalla, ocupaban un tercio del teléfono. */
+  .st-key-recordatorio_del_backup [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+  .st-key-recordatorio_del_backup [data-testid="stColumn"] {
+    min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
   /* Lo mismo para «🔁 Lo que suele llevar»: el «➕» al lado de cada producto, no abajo. */
   [class*="st-key-fila_suele_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
   [class*="st-key-fila_suele_"] [data-testid="stColumn"] {
