@@ -814,7 +814,15 @@ def probar(L):
         at.session_state["pagina_actual"] = ns["PAGINAS"][10]
         at.session_state["sub_devoluciones"] = ns["SUB_DEVOLUCIONES"][1]
         at.run()
-        at.text_input(key="venta_buscar_dev").set_value(str(v7)).run()
+        # Sin escribir nada, las últimas de hoy a un toque (ver CUANTAS_VENTAS_DE_HOY).
+        _de_hoy = [b for b in at.button if b.key == f"dev_de_hoy_{v7}"]
+        esperar("en «De un cliente», la venta de hoy a un toque", len(_de_hoy), 1)
+        if _de_hoy:
+            _de_hoy[0].click().run()
+        else:
+            at.text_input(key="venta_buscar_dev").set_value(str(v7)).run()
+        esperar("y queda buscada", at.text_input(key="venta_buscar_dev").value,
+                f"#{v7}" if _de_hoy else str(v7))
         at.selectbox(key="venta_dev_sel").set_value(v7).run()
         esperar("la casilla de la nota de crédito, tildada",
                 [x.value for x in at.checkbox if "nota de crédito" in x.label], [True])

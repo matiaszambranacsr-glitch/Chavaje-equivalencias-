@@ -1071,6 +1071,10 @@ def ganancia_por_marca(productos):
 NO_VUELVE_AL_STOCK = frozenset({"fallada", "transporte", "modificacion"})
 
 
+# Cuántas de las últimas de hoy se ofrecen a un toque en ↩️ Devoluciones → «De un cliente».
+CUANTAS_VENTAS_DE_HOY = 5
+
+
 def buscar_ventas(texto, dias=180, tope=20):
     """Las ventas no anuladas de los últimos `dias` días que coinciden con `texto`: el número
     («#12» o «12»), el cliente, la patente o el teléfono del auto. La última primero, con sus

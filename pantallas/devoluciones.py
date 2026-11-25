@@ -113,6 +113,19 @@ if pagina == PAGINAS[10]:
     if sub_dvl == SUB_DEVOLUCIONES[1]:
         _q_dev = st.text_input("Número de venta, cliente, patente o teléfono:",
                                key="venta_buscar_dev", placeholder="Ej: 12, Juan, AB123CD")
+        # LAS DE HOY, a un toque: lo que vuelve suele ser de una venta del mismo día («me
+        # llevé el que no era»), y había que preguntar el número o el nombre para buscarla.
+        if not _q_dev.strip():
+            _hoy_dev = [v for v in ventas_del_dia() if not v["anulada"]][:CUANTAS_VENTAS_DE_HOY]
+            if _hoy_dev:
+                st.caption("O una de las últimas de hoy:")
+                for _vh in _hoy_dev:
+                    st.button(f"#{_vh['id']} · {_vh['hora']} · "
+                              f"{_vh['cliente'] or _vh['cuenta'] or _vh['patente'] or 'Mostrador'}"
+                              f" · ${miles(_vh['total'] or 0, 0)}",
+                              key=f"dev_de_hoy_{_vh['id']}", width="stretch",
+                              on_click=lambda _i=_vh["id"]: st.session_state.update(
+                                  venta_buscar_dev=f"#{_i}"))
         if _q_dev.strip():
             _encontradas = buscar_ventas(_q_dev)
             if not _encontradas:

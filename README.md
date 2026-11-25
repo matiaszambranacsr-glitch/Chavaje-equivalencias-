@@ -7957,6 +7957,15 @@ corto, con «⬇️ Bajarlo ahora» y «Más tarde» en un renglón. En «📦 E
 y «➕ Sumar» van juntos abajo del código. En 💬 Mensajes, lo recién llegado dice «recién» y no
 «hace 0 min».
 
+## ↩️ La devolución de hoy, a un toque
+
+Lo que vuelve suele ser de una venta del mismo día («me llevé el que no era»), y en ↩️
+Devoluciones → «🧾 De un cliente» había que preguntar el número o el nombre para buscarla. Ahora,
+con la caja vacía, salen las últimas `CUANTAS_VENTAS_DE_HOY` (5) ventas de hoy —número, hora,
+cliente y total— y un toque la busca. De paso, en 🚗 Vehículos, «📞 A quién avisar» y «⚠️ con
+mantenimiento atrasado» en cero ya no ocupan media pantalla del teléfono: un renglón chico dice
+que no hay nada, y la búsqueda por patente queda más arriba.
+
 ## ⏳ Lo que se va a acabar, sin avisos repetidos
 
 En 📌 Para pedir había dos cálculos de lo mismo: «⏳ Lo que se va a acabar» (por cuántas veces

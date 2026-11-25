@@ -16,31 +16,37 @@ if pagina == PAGINAS[6]:
     _avisar = avisos_por_cliente()
     # Plegados: abiertos empujaban la búsqueda por patente —lo que se viene a hacer— abajo de
     # todo. El título ya dice cuántos hay (lo señaló la revisión de usabilidad con Gemini).
-    with st.expander(f"📞 A quién avisar ({len(_avisar)} cliente(s))" + (" 🔴" if _avisar else ""), key="exp_quien_avisar_cliente_s"):
-        ayuda(
-            "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
-            "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
-            "vez que se anotó el km). Aparecen las piezas que ya pasaron su vida útil o que llegan "
-            f"en los próximos {DIAS_PARA_AVISAR_EL_SERVICE} días. Sin ritmo conocido, las que están "
-            "a menos del 15% de su "
-            "vida útil. Si la pieza tiene «cada cuántos meses», vence también por fecha: lo que "
-            "llegue primero.\n\nUn solo mensaje por cliente, con todo lo que le toca. Después de "
-            f"mandarlo, **✅ Ya le avisé** lo saca de la lista por {DIAS_SIN_REPETIR_EL_AVISO} "
-            "días; si mientras tanto le toca otra pieza, vuelve por esa."
-        )
-        if not _avisar:
-            st.caption("Nadie por ahora. Hace falta que los autos tengan piezas anotadas con "
-                       "vida útil (en km o en meses), o que ya se les haya avisado.")
-        for _x in _avisar:
-            _ca, _cb, _cc = cols([4, 1, 1])
-            _ca.write(f"**{_x['Patente']}** {_x['Auto']} — {_x['Cliente'] or 'sin nombre'}")
-            _ca.caption(" · ".join(f"{p}: le toca {cuando}" for p, cuando in _x["Piezas"]))
-            _cb.link_button("📲 Avisar", _x["_whatsapp"], width="stretch")
-            if _cc.button("✅ Ya le avisé", key=f"ya_avise_{_x['vehiculo_id']}", width="stretch"):
-                marcar_avisado(_x["vehiculo_id"], [p for p, _ in _x["Piezas"]])
-                avisar("success", f"Listo: {_x['Patente']} sale de la lista por "
-                                  f"{DIAS_SIN_REPETIR_EL_AVISO} días.")
-                st.rerun()
+    # Y en cero, ni eso: un renglón chico para los dos (abajo), así la patente queda más arriba
+    # (en el teléfono, dos plegables vacíos ocupaban media pantalla; se vio en el barrido).
+    vehiculos_atrasados = listar_vehiculos_atrasados()
+    if not _avisar and not vehiculos_atrasados:
+        st.caption("✅ Nadie a quien avisar del service y ningún auto con el mantenimiento "
+                   "atrasado.", help="Salen cuando los autos tienen piezas anotadas con vida "
+                                     "útil (en km o en meses) y les toca el cambio.")
+    if _avisar:
+        with st.expander(f"📞 A quién avisar ({len(_avisar)} cliente(s)) 🔴",
+                         key="exp_quien_avisar_cliente_s"):
+            ayuda(
+                "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
+                "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
+                "vez que se anotó el km). Aparecen las piezas que ya pasaron su vida útil o que llegan "
+                f"en los próximos {DIAS_PARA_AVISAR_EL_SERVICE} días. Sin ritmo conocido, las que están "
+                "a menos del 15% de su "
+                "vida útil. Si la pieza tiene «cada cuántos meses», vence también por fecha: lo que "
+                "llegue primero.\n\nUn solo mensaje por cliente, con todo lo que le toca. Después de "
+                f"mandarlo, **✅ Ya le avisé** lo saca de la lista por {DIAS_SIN_REPETIR_EL_AVISO} "
+                "días; si mientras tanto le toca otra pieza, vuelve por esa."
+            )
+            for _x in _avisar:
+                _ca, _cb, _cc = cols([4, 1, 1])
+                _ca.write(f"**{_x['Patente']}** {_x['Auto']} — {_x['Cliente'] or 'sin nombre'}")
+                _ca.caption(" · ".join(f"{p}: le toca {cuando}" for p, cuando in _x["Piezas"]))
+                _cb.link_button("📲 Avisar", _x["_whatsapp"], width="stretch")
+                if _cc.button("✅ Ya le avisé", key=f"ya_avise_{_x['vehiculo_id']}", width="stretch"):
+                    marcar_avisado(_x["vehiculo_id"], [p for p, _ in _x["Piezas"]])
+                    avisar("success", f"Listo: {_x['Patente']} sale de la lista por "
+                                      f"{DIAS_SIN_REPETIR_EL_AVISO} días.")
+                    st.rerun()
 
     # EL CARTEL PARA EL MOSTRADOR (ver generar_pdf_cartel_del_auto()). Perezoso: el QR se arma
     # recién al abrirlo.
@@ -61,22 +67,19 @@ if pagina == PAGINAS[6]:
                                  width="stretch")
             _cq2.code(link_general_de_consulta(), language=None)
 
-    vehiculos_atrasados = listar_vehiculos_atrasados()
-    with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})", key="exp_vehiculos_mantenimiento_atrasado"):
-        if not vehiculos_atrasados:
-            st.caption(
-                "Ninguno por ahora: no hay piezas a las que ya les haya tocado el cambio (por km o "
-                "por tiempo, desde el último cambio anotado)."
-            )
-        else:
+    if vehiculos_atrasados:
+        with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})",
+                         key="exp_vehiculos_mantenimiento_atrasado"):
             st.caption("El que tiene más piezas vencidas, primero. Misma cuenta que «A quién "
                        "avisar» y que el link del cliente.")
             for item in vehiculos_atrasados:
                 v = item["vehiculo"]
                 nombre_auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
-                piezas_txt = ", ".join(f"{p['Pieza']} ({p['Le falta']})" for p in item["piezas_atrasadas"])
+                piezas_txt = ", ".join(f"{p['Pieza']} ({p['Le falta']})"
+                                       for p in item["piezas_atrasadas"])
                 colv1, colv2 = st.columns([4, 1])
-                colv1.write(f"**{v['patente']}** {nombre_auto} — {v.get('cliente_nombre') or 'sin nombre'}")
+                colv1.write(f"**{v['patente']}** {nombre_auto} — "
+                            f"{v.get('cliente_nombre') or 'sin nombre'}")
                 colv1.caption(f"Atrasado: {piezas_txt}")
                 if colv2.button("👁️ Ver", key=f"ver_atrasado_{v['id']}"):
                     # Por patente_pendiente, que se vuelca antes de dibujar el campo: escribir
