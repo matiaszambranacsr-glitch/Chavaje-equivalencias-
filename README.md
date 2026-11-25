@@ -7957,6 +7957,15 @@ corto, con «⬇️ Bajarlo ahora» y «Más tarde» en un renglón. En «📦 E
 y «➕ Sumar» van juntos abajo del código. En 💬 Mensajes, lo recién llegado dice «recién» y no
 «hace 0 min».
 
+## 🔔 Menos avisos repetidos en la campanita
+
+Con la copia de la base real la campanita tenía 19 avisos, y 7 eran el mismo: «La lista de X
+tiene 61 días: la inflación oficial desde entonces fue 0,0%», uno por proveedor (las siete se
+cargaron el mismo día). Ahora las listas que todavía no tienen ritmo propio van en un solo
+aviso («7 listas tienen 61 días», con los nombres), y la inflación solo se dice si hay con qué
+medirla: con el INDEC publicado hasta un mes anterior a la carga decía «0,0%», que se lee como
+que no subió nada. Quedaron 13. Lo controla `pruebas_de_la_plata_y_el_stock.py`.
+
 ## ↩️ La devolución de hoy, a un toque
 
 Lo que vuelve suele ser de una venta del mismo día («me llevé el que no era»), y en ↩️

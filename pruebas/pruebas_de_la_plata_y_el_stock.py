@@ -240,6 +240,24 @@ def probar(L):
     _histo = next(f for f in ns["envejecimiento_de_precios"]() if f["Lista"] == "HISTO")
     esperar("la lista sube 10% por mes, con su propio historial",
             (round(_histo["_ritmo"] or 0, 3), _histo["_dias"]), (0.1, 1))
+    # Las listas sin ritmo propio (una sola importación) y viejas, en UN aviso de la campanita:
+    # con siete cargadas el mismo día eran siete renglones iguales.
+    for _nom, _hace in (("VIEJA UNO", "-70 days"), ("VIEJA DOS", "-65 days")):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (_nom,))
+        _mv = c.lastrowid
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                  "precio) VALUES ('V1', 'V1', 'FILTRO', ?, 100)", (_mv,))
+        c.execute("INSERT INTO historial_precios (producto_id, precio, fecha) "
+                  "VALUES (?, 100, datetime('now', ?))", (c.lastrowid, _hace))
+    conn.commit()
+    ns["invalidar_salud"]()
+    _viejas = [p["titulo"] for p in ns["diagnostico_de_salud"]()
+               if "días" in p["titulo"] and ("listas tienen" in p["titulo"]
+                                             or p["titulo"].startswith("La lista de"))]
+    esperar("las listas viejas sin ritmo, en un solo aviso", len(_viejas), 1)
+    cierto = lambda que, ok, detalle="": ok or fallas.append(f"{que} {detalle}")
+    cierto("y dice cuántas y desde cuándo", _viejas and _viejas[0].startswith(
+        "2 listas tienen de 65 a 70 días"), _viejas)
     esperar("dos precios en la misma lista: solo ese",
             [(f["ID"], f["Precios en la lista"]) for f in
              ns["codigos_con_dos_precios_en_la_misma_lista"]() if f["Marca"] == "HISTO"],

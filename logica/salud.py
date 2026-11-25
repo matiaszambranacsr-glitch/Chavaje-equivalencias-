@@ -114,6 +114,7 @@ def envejecimiento_de_precios():
             "Inflación desde la última carga (INDEC)": (
                 f"{miles(inflacion * 100, 1)}% (a {_hasta})" if inflacion is not None else "—"),
             "_atraso": atraso or inflacion or 0, "_dias": dias or 0, "_ritmo": ritmo,
+            "_inflacion": inflacion,
         })
     salida.sort(key=lambda x: (-x["_atraso"], -x["_dias"]))
     return salida
@@ -742,6 +743,7 @@ def diagnostico_de_salud():
     # cuando algo sale mal: vender con una lista de hace dos meses es vender perdiendo la
     # diferencia, y nadie se entera hasta que repone.
     try:
+        _sin_ritmo = []
         for _vieja in envejecimiento_de_precios():
             if _vieja["_ritmo"] is not None and _vieja["_atraso"] >= 0.05:
                 sumar("alto",
@@ -753,17 +755,35 @@ def diagnostico_de_salud():
                       f"proveedor.",
                       miga_hasta("Importaciones"))
             elif _vieja["_ritmo"] is None and (_vieja["_dias"] >= 60 or _vieja["_atraso"] >= 0.05):
-                _inf_txt = _vieja.get("Inflación desde la última carga (INDEC)") or "—"
-                sumar("medio",
-                      f"La lista de {_vieja['Lista']} tiene {_vieja['_dias']} días"
-                      + (f": la inflación oficial desde entonces fue {_inf_txt}"
-                         if _inf_txt != "—" else ""),
-                      "Todavía no la importaste dos veces, así que no puedo medir cuánto "
-                      "sube ese proveedor"
-                      + (" —la inflación del INDEC es un piso de cuánto quedó abajo—"
-                         if _inf_txt != "—" else "")
-                      + ". Con la próxima importación la app va a saber a qué ritmo aumenta.",
-                      miga_hasta("Qué tan atrasada está cada lista"))
+                _sin_ritmo.append(_vieja)
+        # LAS QUE NO TIENEN RITMO PROPIO, en un solo aviso: con siete listas cargadas el mismo
+        # día eran siete renglones iguales en la campanita (19 avisos en la copia de la base
+        # real). Y la inflación solo si hay con qué medirla: con el INDEC publicado hasta un mes
+        # anterior a la carga decía «fue 0,0%», que se lee como que no subió nada.
+        if _sin_ritmo:
+            _infl = [x["_inflacion"] for x in _sin_ritmo if x.get("_inflacion")]
+            _inf_txt = (f"{miles(max(_infl) * 100, 1)}%" if _infl else "")
+            _dias_sr = sorted({x["_dias"] for x in _sin_ritmo})
+            _cuantos_dias = (f"{miles(_dias_sr[0])} días" if len(_dias_sr) == 1 else
+                             f"de {miles(_dias_sr[0])} a {miles(_dias_sr[-1])} días")
+            sumar("medio",
+                  (f"La lista de {_sin_ritmo[0]['Lista']} tiene {_cuantos_dias}"
+                   if len(_sin_ritmo) == 1 else
+                   f"{len(_sin_ritmo)} listas tienen {_cuantos_dias}")
+                  + (f": la inflación oficial desde entonces fue {_inf_txt}"
+                     if _inf_txt and len(_sin_ritmo) == 1 else
+                     f": la inflación oficial desde entonces llegó a {_inf_txt}"
+                     if _inf_txt else ""),
+                  ("" if len(_sin_ritmo) == 1 else
+                   ", ".join(x["Lista"] for x in _sin_ritmo[:6])
+                   + (f" y {miles(len(_sin_ritmo) - 6)} más" if len(_sin_ritmo) > 6 else "")
+                   + ". ")
+                  + "Todavía no las importaste dos veces, así que no puedo medir cuánto sube "
+                    "cada proveedor"
+                  + (" —la inflación del INDEC es un piso de cuánto quedaron abajo—"
+                     if _inf_txt else "")
+                  + ". Con la próxima importación la app va a saber a qué ritmo aumenta.",
+                  miga_hasta("Qué tan atrasada está cada lista"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/precios viejos", _err)
 
