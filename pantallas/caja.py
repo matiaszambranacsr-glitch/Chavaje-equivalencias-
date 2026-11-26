@@ -243,6 +243,28 @@ if pagina == PAGINAS[11]:
                                    else "📲 Abrir WhatsApp (elegís a quién)",
                                    link_de_whatsapp(_tel_d, _sem_final), width="stretch",
                                    key=f"walink__{_clave_sem}")
+            # EL MES POR VENDEDOR, hasta el día elegido (ver ventas_por_vendedor()): para las
+            # comisiones. Solo el administrador. Perezoso: es una consulta del mes.
+            if es_admin():
+                _pop_mes = st.popover("🏆 El mes por vendedor", key="pop_mes_por_vendedor",
+                                      width="stretch", on_change="rerun")
+                if _pop_mes.open:
+                    with _pop_mes:
+                        _hasta_m = date.fromisoformat(_dia_txt)
+                        _desde_m = _hasta_m.replace(day=1)
+                        _por_vend = ventas_por_vendedor(_desde_m.isoformat(), _dia_txt)
+                        st.caption(f"Del {_desde_m:%d/%m} al {_hasta_m:%d/%m}, por quien armó "
+                                   "la venta: sin lo anulado y con lo devuelto descontado.")
+                        if _por_vend:
+                            st.dataframe([{"Vendedor": x["Vendedor"],
+                                           "Ventas": miles(x["Ventas"]),
+                                           "Vendido": f"${miles(x['Vendido'], 0)}",
+                                           "Devuelto": (f"${miles(x['Devuelto'], 0)}"
+                                                        if x["Devuelto"] else ""),
+                                           "Ticket promedio": f"${miles(x['Ticket promedio'], 0)}"}
+                                          for x in _por_vend], width="stretch", hide_index=True)
+                        else:
+                            st.caption("Todavía no hay ventas este mes.")
             if not _del_dia and not _devs_dia:
                 st.caption("Ese día no hubo ventas.")
             else:

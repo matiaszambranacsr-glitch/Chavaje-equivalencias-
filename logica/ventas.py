@@ -639,6 +639,37 @@ def ventas_del_dia(dia=None):
     return ventas
 
 
+# EL MES POR VENDEDOR: el cierre dice quién vendió cuánto en un día; para las comisiones, o para
+# ver quién atiende más, hacía falta sumar día por día. Por quien armó la venta (no quien la
+# cobró), sin lo anulado y con lo devuelto descontado a quien la había vendido. Solo para el
+# administrador (ver pantallas/caja.py).
+def ventas_por_vendedor(desde, hasta):
+    """[dict] entre dos días de acá («2026-11-01», inclusive): Vendedor, Ventas, Vendido (sin lo
+    anulado, menos lo devuelto), Devuelto y «Ticket promedio». El que más vendió primero."""
+    filas = c.execute(
+        """SELECT COALESCE(NULLIF(v.usuario, ''), 'Sin decir') AS quien, COUNT(*) AS ventas,
+                  SUM(v.total) AS total
+           FROM ventas v
+           WHERE v.anulada = 0 AND date(v.fecha, '-3 hours') BETWEEN ? AND ?
+           GROUP BY quien""", (desde, hasta)).fetchall()
+    devuelto = {f["quien"]: f["importe"] for f in c.execute(
+        """SELECT COALESCE(NULLIF(v.usuario, ''), 'Sin decir') AS quien,
+                  SUM(d.importe) AS importe
+           FROM ventas_devoluciones d JOIN ventas v ON v.id = d.venta_id
+           WHERE v.anulada = 0 AND date(d.fecha, '-3 hours') BETWEEN ? AND ?
+           GROUP BY quien""", (desde, hasta))}
+    salida = []
+    for f in filas:
+        dev = round(float(devuelto.get(f["quien"]) or 0), 2)
+        vendido = round(float(f["total"] or 0) - dev, 2)
+        salida.append({"Vendedor": f["quien"], "Ventas": f["ventas"], "Vendido": vendido,
+                       "Devuelto": dev,
+                       "Ticket promedio": round(float(f["total"] or 0) / f["ventas"], 2)
+                       if f["ventas"] else 0.0})
+    salida.sort(key=lambda x: -x["Vendido"])
+    return salida
+
+
 def devoluciones_del_dia(dia=None):
     """Lo que se devolvió en un día (hoy, si no se dice), de ventas no anuladas: con la forma de
     pago de la venta (la plata vuelve por donde entró) y el precio y el costo del ítem. [dict]."""

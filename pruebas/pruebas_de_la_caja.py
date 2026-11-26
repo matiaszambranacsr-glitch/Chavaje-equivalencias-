@@ -602,6 +602,27 @@ def probar(L):
     esperar("y en el resumen de la semana, por tipo (lo anulado y lo de 2020, no)",
             [r for r in ns["resumen_de_la_semana"]().split("\n") if r.startswith("💸")],
             ["💸 Salidas de caja: 🧾 Gasto $120"])
+    # EL MES POR VENDEDOR (ver ventas_por_vendedor()): por quien armó la venta, sin lo anulado
+    # y con lo devuelto descontado a quien la había vendido; otro mes, aparte.
+    def _venta_vieja(quien, total, fecha, anulada=0):
+        cs.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada) "
+                   "VALUES (?, ?, 'Efectivo', ?, 1, ?)", (fecha, quien, total, anulada))
+        _v = cs.lastrowid
+        cs.execute("INSERT INTO ventas_items (venta_id, producto_id, codigo, marca, cantidad, "
+                   "precio) VALUES (?, NULL, 'X', 'X', 1, ?)", (_v, total))
+        return _v, cs.lastrowid
+    _vr, _ir = _venta_vieja("rosa", 1000, "2020-03-10 15:00:00")
+    _venta_vieja("rosa", 3000, "2020-03-20 15:00:00")
+    _venta_vieja("rosa", 5000, "2020-03-21 15:00:00", anulada=1)
+    _venta_vieja("tito", 500, "2020-03-31 20:00:00")
+    _venta_vieja("tito", 900, "2020-04-01 12:00:00")
+    cs.execute("INSERT INTO ventas_devoluciones (venta_id, venta_item_id, cantidad, importe, "
+               "usuario, fecha) VALUES (?, ?, 1, 200, 'beto', '2020-03-12 15:00:00')",
+               (_vr, _ir))
+    esperar("el mes por vendedor",
+            [(x["Vendedor"], x["Ventas"], x["Vendido"], x["Devuelto"], x["Ticket promedio"])
+             for x in ns["ventas_por_vendedor"]("2020-03-01", "2020-03-31")],
+            [("rosa", 2, 3800.0, 200.0, 2000.0), ("tito", 1, 500.0, 0.0, 500.0)])
     _claves_antes = g["hay_claves_configuradas"]
     try:
         g["hay_claves_configuradas"] = lambda: True

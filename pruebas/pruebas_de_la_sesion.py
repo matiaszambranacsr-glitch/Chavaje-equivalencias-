@@ -1300,6 +1300,18 @@ def probar():
     if _anular:
         _anular[0].click().run()
     esperar("y el «🚫» la anula", (len(_anular), ns["total_de_salidas"]()), (1, 0.0))
+    # EL MES POR VENDEDOR: el empleado no lo ve; el administrador sí, con la tabla.
+    def _mes_por_vendedor(sesion):
+        return [p for p in sesion.get("popover") if "El mes por vendedor" in str(p.proto)]
+    esperar("el mes por vendedor: el empleado no lo ve", len(_mes_por_vendedor(vta)), 0)
+    _adm_mes = sesion_nueva("clave-duenio-1", ns["PAGINAS"][11])
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.run()
+    esperar("el administrador sí, con quién vendió cuánto",
+            (len(_mes_por_vendedor(_adm_mes)),
+             any("rita" in d.value.to_string() for d in _adm_mes.dataframe),
+             [e.value for e in _adm_mes.exception]), (1, True, []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

@@ -7957,6 +7957,16 @@ corto, con «⬇️ Bajarlo ahora» y «Más tarde» en un renglón. En «📦 E
 y «➕ Sumar» van juntos abajo del código. En 💬 Mensajes, lo recién llegado dice «recién» y no
 «hace 0 min».
 
+## 🏆 El mes por vendedor
+
+El cierre dice quién vendió cuánto en un día; para las comisiones, o para ver quién atiende
+más, había que sumar día por día. En 💵 Caja → «📋 Ventas y cierre de caja», **«🏆 El mes por
+vendedor»** (solo el administrador) muestra del 1 al día elegido, por quien armó la venta (no
+quien la cobró): cuántas ventas, lo vendido sin lo anulado y con lo devuelto descontado a
+quien la había vendido, y el ticket promedio. Los días son los de acá: una venta del 31 a las
+20 (hora de acá) es de ese mes (`ventas_por_vendedor()`, en `logica/ventas.py`; lo controlan
+`pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
+
 ## 🔔 Menos avisos repetidos en la campanita
 
 Con la copia de la base real la campanita tenía 19 avisos, y 7 eran el mismo: «La lista de X

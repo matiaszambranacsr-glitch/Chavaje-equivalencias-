@@ -433,6 +433,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("mes_por_vendedor", "Ver cuánto vendió cada vendedor en el mes",
+     "vendedor vendedores empleado empleados comision comisiones cuanto vendio cada uno mes "
+     "mensual ranking",
+     "En la caja, abrí «📋 Ventas y cierre de caja» y tocá «🏆 El mes por vendedor»: del 1 al día "
+     "elegido, cuántas ventas armó cada uno, lo vendido (sin lo anulado y con lo devuelto "
+     "descontado) y el ticket promedio. Solo el administrador.",
+     "💵 Caja", "admin"),
     ("salida_de_caja", "Anotar un gasto, un pago o un retiro de la caja",
      "gasto gastos salida salidas sacar saque retiro retirar pago pagar flete cadete proveedor "
      "contra entrega efectivo cajon caja plata",

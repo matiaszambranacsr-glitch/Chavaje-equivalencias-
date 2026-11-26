@@ -36,6 +36,7 @@ _DATO_VENTAS = re.compile(
     r"|\b(ventas?|caja|recaudacion) (de|del) (hoy|ayer|dia)\b"
     r"|\bcomo (va|viene|vamos|anda|fue|estuvo) (el dia|la caja|hoy|ayer)\b"
     r"|\b(vendimos|vendi|se vendio) (hoy|ayer)\b")
+_POR_VENDEDOR = re.compile(r"\b(vendedor\w*|empleado\w*|cada uno|comision\w*)\b")
 _DATO_Y_AYER = re.compile(r"^(y )?(ayer|el de ayer|y el de ayer)$")
 _DATO_A_COBRAR = re.compile(
     r"\b(que|cuanto|cuantas|hay)\b.{0,20}\b(falta|faltan|espera|esperan|queda|quedan)\b.{0,15}"
@@ -302,7 +303,8 @@ def dato_del_momento(llano, contexto):
     if _CAJA in visibles:
         if _DATO_Y_AYER.match(llano) and contexto.get("ultima") == "dato:ventas":
             return _dato_de_las_ventas(contexto, ayer=True)
-        if _DATO_VENTAS.search(llano):
+        # «cuánto vendió cada vendedor» no es el número del día: es «🏆 El mes por vendedor».
+        if _DATO_VENTAS.search(llano) and not _POR_VENDEDOR.search(llano):
             return _dato_de_las_ventas(contexto, ayer=" ayer" in f" {llano}")
         if _DATO_A_COBRAR.search(llano):
             return _dato_a_cobrar(contexto)

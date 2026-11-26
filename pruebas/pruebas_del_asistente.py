@@ -91,6 +91,8 @@ ENTIENDE = (
     ("cambiar los tiempos de la pagina", "como:tiempos"),
     ("que clientes dejaron de venir", "como:no_vienen"),
     ("anotar un gasto de la caja", "como:salida_de_caja"),
+    ("cuanto vendio cada vendedor este mes", "como:mes_por_vendedor"),
+    ("comisiones de los empleados", "como:mes_por_vendedor"),
     ("saque plata para pagar el flete", "como:salida_de_caja"),
     ("talleres que ya no compran mas", "como:no_vienen"),
     ("configurar los plazos de los avisos", "como:tiempos"),
