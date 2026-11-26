@@ -1302,7 +1302,8 @@ def probar():
     esperar("y el «🚫» la anula", (len(_anular), ns["total_de_salidas"]()), (1, 0.0))
     # EL MES POR VENDEDOR: el empleado no lo ve; el administrador sí, con la tabla.
     def _mes_por_vendedor(sesion):
-        return [p for p in sesion.get("popover") if "El mes por vendedor" in str(p.proto)]
+        return [p for p in sesion.get("popover")
+                if "comisiones por vendedor" in str(p.proto)]
     esperar("el mes por vendedor: el empleado no lo ve", len(_mes_por_vendedor(vta)), 0)
     _adm_mes = sesion_nueva("clave-duenio-1", ns["PAGINAS"][11])
     _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
@@ -1312,6 +1313,21 @@ def probar():
             (len(_mes_por_vendedor(_adm_mes)),
              any("rita" in d.value.to_string() for d in _adm_mes.dataframe),
              [e.value for e in _adm_mes.exception]), (1, True, []))
+    # Con la comisión anotada, la columna; y otro mes (el anterior, sin ventas), su aviso.
+    _adm_mes.number_input(key="comision_por_ciento_campo").set_value(10.0).run()
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.run()
+    esperar("la comisión, anotada y en la tabla",
+            (ns["comision_por_ciento"](),
+             any("Comisión" in d.value.columns for d in _adm_mes.dataframe)), (10.0, True))
+    # (la app simulada cierra los paneles perezosos entre un toque y otro: se vuelve a abrir)
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.run()
+    _adm_mes.selectbox(key="mes_por_vendedor_mes").set_value(
+        ns["meses_para_elegir"]()[1]).run()
+    esperar("el mes anterior se elige", [e.value for e in _adm_mes.exception], [])
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

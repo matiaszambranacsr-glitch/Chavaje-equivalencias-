@@ -609,7 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-25"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
-    ("🏆 El mes por vendedor: cuántas ventas armó cada uno, lo vendido (sin lo anulado y con lo devuelto descontado) y el ticket promedio, del 1 al día elegido. Para las comisiones; solo lo ves vos.", "💵 Caja → 📋 Ventas y cierre de caja"),
+    ("🏆 Ventas y comisiones por vendedor: elegís el mes (este o los anteriores) y sale cuántas ventas armó cada uno, lo vendido (sin lo anulado y con lo devuelto descontado), el ticket promedio, lo del mes anterior y, con el porcentaje anotado, la comisión. Solo lo ves vos.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("↩️ Devolución de un cliente: sin escribir nada, las últimas ventas de hoy a un toque (lo que vuelve suele ser del mismo día).", "↩️ Devoluciones → 🧾 De un cliente"),
     ("💸 Salidas de caja: el flete, el proveedor que cobra contra entrega o tu retiro se anotan con qué fue y quién, y lo que tiene que haber en el cajón y el arqueo los descuentan (antes el arqueo decía «Faltan»). Salen en el resumen del día.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🏷️ Etiquetas de lo que entró: después de «✅ Sumar al stock», el PDF con una etiqueta por unidad, con el código de barras nuestro, para pegar antes de guardar.", "📦 Depósito → 📦 Entró mercadería"),

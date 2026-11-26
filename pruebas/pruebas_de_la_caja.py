@@ -623,12 +623,38 @@ def probar(L):
             [(x["Vendedor"], x["Ventas"], x["Vendido"], x["Devuelto"], x["Ticket promedio"])
              for x in ns["ventas_por_vendedor"]("2020-03-01", "2020-03-31")],
             [("rosa", 2, 3800.0, 200.0, 2000.0), ("tito", 1, 500.0, 0.0, 500.0)])
+    # Los meses para elegir, su rango (el de este mes llega a hoy; febrero bisiesto, al 29) y
+    # la comisión, con lo vendido el mes de antes.
+    _d = ns["date"]
+    esperar("los meses para elegir", ns["meses_para_elegir"](3, hoy=_d(2026, 1, 15)),
+            ["2026-01", "2025-12", "2025-11"])
+    esperar("el nombre del mes", ns["nombre_del_mes"]("2026-11"), "noviembre 2026")
+    esperar("el rango del mes", (ns["rango_del_mes"]("2028-02", hoy=_d(2028, 5, 1)),
+                                 ns["rango_del_mes"]("2026-12", hoy=_d(2026, 12, 9))),
+            (("2028-02-01", "2028-02-29"), ("2026-12-01", "2026-12-09")))
+    ns["guardar_comision_por_ciento"](5)
+    esperar("la comisión anotada", ns["comision_por_ciento"](), 5.0)
+    esperar("las comisiones de marzo",
+            [(x["Vendedor"], x["Comisión"], x["Mes anterior"])
+             for x in ns["comisiones_del_mes"]("2020-03", hoy=_d(2026, 1, 1))],
+            [("rosa", 190.0, 0.0), ("tito", 25.0, 0.0)])
+    esperar("y abril, con lo de marzo al lado",
+            [(x["Vendedor"], x["Vendido"], x["Mes anterior"])
+             for x in ns["comisiones_del_mes"]("2020-04", hoy=_d(2026, 1, 1))],
+            [("tito", 900.0, 500.0)])
+    try:
+        ns["guardar_comision_por_ciento"](80)
+        fallas.append("se pudo anotar una comisión de 80%")
+    except ValueError:
+        pass
     _claves_antes = g["hay_claves_configuradas"]
     try:
         g["hay_claves_configuradas"] = lambda: True
         for _nivel in ("", "mecanico"):
             g["_nivel_de_quien_esta_adentro"] = lambda n=_nivel: n
-            for _que, _hacer in (("anotar", lambda: ns["anotar_salida_de_caja"](
+            for _que, _hacer in (("cambiar la comisión", lambda: ns["guardar_comision_por_ciento"](
+                                    3)),
+                                 ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anular", lambda: ns["anular_salida_de_caja"](1))):
                 try:

@@ -670,6 +670,75 @@ def ventas_por_vendedor(desde, hasta):
     return salida
 
 
+# Y LOS MESES ANTERIORES, con la comisión: se elige el mes (los últimos MESES_PARA_COMISIONES)
+# en vez de tener que elegir su último día, y con el porcentaje de comisión anotado una vez
+# (COMISION_MAXIMA como tope: más es un número mal escrito) sale cuánto le toca a cada uno.
+NOMBRES_DE_LOS_MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                        "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+MESES_PARA_COMISIONES = 12
+COMISION_MAXIMA = 50
+
+
+def meses_para_elegir(cuantos=MESES_PARA_COMISIONES, hoy=None):
+    """[«2026-11», «2026-10», …]: este mes y los anteriores, el más nuevo primero."""
+    hoy = hoy or hoy_aca()
+    anio, mes, salida = hoy.year, hoy.month, []
+    for _ in range(int(cuantos)):
+        salida.append(f"{anio:04d}-{mes:02d}")
+        anio, mes = (anio, mes - 1) if mes > 1 else (anio - 1, 12)
+    return salida
+
+
+def nombre_del_mes(mes):
+    """«2026-11» → «noviembre 2026»."""
+    anio, numero = (int(x) for x in str(mes).split("-")[:2])
+    return f"{NOMBRES_DE_LOS_MESES[numero - 1]} {anio}"
+
+
+def rango_del_mes(mes, hoy=None):
+    """(desde, hasta) de un mes, en días de acá: el de este mes llega hasta hoy."""
+    hoy = hoy or hoy_aca()
+    anio, numero = (int(x) for x in str(mes).split("-")[:2])
+    desde = date(anio, numero, 1)
+    siguiente = date(anio + (numero == 12), numero % 12 + 1, 1)
+    hasta = min(siguiente - timedelta(days=1), hoy)
+    return desde.isoformat(), hasta.isoformat()
+
+
+def comision_por_ciento():
+    try:
+        return max(0.0, min(float(obtener_config("comision_por_ciento", "0") or 0),
+                            COMISION_MAXIMA))
+    except ValueError:
+        return 0.0
+
+
+def guardar_comision_por_ciento(valor):
+    """La anota el administrador; queda en el registro de cambios."""
+    exigir_nivel("admin", "cambiar el porcentaje de comisión")
+    nuevo = round(float(valor or 0), 2)
+    if not 0 <= nuevo <= COMISION_MAXIMA:
+        raise ValueError(f"La comisión tiene que ser entre 0 y {COMISION_MAXIMA}%.")
+    antes = comision_por_ciento()
+    if nuevo != antes:
+        guardar_config("comision_por_ciento", str(nuevo))
+        anotar_cambio("cambió el porcentaje de comisión", "configuración",
+                      "comision_por_ciento", antes=antes, despues=nuevo)
+
+
+def comisiones_del_mes(mes, hoy=None):
+    """ventas_por_vendedor() del mes, con «Comisión» (lo vendido por el porcentaje anotado) y
+    «Mes anterior» (lo que vendió cada uno el mes de antes, entero)."""
+    desde, hasta = rango_del_mes(mes, hoy)
+    anterior_hasta = date.fromisoformat(desde) - timedelta(days=1)
+    anterior = {x["Vendedor"]: x["Vendido"] for x in ventas_por_vendedor(
+        anterior_hasta.replace(day=1).isoformat(), anterior_hasta.isoformat())}
+    por_ciento = comision_por_ciento()
+    return [{**x, "Comisión": round(x["Vendido"] * por_ciento / 100, 2),
+             "Mes anterior": anterior.get(x["Vendedor"], 0.0)}
+            for x in ventas_por_vendedor(desde, hasta)]
+
+
 def devoluciones_del_dia(dia=None):
     """Lo que se devolvió en un día (hoy, si no se dice), de ventas no anuladas: con la forma de
     pago de la venta (la plata vuelve por donde entró) y el precio y el costo del ítem. [dict]."""

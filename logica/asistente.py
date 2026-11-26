@@ -436,9 +436,11 @@ COMO_HAGO_DEL_ASISTENTE = (
     ("mes_por_vendedor", "Ver cuánto vendió cada vendedor en el mes",
      "vendedor vendedores empleado empleados comision comisiones cuanto vendio cada uno mes "
      "mensual ranking",
-     "En la caja, abrí «📋 Ventas y cierre de caja» y tocá «🏆 El mes por vendedor»: del 1 al día "
-     "elegido, cuántas ventas armó cada uno, lo vendido (sin lo anulado y con lo devuelto "
-     "descontado) y el ticket promedio. Solo el administrador.",
+     "En la caja, abrí «📋 Ventas y cierre de caja» y tocá «🏆 Ventas y comisiones por "
+     "vendedor»: elegís el mes (este o los anteriores) y sale cuántas ventas armó cada uno, lo "
+     "vendido (sin lo anulado y con lo devuelto descontado), el ticket promedio y lo del mes "
+     "anterior. Con el porcentaje de comisión anotado, cuánto le toca a cada uno. Solo el "
+     "administrador.",
      "💵 Caja", "admin"),
     ("salida_de_caja", "Anotar un gasto, un pago o un retiro de la caja",
      "gasto gastos salida salidas sacar saque retiro retirar pago pagar flete cadete proveedor "

@@ -7957,14 +7957,18 @@ corto, con «⬇️ Bajarlo ahora» y «Más tarde» en un renglón. En «📦 E
 y «➕ Sumar» van juntos abajo del código. En 💬 Mensajes, lo recién llegado dice «recién» y no
 «hace 0 min».
 
-## 🏆 El mes por vendedor
+## 🏆 Ventas y comisiones por vendedor
 
 El cierre dice quién vendió cuánto en un día; para las comisiones, o para ver quién atiende
-más, había que sumar día por día. En 💵 Caja → «📋 Ventas y cierre de caja», **«🏆 El mes por
-vendedor»** (solo el administrador) muestra del 1 al día elegido, por quien armó la venta (no
-quien la cobró): cuántas ventas, lo vendido sin lo anulado y con lo devuelto descontado a
-quien la había vendido, y el ticket promedio. Los días son los de acá: una venta del 31 a las
-20 (hora de acá) es de ese mes (`ventas_por_vendedor()`, en `logica/ventas.py`; lo controlan
+más, había que sumar día por día. En 💵 Caja → «📋 Ventas y cierre de caja», **«🏆 Ventas y
+comisiones por vendedor»** (solo el administrador): se elige el mes —este, hasta hoy, o
+cualquiera de los últimos `MESES_PARA_COMISIONES` (12), entero— y por quien armó la venta (no
+quien la cobró) sale cuántas ventas, lo vendido sin lo anulado y con lo devuelto descontado a
+quien la había vendido, el ticket promedio y lo que vendió el mes anterior. Con **«Comisión
+(%)»** anotado una vez (hasta `COMISION_MAXIMA`, 50%; queda en el registro de cambios) sale
+cuánto le toca a cada uno. Los días son los de acá: una venta del 31 a las
+20 (hora de acá) es de ese mes (`ventas_por_vendedor()` y `comisiones_del_mes()`, en
+`logica/ventas.py`; lo controlan
 `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
 
 ## 🔔 Menos avisos repetidos en la campanita
