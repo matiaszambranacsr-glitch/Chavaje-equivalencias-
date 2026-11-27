@@ -7989,7 +7989,9 @@ el precio de cada cosa —con descuento, los dos, sobre el precio sin descuento�
 la devolución (vuelve lo que pagó) y el comprobante («Recargo 10% por 3 cuotas») cierran sin
 cuentas aparte. «Volver a la caja» lo saca al centavo, y «cambiar cómo pagó» no se deja si se
 cobró con recargo (el cliente que pagó en efectivo quedaba con el recargo cobrado). Lo vendido
-de las comisiones y del objetivo es lo que pagó el cliente, con el recargo
+de las comisiones y del objetivo es lo que pagó el cliente, con el recargo. En 🧾 Ventas, abajo del
+total, sale «💳 Con crédito: 3 cuotas de $733 (total $2.200) · …», para contestar «¿y en
+cuotas?» sin calculadora
 (`recargo_por_cuotas()`, `cobrar_venta()` y `_aplicar_el_descuento()`, en `logica/ventas.py`;
 lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
 

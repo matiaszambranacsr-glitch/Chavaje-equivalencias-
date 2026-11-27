@@ -861,6 +861,10 @@ def probar(L):
     esperar("guardados: el 0 no queda",
             (ns["guardar_recargos_por_cuotas"]({3: 10, 6: 0, 12: 25}),
              ns["recargos_por_cuotas"]()), ({3: 10.0, 12: 25.0}, {3: 10.0, 12: 25.0}))
+    esperar("lo que el vendedor le dice al cliente: cada cuota y el total",
+            (ns["texto_de_las_cuotas"](2000), ns["texto_de_las_cuotas"](0)),
+            ("💳 Con crédito: 3 cuotas de \\$733 (total \\$2.200) · 12 cuotas de \\$208 (total "
+             "\\$2.500)", ""))
     esperar("solo con crédito y en las cuotas que tienen",
             [ns["recargo_por_cuotas"](f, n) for f, n in (("Tarjeta de crédito", 3),
                                                           ("Efectivo", 3),

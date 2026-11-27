@@ -2109,6 +2109,20 @@ def recargo_por_cuotas(forma_de_pago, cuotas):
     return recargos_por_cuotas().get(int(cuotas or 1), 0.0)
 
 
+def texto_de_las_cuotas(total):
+    """«💳 3 cuotas de $733 (total $2.200) · 12 cuotas de $208 (…)»: lo que el vendedor le dice
+    al cliente que pregunta «¿y en cuotas?», con los recargos anotados. "" si no hay ninguno."""
+    recargos = recargos_por_cuotas()
+    if not recargos or not total:
+        return ""
+    partes = []
+    for cuotas, por_ciento in sorted(recargos.items()):
+        con_recargo = round(float(total) * (1 + por_ciento / 100), 2)
+        partes.append(f"{cuotas} cuotas de \\${miles(con_recargo / cuotas, 0)} (total "
+                      f"\\${miles(con_recargo, 0)})")
+    return "💳 Con crédito: " + " · ".join(partes)
+
+
 def guardar_recargos_por_cuotas(recargos):
     """{cuotas: porcentaje}; en 0 no tiene. Lo cambia el administrador; queda en el registro."""
     exigir_nivel("admin", "cambiar el recargo por cuotas")
