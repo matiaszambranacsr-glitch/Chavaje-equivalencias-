@@ -821,6 +821,8 @@ TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR = (
      "A un auto «le toca pronto» un cambio cuando faltan menos de", "días", 1, 180),
     ("📋 Presupuestos y clientes", "DIAS_SIN_REPETIR_EL_AVISO",
      "A quien se le avisó del service, no volver a avisarle por", "días", 1, 180),
+    ("📋 Presupuestos y clientes", "DIAS_PARA_AVISAR_UNA_SENA",
+     "Una seña que nadie retiró va a la campanita a los", "días", 1, 180),
     ("📋 Presupuestos y clientes", "DIAS_VENCIMIENTO_RESERVA",
      "Una reserva de stock se libera sola a los", "días", 1, 90),
     ("🛒 Para pedir y proveedores", "DIAS_DE_VENTAS_PARA_REPONER",

@@ -802,6 +802,14 @@ def probar(L):
     esperar("en el resumen del día",
             "🔖 Señas: entraron $" in ns["resumen_del_dia"](), True)
     esperar("las que esperan: la de la óptica", [x["id"] for x in ns["senas_activas"]()], [s2])
+    c.execute("UPDATE senas SET fecha = datetime('now', '-40 days') WHERE id = ?", (s2,))
+    esperar("la que nadie retira hace más de los días elegidos, a la campanita",
+            ([x["id"] for x in ns["senas_sin_retirar"]()], ns["senas_sin_retirar"](60)),
+            ([s2], []))
+    ns["invalidar_salud"]()
+    esperar("y la campanita lo dice",
+            [p["titulo"] for p in ns["diagnostico_de_salud"]() if "sin retirar" in p["titulo"]],
+            ["🔖 1 seña(s) sin retirar hace más de 30 días"])
     ns["anotar_salida_de_caja"]("🧾 Gasto", "artículos de limpieza", 120)
     esperar("y en el resumen de la semana, por tipo (lo anulado y lo de 2020, no)",
             [r for r in ns["resumen_de_la_semana"]().split("\n") if r.startswith("💸")],

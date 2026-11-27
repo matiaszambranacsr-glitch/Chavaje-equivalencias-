@@ -3192,6 +3192,9 @@ def mostrar_la_ficha_del_cliente(telefono, donde):
 #     lo que falta (la seña ya había entrado). Anular la venta la vuelve a dejar esperando.
 #   · Si no la retira, «↩️ Devolverla» la saca de la caja del día en que se devuelve.
 SENA_MAXIMA = SALIDA_DE_CAJA_MAXIMA
+# La seña que nadie retira ni se devuelve va a la campanita (ver diagnostico_de_salud()): es
+# plata del cliente, y lo encargado quedó ocupando lugar.
+DIAS_PARA_AVISAR_UNA_SENA = 30
 ESTADOS_DE_LA_SENA = {"activa": "🔖 Esperando que retire", "usada": "✅ Descontada al retirar",
                       "reintegrada": "↩️ Devuelta"}
 
@@ -3260,6 +3263,13 @@ def senas_activas():
                         usuario, fecha
                  FROM senas WHERE estado = 'activa' ORDER BY id""")
     return [dict(f) for f in c.fetchall()]
+
+
+def senas_sin_retirar(dias=None):
+    """Las que esperan hace más de `dias` (DIAS_PARA_AVISAR_UNA_SENA si no se dice) días."""
+    hasta = (datetime.now() - timedelta(days=int(dias or DIAS_PARA_AVISAR_UNA_SENA))
+             ).strftime("%Y-%m-%d %H:%M:%S")
+    return [s for s in senas_activas() if (s["fecha"] or "") < hasta]
 
 
 def senas_para_la_venta(producto_ids, telefono=""):

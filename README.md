@@ -7964,7 +7964,9 @@ $1.000», con el vuelto sobre eso), y el comprobante trae «Seña que ya dejaste
 se descuenta más de lo que vale la venta, una venta con seña no va a cuenta, y dos vendedores no
 descuentan la misma. Anular la venta la deja esperando otra vez. Si no la retira, «↩️» (con un
 «¿seguro?») la devuelve: sale de la caja del día en que se devuelve, por donde había entrado. La
-ficha del cliente (📇 Agenda) muestra sus señas. Todo queda en el registro de cambios
+ficha del cliente (📇 Agenda) muestra sus señas, y la que nadie retira en
+`DIAS_PARA_AVISAR_UNA_SENA` (30, se cambia en «⏱️ Los tiempos de la página») va a la campanita
+con quién la dejó y cuánto suman. Todo queda en el registro de cambios
 (`anotar_sena()`, `senas_para_la_venta()`, `devolver_sena()` y `senas_del_dia()`, en
 `logica/ventas.py`, y `cierre_de_caja()`; lo controlan `pruebas_de_la_caja.py` y
 `pruebas_de_la_sesion.py`).

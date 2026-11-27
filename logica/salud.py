@@ -541,6 +541,22 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/pedidos_al_proveedor", _err)
 
+    # LAS SEÑAS SIN RETIRAR (ver «LAS SEÑAS» en logica/ventas.py): plata del cliente que nadie
+    # le reclamó ni le devolvió, y lo encargado ocupando lugar.
+    try:
+        _senas_viejas = senas_sin_retirar()
+        if _senas_viejas:
+            _quienes_s = list(dict.fromkeys(s["cliente"] or s["telefono"] or "¿?"
+                                            for s in _senas_viejas))
+            sumar("medio", f"🔖 {len(_senas_viejas)} seña(s) sin retirar hace más de "
+                           f"{DIAS_PARA_AVISAR_UNA_SENA} días",
+                  "De " + ", ".join(_quienes_s[:3]) + (" …" if len(_quienes_s) > 3 else "")
+                  + f" (${miles(sum(s['importe'] for s in _senas_viejas), 0)} en total). "
+                  "Escribile para que pase a buscarlo o, si no lo quiere, devolvésela desde "
+                  "«🔖 Señas».", miga_hasta("Caja"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/senas", _err)
+
     # LO FALLADO SIN RECLAMAR (ver «LAS GARANTÍAS» en logica/ventas.py): el proveedor no acepta
     # cualquier fecha, y lo que no se reclama a tiempo se pierde.
     try:
