@@ -844,8 +844,45 @@ def probar(L):
     esperar("el Excel: una hoja por cosa, con la anulada marcada",
             (list(_hojas), [(v["Total"], v["Anulada"]) for v in _hojas["Ventas"]],
              len(_hojas["Arqueos"]), ns["excel_de_varias_hojas"](_hojas)[:2]),
-            (["Resumen", "Ventas", "Salidas", "Señas", "Arqueos", "Devoluciones"],
+            (["Resumen", "Ventas", "Salidas", "Señas", "Arqueos", "Devoluciones", "Gastos fijos"],
              [(1000000.0, ""), (500000.0, "sí"), (300000.0, "")], 4, b"PK"))
+    # LOS GASTOS FIJOS Y LO QUE QUEDÓ: valen desde un mes; cambiar el importe vale desde ese mes
+    # (los de antes no se mueven) y sacarlo deja de contar desde ese mes.
+    esperar("el mes anterior", (ns["mes_anterior"]("2025-01"), ns["mes_anterior"]("2025-03")),
+            ("2024-12", "2025-02"))
+    esperar("sin qué, en cero o disparatado, no",
+            [ns["anotar_gasto_fijo"](q, i, "2025-01")[0] for q, i in (("", 100), ("Alquiler", 0),
+                                                                      ("Alquiler", 1e12))],
+            [False] * 3)
+    esperar("anotado, desde ese mes",
+            ns["anotar_gasto_fijo"]("  alquiler   del local ", 300000, "2025-01"),
+            (True, "💸 alquiler del local: $300.000 por mes, desde enero 2025."))
+    ns["anotar_gasto_fijo"]("Luz", 50000, "2025-02")
+    _alq = c.execute("SELECT id FROM gastos_fijos WHERE concepto = 'alquiler del local'").fetchone()[0]
+    _luz = c.execute("SELECT id FROM gastos_fijos WHERE concepto = 'Luz'").fetchone()[0]
+    _gf_mes = lambda m: [(g["concepto"], g["importe"]) for g in ns["gastos_fijos_del_mes"](m)]
+    esperar("cada mes, los suyos",
+            [_gf_mes(m) for m in ("2024-12", "2025-01", "2025-02")],
+            [[], [("alquiler del local", 300000.0)],
+             [("alquiler del local", 300000.0), ("Luz", 50000.0)]])
+    esperar("cambiar el importe vale desde ese mes; igual, no",
+            (ns["cambiar_gasto_fijo"](_alq, 350000, "2025-03")[0],
+             ns["cambiar_gasto_fijo"](_alq, 300000, "2025-02")[0]), (True, False))
+    ns["sacar_gasto_fijo"](_luz, "2025-04")
+    esperar("los de antes no se mueven; sacado, deja de contar",
+            [_gf_mes(m) for m in ("2025-02", "2025-03", "2025-04")],
+            [[("alquiler del local", 300000.0), ("Luz", 50000.0)],
+             [("alquiler del local", 350000.0), ("Luz", 50000.0)],
+             [("alquiler del local", 350000.0)]])
+    _cm_g = ns["cierre_del_mes"]("2025-02", hoy=_fecha(2025, 3, 15))
+    esperar("lo que quedó: la ganancia menos los gastos de la caja y los fijos",
+            (_cm_g["gastos_fijos"], _cm_g["total_gastos_fijos"], _cm_g["gastos_de_caja"],
+             _cm_g["resultado"]),
+            ([("alquiler del local", 300000.0), ("Luz", 50000.0)], 350000.0, 250.0,
+             round(_cm_g["ganancia"] - 350250.0, 2)))
+    esperar("en el Excel, su hoja",
+            ns["excel_del_cierre_del_mes"]("2025-02", hoy=_fecha(2025, 3, 15))["Gastos fijos"],
+            [{"Qué": "alquiler del local", "Por mes": 300000.0}, {"Qué": "Luz", "Por mes": 50000.0}])
     esperar("este mes, lo mismo que los cierres de cada día",
             ns["cierre_del_mes"](ns["hoy_aca"]().strftime("%Y-%m"))["total"],
             round(sum(ns["cierre_de_caja"](d)["total"] for d in ns["_dias_del_rango"](
@@ -1059,6 +1096,8 @@ def probar(L):
                                   lambda: ns["cierre_del_mes"]("2025-02")),
                                  ("cambiar el trato especial de una cuenta en",
                                   lambda: ns["guardar_trato_de_la_cuenta"](taller, None)),
+                                 ("anotar un gasto fijo en",
+                                  lambda: ns["anotar_gasto_fijo"]("x", 1)),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

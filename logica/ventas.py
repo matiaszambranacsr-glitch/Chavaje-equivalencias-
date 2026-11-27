@@ -3586,6 +3586,133 @@ def arqueos_por_cajero(desde, hasta):
     return sorted(cajeros.values(), key=lambda k: (-k["Faltó"], k["Cajero"]))
 
 
+# LOS GASTOS FIJOS Y LO QUE QUEDÓ: el cierre del mes decía lo que entró y la ganancia de lo
+# vendido, pero no lo que quedó de verdad: faltaban el alquiler, la luz, los sueldos, el contador,
+# que se pagan por fuera de la caja. Se anotan una vez (valen todos los meses hasta que se
+# saquen) y el cierre resta, de la ganancia estimada, los gastos de la caja («🧾 Gasto» en las
+# salidas) y los fijos. Lo que se paga desde el cajón va como salida, no como fijo: si no, se
+# contaría dos veces. Cambiar un importe vale desde este mes; los anteriores no se mueven.
+def mes_anterior(mes):
+    anio, numero = (int(x) for x in str(mes).split("-")[:2])
+    return f"{anio - (numero == 1):04d}-{(numero - 2) % 12 + 1:02d}"
+
+
+def gastos_fijos_del_mes(mes=None):
+    """[dict] id, concepto, importe, desde, hasta: los que valen ese mes (este, si no se dice)."""
+    mes = mes or hoy_aca().strftime("%Y-%m")
+    return [dict(f) for f in c.execute(
+        """SELECT id, concepto, importe, desde, hasta FROM gastos_fijos
+           WHERE desde <= ? AND (hasta IS NULL OR hasta >= ?) ORDER BY importe DESC, id""",
+        (mes, mes))]
+
+
+def _importe_del_gasto(importe):
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        raise ValueError("Escribí cuánto es por mes.")
+    if not 0 < importe <= SALIDA_DE_CAJA_MAXIMA:
+        raise ValueError("El gasto tiene que ser más que cero (y no disparatado).")
+    return importe
+
+
+def anotar_gasto_fijo(concepto, importe, mes=None):
+    """Desde ese mes (este, si no se dice) en adelante. (ok, texto)."""
+    exigir_nivel("admin", "anotar un gasto fijo")
+    concepto = re.sub(r"\s+", " ", str(concepto or "")).strip()[:80]
+    if not concepto:
+        return False, "Escribí qué es (alquiler, luz, sueldos…)."
+    try:
+        importe = _importe_del_gasto(importe)
+    except ValueError as e:
+        return False, str(e)
+    mes = mes or hoy_aca().strftime("%Y-%m")
+    with db_lock:
+        c.execute("INSERT INTO gastos_fijos (concepto, importe, desde, usuario) VALUES (?, ?, ?, ?)",
+                  (concepto, importe, mes, obtener_usuario_actual()))
+        anotar_cambio("anotó un gasto fijo", "configuración", c.lastrowid,
+                      despues={"concepto": concepto, "importe": importe, "desde": mes})
+        conn.commit()
+    return True, f"💸 {concepto}: ${miles(importe, 0)} por mes, desde {nombre_del_mes(mes)}."
+
+
+def cambiar_gasto_fijo(gasto_id, importe, mes=None):
+    """El importe nuevo vale desde ese mes: el de antes queda para los meses anteriores. (ok,
+    texto)."""
+    exigir_nivel("admin", "cambiar un gasto fijo")
+    try:
+        importe = _importe_del_gasto(importe)
+    except ValueError as e:
+        return False, str(e)
+    mes = mes or hoy_aca().strftime("%Y-%m")
+    with db_lock, transaccion():
+        g = c.execute("SELECT * FROM gastos_fijos WHERE id = ? AND (hasta IS NULL OR hasta >= ?)",
+                      (int(gasto_id), mes)).fetchone()
+        if not g:
+            return False, "Ese gasto ya no está."
+        if abs(float(g["importe"]) - importe) < 0.005:
+            return False, "Ya era ese importe."
+        if g["desde"] >= mes:
+            c.execute("UPDATE gastos_fijos SET importe = ? WHERE id = ?", (importe, g["id"]))
+        else:
+            c.execute("UPDATE gastos_fijos SET hasta = ? WHERE id = ?", (mes_anterior(mes), g["id"]))
+            c.execute("INSERT INTO gastos_fijos (concepto, importe, desde, hasta, usuario) "
+                      "VALUES (?, ?, ?, ?, ?)",
+                      (g["concepto"], importe, mes, g["hasta"], obtener_usuario_actual()))
+        anotar_cambio("cambió un gasto fijo", "configuración", g["id"],
+                      antes=float(g["importe"]), despues=importe)
+    return True, f"💸 {g['concepto']}: ${miles(importe, 0)} por mes desde {nombre_del_mes(mes)}."
+
+
+def sacar_gasto_fijo(gasto_id, mes=None):
+    """Deja de contar desde ese mes (los anteriores lo siguen teniendo). (ok, texto)."""
+    exigir_nivel("admin", "sacar un gasto fijo")
+    mes = mes or hoy_aca().strftime("%Y-%m")
+    with db_lock, transaccion():
+        g = c.execute("SELECT * FROM gastos_fijos WHERE id = ? AND (hasta IS NULL OR hasta >= ?)",
+                      (int(gasto_id), mes)).fetchone()
+        if not g:
+            return False, "Ese gasto ya no está."
+        if g["desde"] >= mes:
+            c.execute("DELETE FROM gastos_fijos WHERE id = ?", (g["id"],))
+        else:
+            c.execute("UPDATE gastos_fijos SET hasta = ? WHERE id = ?", (mes_anterior(mes), g["id"]))
+        anotar_cambio("sacó un gasto fijo", "configuración", g["id"],
+                      antes={"concepto": g["concepto"], "importe": g["importe"]})
+    return True, f"💸 {g['concepto']}: ya no cuenta desde {nombre_del_mes(mes)}."
+
+
+def anotar_gasto_fijo_y_avisar():
+    """«➕ Anotar» de los gastos fijos (va como on_click): lee los campos y, si anotó, los vacía."""
+    try:
+        ok, texto = anotar_gasto_fijo(st.session_state.get("gasto_fijo_concepto"),
+                                      st.session_state.get("gasto_fijo_importe"))
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    if ok:
+        st.session_state.pop("gasto_fijo_concepto", None)
+        st.session_state.pop("gasto_fijo_importe", None)
+    avisar("success" if ok else "warning", texto)
+
+
+def cambiar_gasto_fijo_y_avisar(gasto_id, clave_del_campo):
+    """Al cambiar el importe de un gasto fijo (va como on_change)."""
+    try:
+        ok, texto = cambiar_gasto_fijo(gasto_id, st.session_state.get(clave_del_campo))
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
+def sacar_gasto_fijo_y_avisar(gasto_id):
+    """«🗑️» de un gasto fijo (va como on_click)."""
+    try:
+        ok, texto = sacar_gasto_fijo(gasto_id)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
 def cierre_del_mes(mes, hoy=None):
     """Todo lo del mes (el de ahora, hasta hoy): dict con desde, hasta, total, ventas, por_forma
     [(forma, total)], devuelto, señas (entraron, devueltas, descontadas), anuladas, ganancia e
@@ -3616,7 +3743,15 @@ def cierre_del_mes(mes, hoy=None):
     anterior = round(sum(x["Vendido"] for x in ventas_por_vendedor(
         anterior_hasta.replace(day=1).isoformat(), anterior_hasta.isoformat())), 2)
     mejor = max(por_dia.items(), key=lambda x: x[1]) if por_dia else None
+    # LO QUE QUEDÓ (ver «LOS GASTOS FIJOS Y LO QUE QUEDÓ»): la ganancia de lo vendido, menos los
+    # gastos de la caja y los fijos del mes.
+    gastos_fijos = gastos_fijos_del_mes(mes)
+    total_fijos = round(sum(g["importe"] for g in gastos_fijos), 2)
+    gastos_de_caja = round(sum(x for t, _n, x in salidas if t == TIPOS_DE_SALIDA_DE_CAJA[0]), 2)
     return {"mes": mes, "desde": desde, "hasta": hasta,
+            "gastos_fijos": [(g["concepto"], g["importe"]) for g in gastos_fijos],
+            "total_gastos_fijos": total_fijos, "gastos_de_caja": gastos_de_caja,
+            "resultado": round(suma["ganancia"] - gastos_de_caja - total_fijos, 2),
             **{k: round(v, 2) for k, v in suma.items()}, **cuentas,
             "por_forma": sorted(((f, round(t, 2)) for f, t in por_forma.items() if round(t, 2)),
                                 key=lambda x: -x[1]),
@@ -3642,6 +3777,10 @@ def texto_del_cierre_del_mes(cierre, con_ganancia=False):
         r.append(f"🏅 Mejor día: {d[8:10]}/{d[5:7]} con {plata(t)}")
     if con_ganancia and cierre["items_con_costo"]:
         r.append(f"💰 Ganancia estimada: {plata(cierre['ganancia'])} (de lo que tiene costo)")
+        if cierre["total_gastos_fijos"] or cierre["gastos_de_caja"]:
+            r.append(f"💸 Gastos: {plata(cierre['gastos_de_caja'])} de la caja y "
+                     f"{plata(cierre['total_gastos_fijos'])} fijos")
+            r.append(f"🧾 Lo que quedó: {plata(cierre['resultado'])}")
     if cierre["total_devuelto"]:
         r.append(f"↩️ Devuelto: {plata(cierre['total_devuelto'])}")
     if cierre["total_senas"] or cierre["senas_descontadas"]:
@@ -3674,8 +3813,10 @@ def excel_del_cierre_del_mes(mes, hoy=None, con_ganancia=False):
            ("Señas devueltas", cierre["total_senas_devueltas"]),
            ("Salidas de caja", cierre["total_salidas"]), ("Anuladas", cierre["anuladas"]),
            ("Mes anterior (vendido)", cierre["anterior"])]
-        + ([("Ganancia estimada (de lo que tiene costo)", cierre["ganancia"])]
-           if con_ganancia else []))]
+        + ([("Ganancia estimada (de lo que tiene costo)", cierre["ganancia"]),
+            ("Gastos de la caja", cierre["gastos_de_caja"]),
+            ("Gastos fijos", cierre["total_gastos_fijos"]),
+            ("Lo que quedó", cierre["resultado"])] if con_ganancia else []))]
     ventas = [{"Día": dia_de_aca(f["cuando"]), "#": f["id"], "Vendió": f["usuario"] or "",
                "Cliente": f["cliente"] or f["cuenta"] or "", "Pago": f["forma_de_pago"] or "",
                "Cuotas": f["cuotas"] or 1, "Descuento %": f["descuento"] or 0,
@@ -3712,7 +3853,8 @@ def excel_del_cierre_del_mes(mes, hoy=None, con_ganancia=False):
                      "Quién": d["usuario"] or ""}
                     for dia in _dias_del_rango(desde, hasta) for d in devoluciones_del_dia(dia)]
     return {"Resumen": resumen, "Ventas": ventas, "Salidas": salidas, "Señas": senas,
-            "Arqueos": arqueos, "Devoluciones": devoluciones}
+            "Arqueos": arqueos, "Devoluciones": devoluciones,
+            "Gastos fijos": [{"Qué": g, "Por mes": x} for g, x in cierre["gastos_fijos"]]}
 
 
 def cierre_del_mes_para_descargar(mes, con_ganancia=False):

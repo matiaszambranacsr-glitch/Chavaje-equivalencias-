@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("gastos_fijos", "Anotar los gastos fijos y ver lo que quedó en el mes",
+     "gastos fijos gasto alquiler luz gas sueldos sueldo contador impuestos lo que quedo "
+     "ganancia neta resultado",
+     "En la caja, abrí «📋 Ventas y cierre de caja» y tocá «💸 Gastos fijos»: anotá qué es y cuánto "
+     "por mes (vale todos los meses hasta que lo saques con 🗑️). En «📅 Cierre del mes» sale "
+     "«🧾 Lo que quedó»: la ganancia menos los gastos de la caja y los fijos. Lo que se paga "
+     "desde el cajón va como salida de caja, no como fijo. Solo el administrador.",
+     "💵 Caja", "admin"),
     ("trato_especial", "Darle a un taller otro recargo o su descuento siempre",
      "trato especial taller preferencial propio recargo descuento contado paga en el momento "
      "arreglo condiciones",

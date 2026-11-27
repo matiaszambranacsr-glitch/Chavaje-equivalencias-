@@ -1461,6 +1461,24 @@ def probar():
               if x.proto.label == "⬇️ El mes en Excel"], [e.value for e in _adm_mes.exception]),
             (["💵 Entró", "📈 Mes anterior"], True, ["⬇️ El mes en Excel"], []))
     _adm_mes.session_state["pop_cierre_del_mes"] = False
+    # LOS GASTOS FIJOS, al lado: se anota uno, se le cambia el importe y se saca.
+    def _con_gastos():
+        _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+        _adm_mes.session_state["pop_gastos_fijos"] = True
+    _con_gastos()
+    _adm_mes.run()
+    _adm_mes.text_input(key="gasto_fijo_concepto").set_value("Alquiler")
+    _adm_mes.number_input(key="gasto_fijo_importe").set_value(300000.0)
+    _con_gastos()
+    _adm_mes.button(key="gasto_fijo_anotar").click().run()
+    _gf_s = ns["gastos_fijos_del_mes"]()
+    esperar("el gasto fijo, anotado desde la caja",
+            ([(g["concepto"], g["importe"]) for g in _gf_s], [e.value for e in _adm_mes.exception]),
+            ([("Alquiler", 300000.0)], []))
+    _con_gastos()
+    _adm_mes.button(key=f"gasto_fijo_sacar_{_gf_s[0]['id']}").click().run()
+    esperar("y sacado", ns["gastos_fijos_del_mes"](), [])
+    _adm_mes.session_state["pop_gastos_fijos"] = False
     # EL RECARGO POR CUOTAS se pone en Administrar → 💬 Mensajería y cobros.
     _adm_mes.session_state["pagina_actual"] = "🗂️ Administrar"
     _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][2]

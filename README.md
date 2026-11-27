@@ -7946,6 +7946,20 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 💸 Los gastos fijos y lo que quedó en el mes
+
+El cierre del mes decía lo que entró y la ganancia de lo vendido, pero no lo que quedó de verdad:
+faltaban el alquiler, la luz, los sueldos, el contador, que se pagan por fuera de la caja. En 💵
+Caja → «📋 Ventas y cierre de caja», **«💸 Gastos fijos»** (solo el administrador) los anota una
+vez, con lo que se paga por mes: valen desde ese mes hasta que se sacan (🗑️). Cambiar un importe
+vale desde este mes —los meses de antes siguen con el viejo— y sacarlo deja de contar desde este
+mes. El cierre del mes dice **«🧾 Lo que quedó»**: la ganancia estimada (de lo que tiene costo),
+menos los gastos de la caja (las salidas «🧾 Gasto») y los fijos; también en el WhatsApp y en una
+hoja del Excel. Lo que se paga desde el cajón va como salida de caja, no como fijo: si no, se
+contaría dos veces (`gastos_fijos_del_mes()`, `anotar_gasto_fijo()`, `cambiar_gasto_fijo()` y
+`sacar_gasto_fijo()`, en `logica/ventas.py`; lo controlan `pruebas_de_la_caja.py` y
+`pruebas_de_la_sesion.py`).
+
 ## 🤝 El trato especial de una cuenta
 
 El taller que compra mucho tiene otro arreglo —menos recargo en cuotas, o su descuento aunque

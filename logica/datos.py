@@ -3156,6 +3156,18 @@ def _esquema_ventas(c):
     )""")
     # EL CAMBIO CON QUE SE ABRIÓ LA CAJA, uno por día de acá. Ver «EL CAMBIO DE APERTURA Y LOS
     # BILLETES» en logica/ventas.py.
+    # LOS GASTOS FIJOS (ver esa sección en logica/ventas.py): alquiler, luz, sueldos. Valen
+    # desde un mes (AAAA-MM) hasta otro (o siempre); cambiar uno cierra el viejo y abre otro, así
+    # los meses de antes no se mueven.
+    c.execute("""CREATE TABLE IF NOT EXISTS gastos_fijos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        concepto TEXT NOT NULL,
+        importe REAL NOT NULL,
+        desde TEXT NOT NULL,
+        hasta TEXT,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
     # LAS SEÑAS (ver esa sección en logica/ventas.py): lo que deja el cliente a cuenta de algo
     # que encarga. Entra a la caja el día que se deja; al retirar se descuenta de la venta.
     c.execute("""CREATE TABLE IF NOT EXISTS senas (

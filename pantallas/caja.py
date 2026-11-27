@@ -383,6 +383,16 @@ if pagina == PAGINAS[11]:
                             grafico_de_barras([d for d, _n, _t in _cm["cuando"]["por_dia"]],
                                               [n for _d, n, _t in _cm["cuando"]["por_dia"]],
                                               "Día", "Ventas", alto=180)
+                        # LO QUE QUEDÓ (ver «LOS GASTOS FIJOS Y LO QUE QUEDÓ»).
+                        if _cm["items_con_costo"]:
+                            st.markdown(
+                                f"**🧾 Lo que quedó: \\${miles(_cm['resultado'], 0)}** (ganancia "
+                                f"estimada \\${miles(_cm['ganancia'], 0)}, menos "
+                                f"\\${miles(_cm['gastos_de_caja'], 0)} de gastos de la caja y "
+                                f"\\${miles(_cm['total_gastos_fijos'], 0)} fijos)",
+                                help="La ganancia es de lo que tiene costo cargado: "
+                                     f"{miles(_cm['items_con_costo'])} de {miles(_cm['items'])} "
+                                     "cosas vendidas. Los fijos se anotan en «💸 Gastos fijos».")
                         _texto_cm = texto_del_cierre_del_mes(_cm, con_ganancia=True)
                         _cm1, _cm2 = cols([1, 1])
                         _cm1.link_button("📲 Mandarlo por WhatsApp",
@@ -395,6 +405,37 @@ if pagina == PAGINAS[11]:
                                              key="cierre_mes_excel", width="stretch",
                                              mime="application/vnd.openxmlformats-"
                                                   "officedocument.spreadsheetml.sheet")
+                # LOS GASTOS FIJOS (ver esa sección en logica/ventas.py): para «lo que quedó».
+                _pop_gf = st.popover("💸 Gastos fijos", key="pop_gastos_fijos", width="stretch",
+                                     on_change="rerun")
+                if _pop_gf.open:
+                    with _pop_gf:
+                        st.caption("Lo que se paga todos los meses por fuera de la caja (alquiler, "
+                                   "luz, sueldos, contador). Lo que se paga desde el cajón va "
+                                   "como salida de caja, no acá.")
+                        _gf = gastos_fijos_del_mes()
+                        for _g in _gf:
+                            _gf1, _gf2, _gf3 = cols([3, 2, 1], abajo=True,
+                                                    apilar_en_celular=False)
+                            _gf1.markdown(texto_para_markdown(_g["concepto"]))
+                            _clave_gf = f"gasto_fijo_{_g['id']}_{_g['importe']}"
+                            _gf2.number_input("Por mes ($)", min_value=0.0, step=1000.0,
+                                              value=float(_g["importe"]), key=_clave_gf,
+                                              label_visibility="collapsed",
+                                              on_change=cambiar_gasto_fijo_y_avisar,
+                                              args=(_g["id"], _clave_gf))
+                            _gf3.button("🗑️", key=f"gasto_fijo_sacar_{_g['id']}",
+                                        width="stretch", on_click=sacar_gasto_fijo_y_avisar,
+                                        args=(_g["id"],), help="Deja de contar desde este mes.")
+                        if _gf:
+                            st.caption(f"Total por mes: \\${miles(sum(g['importe'] for g in _gf), 0)}")
+                        _gn1, _gn2 = cols([3, 2])
+                        _gn1.text_input("Qué es:", key="gasto_fijo_concepto",
+                                        placeholder="Ej: alquiler")
+                        _gn2.number_input("Por mes ($):", min_value=0.0, step=1000.0, value=None,
+                                          key="gasto_fijo_importe", placeholder="Ej: 350000")
+                        st.button("➕ Anotar", key="gasto_fijo_anotar", width="stretch",
+                                  on_click=anotar_gasto_fijo_y_avisar)
                 _pop_mes = st.popover("🏆 Ventas y comisiones por vendedor",
                                       key="pop_mes_por_vendedor",
                                       width="stretch", on_change="rerun")

@@ -609,6 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("💸 Gastos fijos y lo que quedó: anotás alquiler, luz, sueldos (valen todos los meses hasta que los saques) y el cierre del mes muestra la ganancia estimada menos los gastos de la caja y los fijos.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🤝 Trato especial por taller: en la configuración de cada cuenta, su propio recargo por cuotas (pisa la tabla general) y «su descuento también cuando paga en el momento» (la caja ya lo trae puesto al cobrarle).", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("❌ Cheque rechazado: en «🏦 Cheques para depositar», los depositados hace poco tienen «❌» (vuelve a la cuenta del taller, con lo que cobró el banco, y sale el WhatsApp para avisarle) y «↩️» por si se marcó depositado por error.", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("🪟 Ya no se cierran solos: «📋 Ventas y cierre de caja» al cobrar una venta, «🧩 Armar el presupuesto con lo que pide» al llegar otro mensaje, «📲 Cobrar lo vencido» al registrar un pago y «📋 Presupuestos para seguir» al marcar uno. Y el cambio de apertura se anota con un toque: «🪙 El mismo que ayer».", "💵 Caja"),
