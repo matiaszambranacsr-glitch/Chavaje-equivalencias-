@@ -1788,6 +1788,10 @@ def _esquema_gestion(c):
         anulado INTEGER DEFAULT 0
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_movimientos_cuenta ON movimientos_de_cuenta(mecanico_id)")
+    # Cuándo se depositó un cheque recibido (ver «LOS CHEQUES PARA DEPOSITAR» en
+    # logica/mecanico.py). Sin dato, todavía está en el cajón.
+    if "cheque_depositado" not in [f[1] for f in c.execute("PRAGMA table_info(movimientos_de_cuenta)")]:
+        c.execute("ALTER TABLE movimientos_de_cuenta ADD COLUMN cheque_depositado TEXT")
     # LOS PERMISOS PARA PASAR EL LÍMITE DE CRÉDITO: el que atiende lo pide, con un motivo, y solo
     # un administrador lo da (ver «PASAR EL LÍMITE CON PERMISO» en logica/mecanico.py). Lo que se
     # vendió gracias a uno queda con su número en el cargo o en el pedido.

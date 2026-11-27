@@ -56,6 +56,7 @@ TIEMPOS_TECNICOS = {
     "HORAS_CONTEXTO_FRESCO": "fuente de afuera",
     "MINUTOS_ANTES_DE_REINTENTAR": "fuente de afuera",
     "HORAS_DE_LAS_TASAS": "fuente de afuera (BCRA)",
+    "DIAS_PARA_DEPOSITAR_UN_CHEQUE": "ley de cheques: 30 días desde la fecha de pago",
     "DIAS_QUE_SE_ABRE_SIN_HORARIO": "no es un plazo: los días de la semana (lunes a sábado) "
                                     "del objetivo del mes; los cambia el horario de atención",
 }

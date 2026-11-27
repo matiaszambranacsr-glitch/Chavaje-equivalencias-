@@ -1498,6 +1498,16 @@ def probar():
     _adm_mes.button(key=f"cc_recibo_listo_{_cta_rec}").click().run()
     esperar("«Listo» lo saca", any(m.value.startswith("**🧾 Recibo N°") for m in _adm_mes.markdown),
             False)
+    # LOS CHEQUES PARA DEPOSITAR, en la misma pantalla: se marca uno y sale.
+    ns["registrar_pago_de_cuenta"](_cta_rec, 900, "Cheque",
+                                   cheque_fecha=ns["hoy_aca"]().isoformat())
+    _ch_id = ns["cheques_sin_depositar"]()[0]["id"]
+    _adm_mes.session_state["exp_cheques_depositar"] = True
+    _adm_mes.run()
+    _adm_mes.session_state["exp_cheques_depositar"] = True
+    _adm_mes.button(key=f"cheque_depositado_{_ch_id}").click().run()
+    esperar("el cheque, depositado desde la pantalla",
+            (ns["cheques_sin_depositar"](), [e.value for e in _adm_mes.exception]), ([], []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

@@ -541,6 +541,25 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/pedidos_al_proveedor", _err)
 
+    # LOS CHEQUES PARA DEPOSITAR (ver esa sección en logica/mecanico.py): el que no se deposita
+    # a tiempo, el banco lo rechaza.
+    try:
+        _cheques = [x for x in cheques_sin_depositar() if x["se_puede"]]
+        if _cheques:
+            _primero = _cheques[0]
+            _urgente = _primero["dias_para_vencer"] <= DIAS_PARA_AVISAR_UN_CHEQUE
+            sumar("alto" if _urgente else "medio",
+                  f"🏦 {len(_cheques)} cheque(s) para depositar "
+                  f"(${miles(sum(x['importe'] for x in _cheques), 0)})",
+                  ("Uno ya venció" if _primero["vencido"] else
+                   f"El de {_primero['cuenta']} vence el {_primero['vence'][8:10]}/"
+                   f"{_primero['vence'][5:7]}")
+                  + f": un cheque se deposita dentro de los {DIAS_PARA_DEPOSITAR_UN_CHEQUE} "
+                    "días de su fecha. Al depositarlo, «✅ Depositado» en «🏦 Cheques para "
+                    "depositar».", miga_hasta("Cuentas corrientes"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/cheques", _err)
+
     # LAS SEÑAS SIN RETIRAR (ver «LAS SEÑAS» en logica/ventas.py): plata del cliente que nadie
     # le reclamó ni le devolvió, y lo encargado ocupando lugar.
     try:

@@ -7946,6 +7946,20 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🏦 Los cheques para depositar
+
+El pago con cheque quedaba en la cuenta del taller y su fecha en «cheques en cartera», pero nadie
+veía, juntos, los de todas las cuentas: cuáles ya se podían depositar y hasta cuándo. Un cheque
+se deposita dentro de los 30 días de su fecha de pago (`DIAS_PARA_DEPOSITAR_UN_CHEQUE`, la ley de
+cheques); pasado eso el banco lo rechaza y hay que volver a cobrárselo al taller. En 🗂️
+Administrar → 💳 Cuentas corrientes, **«🏦 Cheques para depositar»** los muestra todos, el que
+vence primero arriba —«🔴 venció», «vence el 12/12» o, el diferido, «se deposita desde el…»—,
+con **«✅»** para marcar el que ya se depositó (queda en el registro de cambios). La campanita
+avisa los que ya se pueden depositar, y fuerte si a alguno le faltan
+`DIAS_PARA_AVISAR_UN_CHEQUE` días o menos (5, se cambia en «⏱️ Los tiempos de la página») o
+ya venció (`cheques_sin_depositar()` y `marcar_cheque_depositado()`, en `logica/mecanico.py`; lo
+controlan `pruebas_de_las_cuentas.py` y `pruebas_de_la_sesion.py`).
+
 ## 📅 El cierre del mes, los arqueos por cajero y cuándo se vende
 
 El cierre de caja es de un día; para el mes —lo que se le pasa al contador, lo que mira el dueño

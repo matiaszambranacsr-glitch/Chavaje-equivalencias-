@@ -283,6 +283,29 @@ def probar(L):
              "a favor" in ns["texto_del_recibo"](_rec_ch)), (True, _rec_ch["saldo_despues"] < 0))
     esperar("los últimos pagos, el más nuevo primero",
             [p_["importe"] for p_ in ns["pagos_de_la_cuenta"](tp, 2)], [100000.0, 1500.0])
+
+    # LOS CHEQUES PARA DEPOSITAR (ver esa sección en logica/mecanico.py): de todas las cuentas,
+    # el que vence primero arriba; vencen a los 30 días de su fecha; «Depositado» los saca.
+    from datetime import timedelta as _td
+    _hoy = ns["hoy_aca"]()
+    for _dias, _imp in ((3, 1000), (28, 2000), (40, 3000)):
+        ns["registrar_pago_de_cuenta"](tp, _imp, "Cheque",
+                                       cheque_fecha=(_hoy - _td(days=_dias)).isoformat())
+    _ch = ns["cheques_sin_depositar"]()
+    esperar("todos, el que vence primero arriba, con lo que le falta",
+            [(x["importe"], x["se_puede"], x["dias_para_vencer"], x["vencido"]) for x in _ch],
+            [(3000.0, True, -10, True), (2000.0, True, 2, False), (1000.0, True, 27, False),
+             (100000.0, False, (ns["date"](2030, 1, 15) - _hoy).days + 30, False)])
+    ns["invalidar_salud"]()
+    _aviso_ch = [p_ for p_ in ns["diagnostico_de_salud"]() if "para depositar" in p_["titulo"]]
+    esperar("la campanita: los que ya se pueden, fuerte porque uno venció",
+            [(p_["nivel"], p_["titulo"], p_["detalle"].startswith("Uno ya venció"))
+             for p_ in _aviso_ch], [("alto", "🏦 3 cheque(s) para depositar ($6.000)", True)])
+    _id_b = _ch[1]["id"]
+    esperar("depositado, sale; dos veces, no",
+            (ns["marcar_cheque_depositado"](_id_b)[0], ns["marcar_cheque_depositado"](_id_b)[0],
+             [x["importe"] for x in ns["cheques_sin_depositar"]()]),
+            (True, False, [3000.0, 1000.0, 100000.0]))
     return fallas
 
 

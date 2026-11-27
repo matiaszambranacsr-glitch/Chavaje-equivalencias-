@@ -435,6 +435,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("cheques", "Ver los cheques para depositar",
+     "cheque cheques depositar deposito banco cartera diferido vence vencimiento rechazado "
+     "30 dias",
+     "En 🗂️ Administrar → 💳 Cuentas corrientes, «🏦 Cheques para depositar»: los de todas las "
+     "cuentas, el que vence primero arriba (se depositan dentro de los 30 días de su fecha). Al "
+     "depositarlo, tocá «✅». La campanita avisa los que ya se pueden depositar.",
+     "🗂️ Administrar", "empleado"),
     ("cierre_mes", "Ver el cierre del mes (y a qué hora se vende más)",
      "cierre mes mensual resumen del mes contador excel arqueos faltante sobrante cajero "
      "cajera hora horario dia semana cuando se vende mas pico",

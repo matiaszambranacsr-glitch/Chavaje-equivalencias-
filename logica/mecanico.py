@@ -1842,6 +1842,63 @@ def recibo_para_descargar(movimiento_id):
     return lambda: pdf_del_recibo(recibo, en_ticket)
 
 
+# LOS CHEQUES PARA DEPOSITAR: el pago con cheque quedaba anotado en la cuenta del taller y la
+# fecha en «cheques en cartera», pero nadie veía, juntos, los de todas las cuentas: cuáles ya se
+# pueden depositar y hasta cuándo. Un cheque se deposita dentro de los 30 días de su fecha de
+# pago (ley de cheques); pasado eso, el banco lo rechaza y hay que ir a cobrárselo al taller de
+# nuevo. Ahora están todos juntos, el que vence primero arriba, con «✅ Depositado», y la
+# campanita avisa los que ya se pueden depositar (fuerte si vencen en DIAS_PARA_AVISAR_UN_CHEQUE).
+DIAS_PARA_DEPOSITAR_UN_CHEQUE = 30
+DIAS_PARA_AVISAR_UN_CHEQUE = 5
+
+
+def cheques_sin_depositar(hoy=None):
+    """[dict] los cheques recibidos (pagos sin anular) que no se depositaron: id, cuenta,
+    importe, fecha (la del cheque), vence (la fecha más DIAS_PARA_DEPOSITAR_UN_CHEQUE), se_puede
+    (ya llegó su fecha), dias_para_vencer y vencido. El que vence primero arriba."""
+    hoy = hoy or hoy_aca()
+    salida = []
+    for f in c.execute("""SELECT m.id, k.nombre AS cuenta, -m.importe AS importe, m.cheque_fecha,
+                                 m.concepto
+                          FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
+                          WHERE m.medio = 'Cheque' AND m.anulado = 0 AND m.importe < 0
+                            AND m.cheque_fecha IS NOT NULL AND m.cheque_depositado IS NULL
+                          ORDER BY m.cheque_fecha, m.id"""):
+        try:
+            fecha = date.fromisoformat(str(f["cheque_fecha"])[:10])
+        except ValueError:
+            continue
+        vence = fecha + timedelta(days=DIAS_PARA_DEPOSITAR_UN_CHEQUE)
+        salida.append({"id": f["id"], "cuenta": f["cuenta"], "importe": round(f["importe"], 2),
+                       "fecha": fecha.isoformat(), "vence": vence.isoformat(),
+                       "se_puede": fecha <= hoy, "dias_para_vencer": (vence - hoy).days,
+                       "vencido": vence < hoy, "concepto": f["concepto"] or ""})
+    return salida
+
+
+def marcar_cheque_depositado(movimiento_id):
+    """«✅ Depositado» (ok, texto). Queda en el registro de cambios."""
+    exigir_nivel("empleado", "marcar un cheque como depositado")
+    with db_lock:
+        c.execute("""UPDATE movimientos_de_cuenta SET cheque_depositado = datetime('now')
+                     WHERE id = ? AND medio = 'Cheque' AND anulado = 0
+                       AND cheque_depositado IS NULL""", (int(movimiento_id),))
+        if c.rowcount != 1:
+            return False, "Ese cheque ya estaba depositado (o no existe)."
+        anotar_cambio("depositó un cheque", "movimiento", movimiento_id)
+        conn.commit()
+    return True, "🏦 Cheque marcado como depositado."
+
+
+def marcar_cheque_y_avisar(movimiento_id):
+    """«✅ Depositado» (va como on_click)."""
+    try:
+        ok, texto = marcar_cheque_depositado(movimiento_id)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
 def anular_movimiento_de_cuenta(movimiento_id):
     """No se borra: queda tachado («ANULADO») para que se vea qué pasó. (ok, texto).
 

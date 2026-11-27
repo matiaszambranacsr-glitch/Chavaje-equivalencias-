@@ -1637,6 +1637,37 @@ if pagina == PAGINAS[3]:
                               for r in _resumen_cc], width="stretch", hide_index=True,
                              height=min(420, 38 * (len(_resumen_cc) + 1)))
 
+                # LOS CHEQUES PARA DEPOSITAR (ver esa sección en logica/mecanico.py), de todas
+                # las cuentas. Título fijo: con la cuenta adentro no se cierra al marcar uno.
+                _exp_cheques = st.expander("🏦 Cheques para depositar", key="exp_cheques_depositar",
+                                           on_change="rerun")
+                if _exp_cheques.open:
+                    with _exp_cheques:
+                        _cheques_cc = cheques_sin_depositar()
+                        if not _cheques_cc:
+                            st.caption("No hay cheques sin depositar.")
+                        _ya_cc = [x for x in _cheques_cc if x["se_puede"]]
+                        if _ya_cc:
+                            st.caption(f"{miles(len(_ya_cc))} para depositar ya, por "
+                                       f"\\${miles(sum(x['importe'] for x in _ya_cc), 0)}. Se "
+                                       f"depositan dentro de los {DIAS_PARA_DEPOSITAR_UN_CHEQUE} "
+                                       "días de su fecha.")
+                        for _ch in _cheques_cc:
+                            _chq1, _chq2 = cols([4, 1], abajo=True, apilar_en_celular=False)
+                            _estado_ch = ("🔴 venció" if _ch["vencido"] else
+                                          f"vence el {_ch['vence'][8:10]}/{_ch['vence'][5:7]}"
+                                          if _ch["se_puede"] else
+                                          f"se deposita desde el {_ch['fecha'][8:10]}/"
+                                          f"{_ch['fecha'][5:7]}")
+                            _chq1.caption(f"**{texto_para_markdown(_ch['cuenta'])}** · "
+                                          f"\\${miles(_ch['importe'], 0)} · {_estado_ch}"
+                                          + (f" · {texto_para_markdown(_ch['concepto'])}"
+                                             if _ch["concepto"] and not _ch["concepto"]
+                                             .lower().startswith("pago (") else ""))
+                            _chq2.button("✅", key=f"cheque_depositado_{_ch['id']}",
+                                         help="Ya lo depositaste.", width="stretch",
+                                         on_click=marcar_cheque_y_avisar, args=(_ch["id"],))
+
                 # COBRAR LO VENCIDO (ver cuentas_para_recordar()): cada una con su WhatsApp ya
                 # escrito. Perezoso: arma los mensajes recién al abrirlo.
                 _vencidas_cc = [r["Vencido"] for r in _resumen_cc if (r["Vencido"] or 0) >= 1]
