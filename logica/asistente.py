@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("trato_especial", "Darle a un taller otro recargo o su descuento siempre",
+     "trato especial taller preferencial propio recargo descuento contado paga en el momento "
+     "arreglo condiciones",
+     "En 🗂️ Administrar → 💳 Cuentas corrientes, elegí la cuenta y abrí «⚙️ Configuración de la "
+     "cuenta» → «🤝 Trato especial»: «💳 Su propio recargo por cuotas» (pisa la tabla general) y "
+     "«🏷️ Su descuento también cuando paga en el momento» (la caja lo trae puesto). «💾 Guardar "
+     "el trato».",
+     "🗂️ Administrar", "admin"),
     ("cheques", "Ver los cheques para depositar",
      "cheque cheques depositar deposito banco cartera diferido vence vencimiento rechazado "
      "rechazaron rebotado reboto sin fondos 30 dias",

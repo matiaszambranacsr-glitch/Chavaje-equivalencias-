@@ -2035,6 +2035,40 @@ if pagina == PAGINAS[3]:
                     avisar("success", "Configuración guardada.")
                     st.rerun()
 
+                # EL TRATO ESPECIAL (ver esa sección en logica/mecanico.py): su propio recargo por
+                # cuotas y su descuento también pagando en el momento. Las claves llevan lo
+                # guardado: si otro lo cambia, los campos lo traen.
+                st.markdown("**🤝 Trato especial**")
+                _trato = trato_de_la_cuenta(_mid)
+                _clave_propio = f"trato_propio_{_mid}_{_trato['recargos'] is not None}"
+                st.checkbox("💳 Su propio recargo por cuotas", value=_trato["recargos"] is not None,
+                            key=_clave_propio,
+                            help="Pisa la tabla general al cobrarle con crédito en cuotas (en 0, "
+                                 "sin interés).")
+                _claves_trato = {}
+                if st.session_state.get(_clave_propio):
+                    _base_trato = (_trato["recargos"] if _trato["recargos"] is not None
+                                   else recargos_por_cuotas(True))
+                    _cuotas_trato = [n for n in CUOTAS_POSIBLES if n > 1]
+                    for _i in range(0, len(_cuotas_trato), 4):
+                        for _col_t, _n in zip(st.columns(4), _cuotas_trato[_i:_i + 4]):
+                            _claves_trato[_n] = f"trato_recargo_{_mid}_{_n}_{_base_trato.get(_n, 0)}"
+                            _col_t.number_input(f"{_n} cuotas (%)", min_value=0.0,
+                                                max_value=RECARGO_MAXIMO, step=1.0,
+                                                value=float(_base_trato.get(_n, 0.0)),
+                                                key=_claves_trato[_n])
+                _clave_contado = f"trato_contado_{_mid}_{_trato['descuento_al_contado']}"
+                # Rótulo fijo: con el porcentaje adentro, cambiar el descuento de arriba lo
+                # destildaba (el rótulo es parte de la identidad del campo).
+                st.checkbox("🏷️ Su descuento también cuando paga en el momento",
+                            value=_trato["descuento_al_contado"],
+                            key=_clave_contado,
+                            help="Al cobrarle una venta en la caja, el descuento ya viene puesto. "
+                                 "Sin tildar, su descuento vale solo a cuenta.")
+                st.button("💾 Guardar el trato", key=f"trato_guardar_{_mid}",
+                          on_click=guardar_trato_y_avisar,
+                          args=(_mid, _clave_propio, _claves_trato, _clave_contado))
+
                 # CÓMO ESTÁ EN EL SISTEMA FINANCIERO: ver situacion_en_el_bcra(). Sirve para
                 # decidir el límite: un taller en situación 3 o peor con algún banco no es
                 # alguien a quien fiarle mucho.

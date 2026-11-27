@@ -367,7 +367,9 @@ if pagina == PAGINAS[9]:
             _total_vta = sum(x["cantidad"] * x["precio"] for x in venta_items)
             st.markdown(f"### Total: ${miles(_total_vta, 0)}")
             # «¿Y en cuotas?»: con los recargos anotados (ver «EL RECARGO POR CUOTAS»).
-            _cuotas_vta = texto_de_las_cuotas(_total_vta, de_cuenta=bool(cuenta_elegida()))
+            _cta_cuotas = cuenta_elegida()
+            _cuotas_vta = texto_de_las_cuotas(_total_vta, de_cuenta=bool(_cta_cuotas),
+                                              mecanico_id=(_cta_cuotas or {}).get("id"))
             if _cuotas_vta:
                 st.caption(_cuotas_vta)
             # LA VENTA INCOMPLETA, como avisa «Se llevó»: antes de que se vaya el cliente.

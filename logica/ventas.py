@@ -2134,19 +2134,29 @@ def recargos_por_cuotas(de_cuenta=False, la_suya=False):
     return salida
 
 
-def recargo_por_cuotas(forma_de_pago, cuotas, de_cuenta=False):
+def recargos_que_le_tocan(de_cuenta=False, mecanico_id=None):
+    """La tabla de recargos de esa venta: la propia de la cuenta si tiene trato especial (ver
+    «EL TRATO ESPECIAL DE UNA CUENTA»); si no, la de las cuentas o la del mostrador."""
+    if mecanico_id:
+        propios = trato_de_la_cuenta(mecanico_id)["recargos"]
+        if propios is not None:
+            return propios
+    return recargos_por_cuotas(de_cuenta or bool(mecanico_id))
+
+
+def recargo_por_cuotas(forma_de_pago, cuotas, de_cuenta=False, mecanico_id=None):
     """El porcentaje que se le suma a un cobro: solo con crédito y en cuotas que lo tengan. A una
-    cuenta corriente, el de las cuentas (si lo tienen aparte)."""
+    cuenta corriente, el de las cuentas (si lo tienen aparte), o el suyo (trato especial)."""
     if forma_de_pago != "Tarjeta de crédito":
         return 0.0
-    return recargos_por_cuotas(de_cuenta).get(int(cuotas or 1), 0.0)
+    return recargos_que_le_tocan(de_cuenta, mecanico_id).get(int(cuotas or 1), 0.0)
 
 
-def texto_de_las_cuotas(total, de_cuenta=False):
+def texto_de_las_cuotas(total, de_cuenta=False, mecanico_id=None):
     """«💳 3 cuotas de $733 (total $2.200) · 12 cuotas de $208 (…)»: lo que el vendedor le dice
     al cliente que pregunta «¿y en cuotas?», con los recargos anotados (los de las cuentas, si
-    es a una cuenta y las tienen aparte). "" si no hay ninguno."""
-    recargos = recargos_por_cuotas(de_cuenta)
+    es a una cuenta y las tienen aparte, o los de su trato especial). "" si no hay ninguno."""
+    recargos = recargos_que_le_tocan(de_cuenta, mecanico_id)
     if not recargos or not total:
         return ""
     partes = []
@@ -2247,14 +2257,16 @@ def cobrar_venta(venta_id, forma_de_pago, cuotas=1, descuento=0):
         return False, "Las cuotas tienen que ser un número."
     if cuotas not in CUOTAS_POSIBLES:
         return False, "Esa cantidad de cuotas no está."
+    # El de las cuentas corrientes si es a una cuenta, o el suyo (ver «EL RECARGO POR CUOTAS» y
+    # «EL TRATO ESPECIAL DE UNA CUENTA»); y su descuento puede pasar el tope de la caja.
+    _de_cuenta = c.execute("SELECT mecanico_id FROM ventas WHERE id = ?", (venta_id,)).fetchone()
+    _mid = _de_cuenta["mecanico_id"] if _de_cuenta else None
     try:
-        descuento = _descuento_valido(descuento, DESCUENTO_MAXIMO_EN_LA_CAJA)
+        descuento = _descuento_valido(descuento, max(DESCUENTO_MAXIMO_EN_LA_CAJA,
+                                                     descuento_al_cobrarle(_mid)))
     except ValueError as e:
         return False, str(e)
-    # El de las cuentas corrientes si es a una cuenta (ver «EL RECARGO POR CUOTAS»).
-    _de_cuenta = c.execute("SELECT mecanico_id FROM ventas WHERE id = ?", (venta_id,)).fetchone()
-    recargo = recargo_por_cuotas(forma_de_pago, cuotas,
-                                 de_cuenta=bool(_de_cuenta and _de_cuenta["mecanico_id"]))
+    recargo = recargo_por_cuotas(forma_de_pago, cuotas, de_cuenta=bool(_mid), mecanico_id=_mid)
     with db_lock, transaccion():
         # Se marca cobrada SOLO si seguía esperando: dos cajeros con la misma venta en pantalla
         # no la cobran dos veces.

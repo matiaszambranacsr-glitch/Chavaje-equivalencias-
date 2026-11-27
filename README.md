@@ -7946,6 +7946,21 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🤝 El trato especial de una cuenta
+
+El taller que compra mucho tiene otro arreglo —menos recargo en cuotas, o su descuento aunque
+pague en el momento— y la cajera tenía que acordarse de cada uno. En 🗂️ Administrar → 💳
+Cuentas corrientes → «⚙️ Configuración de la cuenta», **«🤝 Trato especial»**: con **«💳 Su
+propio recargo por cuotas»** la cuenta tiene su tabla, que pisa la general (la de las cuentas o
+la del mostrador; la cuota que no tiene, sin interés), y con **«🏷️ Su descuento también cuando
+paga en el momento»** la caja ya trae puesto su descuento al cobrarle una venta (aunque pase el
+tope de descuento de la caja); sin tildar, su descuento vale solo a cuenta, como siempre. Las
+cuotas de 🧾 Ventas y la caja usan su tabla y lo dicen («el de esa cuenta»). Lo cambia el
+administrador y queda en el registro de cambios (`trato_de_la_cuenta()`,
+`guardar_trato_de_la_cuenta()` y `descuento_al_cobrarle()`, en `logica/mecanico.py`, y
+`recargos_que_le_tocan()` en `logica/ventas.py`; lo controlan `pruebas_de_la_caja.py` y
+`pruebas_de_la_sesion.py`).
+
 ## 🪟 Los desplegables que se cerraban solos
 
 Streamlit 1.65 reconoce un desplegable perezoso (los que corren lo de adentro solo abiertos, con

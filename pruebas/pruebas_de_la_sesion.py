@@ -1522,6 +1522,19 @@ def probar():
               if b.label.startswith("📲 Avisarle a Taller Sesión")],
              [e.value for e in _adm_mes.exception]),
             (2, ["📲 Avisarle a Taller Sesión por WhatsApp"], []))
+    # EL TRATO ESPECIAL, en la configuración de la cuenta: su recargo propio y su descuento.
+    _adm_mes.session_state["exp_cheques_depositar"] = False
+    _adm_mes.run()
+    [x for x in _adm_mes.checkbox if (x.key or "").startswith(f"trato_propio_{_cta_rec}_")][0] \
+        .check().run()
+    [x for x in _adm_mes.number_input
+     if (x.key or "").startswith(f"trato_recargo_{_cta_rec}_6_")][0].set_value(4.0)
+    [x for x in _adm_mes.checkbox if (x.key or "").startswith(f"trato_contado_{_cta_rec}_")][0] \
+        .check()
+    _adm_mes.button(key=f"trato_guardar_{_cta_rec}").click().run()
+    esperar("el trato de la cuenta, guardado desde la pantalla",
+            (ns["trato_de_la_cuenta"](_cta_rec), [e.value for e in _adm_mes.exception]),
+            ({"recargos": {6: 4.0}, "descuento_al_contado": True}, []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

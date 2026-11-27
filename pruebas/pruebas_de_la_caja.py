@@ -928,6 +928,37 @@ def probar(L):
     esperar("destildado, otra vez el del mostrador (y la de las cuentas queda guardada)",
             (ns["recargo_por_cuotas"]("Tarjeta de crédito", 3, de_cuenta=True),
              ns["recargos_por_cuotas"](True, la_suya=True)), (10.0, {3: 5.0}))
+    # EL TRATO ESPECIAL DE UNA CUENTA: su recargo propio pisa la tabla general, y su descuento
+    # viene puesto en la caja si lo tiene también pagando en el momento.
+    esperar("sin trato, lo general",
+            (ns["trato_de_la_cuenta"](taller), ns["descuento_al_cobrarle"](taller)),
+            ({"recargos": None, "descuento_al_contado": False}, 0.0))
+    st.session_state["nivel_usuario"] = "admin"
+    try:
+        ns["guardar_trato_de_la_cuenta"](taller, {1: 5})
+        fallas.append("se guardó un recargo propio para 1 pago")
+    except ValueError:
+        pass
+    esperar("el trato guardado",
+            ns["guardar_trato_de_la_cuenta"](taller, {3: 2, 6: 0}, descuento_al_contado=True),
+            {"recargos": {3: 2.0}, "descuento_al_contado": True})
+    st.session_state["nivel_usuario"] = "operador"
+    esperar("su recargo pisa el general (y la cuota que no tiene, sin recargo)",
+            [ns["recargo_por_cuotas"]("Tarjeta de crédito", n, mecanico_id=m)
+             for n, m in ((3, taller), (12, taller), (3, None))], [2.0, 0.0, 10.0])
+    esperar("su descuento, para la caja", ns["descuento_al_cobrarle"](taller), 10.0)
+    v_trato, _ = ns["cerrar_venta"]([item("A1", 2)], mecanico_id=taller, a_la_caja=True)
+    esperar("cobrada en 3 cuotas con su descuento: los dos, como dice su trato",
+            (ns["cobrar_venta"](v_trato, "Tarjeta de crédito", 3, 10)[0],
+             uno("SELECT total FROM ventas WHERE id = ?", v_trato),
+             ns["texto_de_las_cuotas"](2000, mecanico_id=taller)),
+            (True, 1836.0, "💳 Con crédito: 3 cuotas de \\$680 (total \\$2.040)"))
+    st.session_state["nivel_usuario"] = "admin"
+    ns["guardar_trato_de_la_cuenta"](taller, None, False)
+    st.session_state["nivel_usuario"] = "operador"
+    esperar("sin el trato, de nuevo lo general",
+            (ns["recargo_por_cuotas"]("Tarjeta de crédito", 3, mecanico_id=taller),
+             ns["descuento_al_cobrarle"](taller)), (10.0, 0.0))
     c.execute("UPDATE senas SET fecha = datetime('now', '-40 days') WHERE id = ?", (s2,))
     esperar("la que nadie retira hace más de los días elegidos, a la campanita",
             ([x["id"] for x in ns["senas_sin_retirar"]()], ns["senas_sin_retirar"](60)),
@@ -1026,6 +1057,8 @@ def probar(L):
                                   lambda: ns["guardar_recargos_por_cuotas"]({3: 1})),
                                  ("ver el cierre del mes en",
                                   lambda: ns["cierre_del_mes"]("2025-02")),
+                                 ("cambiar el trato especial de una cuenta en",
+                                  lambda: ns["guardar_trato_de_la_cuenta"](taller, None)),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

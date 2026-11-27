@@ -1722,6 +1722,13 @@ def _esquema_gestion(c):
     # La CUENTA CORRIENTE de cada taller: lo que se lleva fiado y lo que paga. Ver la sección
     # «CUENTA CORRIENTE DE LOS TALLERES» en logica/mecanico.py.
     # Sin clave foránea a propósito: borrar un mecánico no puede borrar lo que debe.
+    # EL TRATO ESPECIAL DE UNA CUENTA (ver esa sección en logica/mecanico.py): su propio recargo
+    # por cuotas (JSON; sin dato, el general) y si su descuento vale también pagando en el momento.
+    c.execute("""CREATE TABLE IF NOT EXISTS tratos_de_cuenta (
+        mecanico_id INTEGER PRIMARY KEY,
+        recargos TEXT,
+        descuento_al_contado INTEGER DEFAULT 0
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS cuentas_de_taller (
         mecanico_id INTEGER PRIMARY KEY,
         limite REAL DEFAULT 0,

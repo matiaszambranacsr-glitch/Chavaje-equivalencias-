@@ -1521,6 +1521,87 @@ def cuenta_del_telefono(telefono):
     return None
 
 
+# EL TRATO ESPECIAL DE UNA CUENTA: el taller que compra mucho tiene otro arreglo —menos recargo en
+# cuotas, o su descuento aunque pague en el momento— y la cajera tenía que acordarse de cada uno.
+# Se anota en la cuenta: su propio recargo por cuotas pisa la tabla general (ver «EL RECARGO POR
+# CUOTAS» en logica/ventas.py), y con «su descuento también cuando paga en el momento» la caja ya
+# lo trae puesto al cobrarle una venta (sin eso, el descuento de la cuenta vale solo a cuenta).
+def trato_de_la_cuenta(mecanico_id):
+    """{recargos: {cuotas: %} o None (usa el general), descuento_al_contado: bool}."""
+    f = c.execute("SELECT recargos, descuento_al_contado FROM tratos_de_cuenta "
+                  "WHERE mecanico_id = ?", (int(mecanico_id),)).fetchone() if mecanico_id else None
+    recargos = None
+    if f and f["recargos"] is not None:
+        try:
+            recargos = {int(k): float(v) for k, v in json.loads(f["recargos"]).items()
+                        if int(k) in CUOTAS_POSIBLES and int(k) > 1
+                        and 0 < float(v) <= RECARGO_MAXIMO}
+        except (ValueError, TypeError, AttributeError):
+            recargos = None
+    return {"recargos": recargos, "descuento_al_contado": bool(f and f["descuento_al_contado"])}
+
+
+def guardar_trato_de_la_cuenta(mecanico_id, recargos=None, descuento_al_contado=False):
+    """`recargos`: {cuotas: %} propios (en 0, sin interés) o None para usar el general. Lo
+    cambia el administrador; queda en el registro."""
+    exigir_nivel("admin", "cambiar el trato especial de una cuenta")
+    propios = None
+    if recargos is not None:
+        propios = {}
+        for k, v in recargos.items():
+            cuotas, por_ciento = int(k), round(float(v or 0), 2)
+            if cuotas not in CUOTAS_POSIBLES or cuotas <= 1:
+                raise ValueError("El recargo es para 2 cuotas o más.")
+            if not 0 <= por_ciento <= RECARGO_MAXIMO:
+                raise ValueError(f"El recargo tiene que ser entre 0 y "
+                                 f"{miles(RECARGO_MAXIMO, 0)}%.")
+            if por_ciento:
+                propios[cuotas] = por_ciento
+    antes = trato_de_la_cuenta(mecanico_id)
+    with db_lock:
+        c.execute("""INSERT INTO tratos_de_cuenta (mecanico_id, recargos, descuento_al_contado)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(mecanico_id) DO UPDATE SET recargos = excluded.recargos,
+                         descuento_al_contado = excluded.descuento_al_contado""",
+                  (int(mecanico_id),
+                   None if propios is None else json.dumps({str(k): v for k, v in
+                                                            sorted(propios.items())}),
+                   1 if descuento_al_contado else 0))
+        anotar_cambio("cambió el trato especial de una cuenta", "cuenta", mecanico_id,
+                      antes=antes, despues={"recargos": propios,
+                                            "descuento_al_contado": bool(descuento_al_contado)})
+        conn.commit()
+    return trato_de_la_cuenta(mecanico_id)
+
+
+def guardar_trato_y_avisar(mecanico_id, clave_propio, claves_recargo, clave_contado):
+    """«💾 Guardar el trato» (va como on_click)."""
+    try:
+        propio = bool(st.session_state.get(clave_propio))
+        trato = guardar_trato_de_la_cuenta(
+            mecanico_id,
+            {n: st.session_state.get(k) or 0 for n, k in claves_recargo.items()}
+            if propio else None, bool(st.session_state.get(clave_contado)))
+        aviso = ("success", "🤝 Trato guardado: " + (
+            ("recargo propio " + (", ".join(f"{n} cuotas {como_porcentaje(p)}%"
+                                            for n, p in sorted(trato["recargos"].items()))
+                                  or "sin interés")) if trato["recargos"] is not None
+            else "el recargo general")
+            + (", y su descuento también pagando en el momento" if
+               trato["descuento_al_contado"] else "") + ".")
+    except (PermissionError, ValueError) as _err:
+        aviso = ("warning", el_error_en_castellano(_err))
+    avisar(*aviso)
+
+
+def descuento_al_cobrarle(mecanico_id):
+    """El descuento que la caja trae puesto al cobrar una venta a esa cuenta: el suyo si tiene
+    «también cuando paga en el momento»; si no, 0."""
+    if not mecanico_id or not trato_de_la_cuenta(mecanico_id)["descuento_al_contado"]:
+        return 0.0
+    return configuracion_de_cuenta(mecanico_id)["descuento"]
+
+
 def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo, descuento=None,
                                 cobra_mora=None):
     """Guarda la configuración. descuento=None y cobra_mora=None dejan lo que tenía."""
