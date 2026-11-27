@@ -15,6 +15,7 @@ que lo pedido al proveedor quede anotado, llegue solo al entrar y se reclame si 
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -369,6 +370,83 @@ def probar():
     finally:
         _g["_nivel_de_quien_esta_adentro"], _g["hay_claves_configuradas"] = _antes
     fallas += [f"se rompió: {e.value}" for e in at.exception][:2]
+
+    # LOS CARTELES DE PRECIO (ver esa sección en logica/deposito.py): los que cambiaron con la
+    # última lista de la marca (no con una anterior), por defecto solo lo que hay en stock; sin
+    # repetir, sin los que no tienen precio y sin los de una lista en otra escala.
+    c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('MARCA CARTEL', 'PROVEEDOR')")
+    _mk = c.execute("SELECT id FROM marcas WHERE nombre = 'MARCA CARTEL'").fetchone()[0]
+    _k = {}
+    for _cod, _precio, _stock, _hist in (
+            ("K1", 150, 2, ((100, "2026-01-01 10:00:00"), (150, "2026-02-01 10:00:00"))),
+            ("K2", 200, 0, ((180, "2026-01-01 10:00:00"), (200, "2026-02-01 10:30:00"))),
+            ("K3", 300, 5, ((300, "2026-02-01 10:00:00"),)),
+            ("K4", 0, 1, ()),
+            # Dos veces en la misma lista (la unidad y la caja): no es un precio nuevo.
+            ("K6", 900, 3, ((40, "2026-02-01 10:00:00"), (900, "2026-02-01 10:01:00"))),
+            ("K5", 60, 4, ((50, "2025-12-01 10:00:00"), (60, "2026-01-01 10:00:00")))):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                  "precio, stock) VALUES (?, ?, 'BUJIA DE ENCENDIDO PARA PROBAR UN RENGLON LARGO "
+                  "QUE NO ENTRA', ?, ?, ?)", (_cod, _cod, _mk, _precio, _stock))
+        _k[_cod] = c.lastrowid
+        for _p, _f in _hist:
+            c.execute("INSERT INTO historial_precios (producto_id, precio, fecha) VALUES (?, ?, ?)",
+                      (_k[_cod], _p, _f))
+    ns["conn"].commit()
+    _de_la_marca = [m for m in ns["marcas_con_precios_nuevos"]() if m["marca_id"] == _mk]
+    esperar("la marca con precios nuevos: dos cambiaron con la última lista, uno con stock",
+            _de_la_marca, [{"marca_id": _mk, "marca": "MARCA CARTEL", "fecha": "2026-02-01",
+                            "cambiaron": 2, "con_stock": 1}])
+    esperar("solo lo que hay en stock, o todo, con el precio de antes",
+            ([(f["codigo_raw"], f["antes"]) for f in ns["precios_nuevos_de_la_marca"](_mk)],
+             [(f["codigo_raw"], f["antes"])
+              for f in ns["precios_nuevos_de_la_marca"](_mk, solo_con_stock=False)]),
+            ([("K1", 100.0)], [("K1", 100.0), ("K2", 180.0)]))
+    _cart, _fuera, _sin = ns["carteles_de_precio"]([_k["K2"], _k["K4"], _k["K2"], _k["K1"],
+                                                     999999])
+    esperar("los carteles: sin repetir, en el orden elegido, sin el que no tiene precio",
+            ([(x["titulo"], x["precio"], x["barras"]) for x in _cart], _fuera, _sin),
+            ([("MARCA CARTEL K2", 200.0, ns["codigo_nuestro"](_k["K2"])),
+              ("MARCA CARTEL K1", 150.0, ns["codigo_nuestro"](_k["K1"]))], [], 1))
+    _g2 = ns["carteles_de_precio"].__globals__
+    _escala_antes = _g2["marcas_con_precios_fuera_de_escala"]
+    try:
+        _g2["marcas_con_precios_fuera_de_escala"] = lambda: {"MARCA CARTEL"}
+        esperar("los de una lista en otra escala no salen",
+                ns["carteles_de_precio"]([_k["K1"]]), ([], ["MARCA CARTEL"], 0))
+    finally:
+        _g2["marcas_con_precios_fuera_de_escala"] = _escala_antes
+    _pdf_k = ns["pdf_de_carteles_de_precio"](_cart * 11, "27/11/2026")
+    esperar("el PDF: 22 carteles son dos hojas (de a 21)",
+            (_pdf_k[:4], len(re.findall(rb"/Type /Page\b(?!s)", _pdf_k))), (b"%PDF", 2))
+    esperar("sin carteles, nada", (ns["pdf_de_carteles_de_precio"]([], "x"),
+                                   ns["carteles_para_descargar"]([])()), (b"", b""))
+    # En la pantalla: se elige uno, se suma (dos veces es uno) y sale el botón del PDF.
+    at.session_state["pagina_actual"] = ns["PAGINAS"][10]
+    at.session_state["sub_devoluciones"] = ns["SUB_DEVOLUCIONES"][2]
+    at.run()
+    at.text_input(key="carteles_buscar").set_value("K1").run()
+    at.button(key="carteles_sumar").click().run()
+    at.button(key="carteles_sumar").click().run()
+
+    def _boton_carteles():
+        return [x.proto.label for x in at.get("download_button")
+                if x.proto.label.startswith("💲 Carteles de precio")]
+    esperar("elegido una vez, y su botón", (at.session_state["carteles_elegidos"],
+                                            _boton_carteles()),
+            ([_k["K1"]], ["💲 Carteles de precio (1)"]))
+    at.button(key="carteles_vaciar").click().run()
+    esperar("«Vaciar» los saca", ("carteles_elegidos" in at.session_state, _boton_carteles()),
+            (False, []))
+    at.radio(key="carteles_modo").set_value(
+        "Los que cambiaron de precio con la última lista").run()
+    at.selectbox(key="carteles_marca").set_value(_mk).run()
+    esperar("los de la última lista, con lo que hay en stock",
+            (_boton_carteles(), any("cambiaron 2 precio(s); 1 de lo que hay en stock" in x.value
+                                    for x in at.caption)), (["💲 Carteles de precio (1)"], True))
+    at.toggle(key="carteles_con_stock").set_value(False).run()
+    esperar("y sin el filtro, todos", (_boton_carteles(), [e.value for e in at.exception]),
+            (["💲 Carteles de precio (2)"], []))
     return fallas
 
 

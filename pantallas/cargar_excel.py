@@ -1200,6 +1200,19 @@ if pagina == PAGINAS[2]:
                             "descripción de antes. Mirá cuál es la buena; si es la nueva, "
                             "corregila a mano en el producto.")
                         st.dataframe(_fichas["ejemplos"], hide_index=True, width="stretch")
+                    # LOS CARTELES DE PRECIO (ver esa sección en logica/deposito.py): lo que
+                    # cambió de precio y está en la góndola tiene el cartel viejo.
+                    try:
+                        _carteles_nuevos = [m for m in marcas_con_precios_nuevos()
+                                            if m["marca"] == nombre_prov.strip().upper()]
+                    except sqlite3.Error as _err:
+                        anotar_error("importar/carteles de precio", _err)
+                        _carteles_nuevos = []
+                    if _carteles_nuevos and _carteles_nuevos[0]["con_stock"]:
+                        st.info(f"💲 Cambió el precio de **{miles(_carteles_nuevos[0]['con_stock'])}"
+                                f" producto(s) de {nombre_prov.strip().upper()} que hay en "
+                                "stock**: los carteles nuevos para la góndola salen en ↩️ "
+                                "Devoluciones → 🏷️ Etiquetas («💲 Carteles de precio»).")
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()
 

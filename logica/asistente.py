@@ -435,6 +435,15 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("carteles", "Imprimir carteles de precio para la góndola",
+     "cartel carteles precio precios gondola mostrador exhibidor imprimir etiqueta etiquetas "
+     "estante cambio cambiaron lista nueva",
+     "En ↩️ Devoluciones → 🏷️ Etiquetas, «💲 Carteles de precio»: elegí «Los que elijo» (buscá "
+     "el código o escaneá la caja y «➕ Sumar») o «Los que cambiaron de precio con la última "
+     "lista» y la marca (solo lo que hay en stock, si no lo destildás). El PDF trae 21 carteles "
+     "por hoja con el precio grande, la fecha y el código de barras para cobrarlo escaneando. "
+     "Los de una lista en otra escala no salen.",
+     "↩️ Devoluciones", ""),
     ("objetivo_del_mes", "Ponerle un objetivo de ventas al mes",
      "objetivo meta metas objetivos mes mensual llegar alcanzar barra progreso cuanto falta "
      "vender por dia",

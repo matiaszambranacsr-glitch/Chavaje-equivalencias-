@@ -56,6 +56,8 @@ TIEMPOS_TECNICOS = {
     "HORAS_CONTEXTO_FRESCO": "fuente de afuera",
     "MINUTOS_ANTES_DE_REINTENTAR": "fuente de afuera",
     "HORAS_DE_LAS_TASAS": "fuente de afuera (BCRA)",
+    "DIAS_QUE_SE_ABRE_SIN_HORARIO": "no es un plazo: los días de la semana (lunes a sábado) "
+                                    "del objetivo del mes; los cambia el horario de atención",
 }
 _RE_TIEMPO_DEL_CODIGO = re.compile(
     r"^((?:DIAS|HORAS|MINUTOS|SEGUNDOS)_[A-Z_]+|[A-Z][A-Z_]*_(?:DIAS|HORAS|MINUTOS|SEGUNDOS))"

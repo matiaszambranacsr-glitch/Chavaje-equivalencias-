@@ -239,6 +239,70 @@ if pagina == PAGINAS[10]:
                 file_name="etiquetas_lo_que_esta_afuera.pdf", mime="application/pdf",
                 key="dvl_etiquetas_afuera",
                 help="Por si alguna se despegó o se entregó sin etiqueta.")
+        # LOS CARTELES DE PRECIO: ver esa sección en logica/deposito.py.
+        st.markdown("**💲 Carteles de precio**")
+        _modo_k = st.radio("Carteles de:", ["Los que elijo",
+                                            "Los que cambiaron de precio con la última lista"],
+                           horizontal=True, key="carteles_modo",
+                           help="Para la góndola y el mostrador: marca y código, el precio "
+                                "grande, la fecha y el código de barras nuestro (se cobra "
+                                "escaneando el cartel). Tres por siete en una hoja A4.")
+        _ids_k, _archivo_k, _elijo_k = [], "carteles_de_precio.pdf", _modo_k == "Los que elijo"
+        if _elijo_k:
+            _q_k = st.text_input("Código del producto, o escaneá la caja:", key="carteles_buscar",
+                                 placeholder="Ej: W712, 7891234567895")
+            if _q_k.strip():
+                _prods_k = {p["id"]: p for p in productos_para_etiquetar(_q_k)}
+                if not _prods_k:
+                    st.caption("No encontré ningún producto con eso.")
+                else:
+                    _k1, _k2 = cols([3, 1], abajo=True)
+                    _k1.selectbox("Producto:", list(_prods_k), key="carteles_producto",
+                                  format_func=lambda i: (  # rótulo fijo: el producto no cambia
+                                      f"{_prods_k[i]['marca']} {_prods_k[i]['codigo_raw']} — "
+                                      f"{(_prods_k[i]['descripcion'] or '')[:40]}"))
+                    _k2.button("➕ Sumar", key="carteles_sumar", width="stretch",
+                               on_click=sumar_al_cartel, args=("carteles_producto",))
+            _ids_k = list(st.session_state.get("carteles_elegidos") or [])
+        else:
+            _marcas_k = marcas_con_precios_nuevos()
+            if not _marcas_k:
+                st.caption("Todavía ninguna lista cambió precios: sale cuando se vuelve a cargar "
+                           "la lista de una marca.")
+            else:
+                _por_id_k = {m["marca_id"]: m for m in _marcas_k}
+                _k1, _k2 = cols([3, 2], abajo=True)
+                _mid_k = _k1.selectbox(
+                    "Marca:", list(_por_id_k), key="carteles_marca",
+                    format_func=lambda i: (  # rótulo fijo: cambia solo al cargar otra lista
+                        f"{_por_id_k[i]['marca']} — lista del "
+                        f"{_por_id_k[i]['fecha'][8:10]}/{_por_id_k[i]['fecha'][5:7]}"))
+                _con_stock_k = _k2.toggle("Solo lo que hay en stock", value=True,
+                                          key="carteles_con_stock")
+                _m_k = _por_id_k[_mid_k]
+                st.caption(f"Con la última lista cambiaron {miles(_m_k['cambiaron'])} "
+                           f"precio(s); {miles(_m_k['con_stock'])} de lo que hay en stock.")
+                _ids_k = [f["id"] for f in precios_nuevos_de_la_marca(_mid_k, _con_stock_k)]
+                _archivo_k = f"carteles_{sanitizar(_m_k['marca']) or _mid_k}.pdf"
+        if _ids_k:
+            _carteles_k, _fuera_k, _sin_precio_k = carteles_de_precio(_ids_k)
+            if _fuera_k:
+                st.warning(f"Los de **{', '.join(_fuera_k)}** no salen: su lista está en otra "
+                           "escala que las demás, y ese precio no es el de venta.")
+            if _elijo_k:
+                st.caption(" · ".join(k["titulo"] for k in _carteles_k)
+                           + (f" · {_sin_precio_k} sin precio (no sale)" if _sin_precio_k
+                              else ""))
+            elif _sin_precio_k:
+                st.caption(f"{_sin_precio_k} sin precio no salen.")
+            _d1, _d2 = cols([3, 1], abajo=True)
+            _d1.download_button(f"💲 Carteles de precio ({len(_carteles_k)})",
+                                data=carteles_para_descargar(_carteles_k),
+                                file_name=_archivo_k, mime="application/pdf",
+                                key="carteles_pdf", disabled=not _carteles_k, width="stretch")
+            if _elijo_k:
+                _d2.button("🗑️ Vaciar", key="carteles_vaciar", width="stretch",
+                           on_click=vaciar_los_carteles)
 
     # ---------- LAS GARANTÍAS: ver «LAS GARANTÍAS» en logica/ventas.py ----------
     if sub_dvl == SUB_DEVOLUCIONES[3]:

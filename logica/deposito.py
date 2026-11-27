@@ -660,6 +660,166 @@ def etiquetas_para_descargar(items):
     return lambda: pdf_de_etiquetas(datos)
 
 
+# LOS CARTELES DE PRECIO: el precio de la góndola y del mostrador se escribía a mano, y cuando
+# entraba una lista nueva quedaba el viejo: el cliente veía uno y en la caja le cobraban otro.
+# Una hoja A4 de carteles —marca y código, descripción, el precio grande, la fecha y el código
+# de barras nuestro, para cobrarlo escaneando el cartel—, de los productos que se eligen o de
+# los que cambiaron de precio con la última lista de una marca (por defecto, solo los que hay en
+# stock: de una lista de 20.000 códigos, lo que está en la góndola). Los de una lista en otra
+# escala no salen, porque su precio no es el de venta (ver escala_de_precios_por_marca()), ni
+# los que no tienen precio.
+CARTELES_MAXIMOS = 500                 # 24 hojas: más es haber elegido una lista entera
+_COLUMNAS_DE_CARTELES, _FILAS_DE_CARTELES = 3, 7
+
+
+def _cambios_de_la_ultima_lista(marca_id=None):
+    """Los productos cuyo precio cambió con la última lista de su marca: el último renglón del
+    historial está en la última carga de la marca (dentro de la hora, como en
+    codigos_con_dos_precios_en_la_misma_lista()) y el de antes de esa carga era otro. El de
+    antes, de ANTES de la carga: con la copia de la base real salían 151 de IMPERIAL que eran
+    el mismo código dos veces en la misma lista (la unidad y la caja), no un precio nuevo."""
+    filtro, params = ("AND p.marca_id = ?", [int(marca_id)]) if marca_id is not None else ("", [])
+    # Primero los que tienen dos precios anotados o más (en la base real, 155 de 71.636): la
+    # última carga de cada marca se mira solo para esas marcas.
+    c.execute(f"""
+        WITH varios AS (SELECT producto_id, MAX(id) AS ultimo FROM historial_precios
+                        GROUP BY producto_id HAVING COUNT(*) >= 2),
+             ultima AS (SELECT p.marca_id, MAX(h.fecha) AS fecha FROM historial_precios h
+                        JOIN productos p ON p.id = h.producto_id
+                        WHERE p.marca_id IN (SELECT p3.marca_id FROM varios v3
+                                             JOIN productos p3 ON p3.id = v3.producto_id)
+                        GROUP BY p.marca_id)
+        SELECT p.id, p.marca_id, m.nombre AS marca, p.codigo_raw, p.descripcion, p.precio,
+               p.stock, h.fecha,
+               (SELECT h0.precio FROM historial_precios h0 WHERE h0.producto_id = p.id
+                AND h0.fecha < datetime(u.fecha, '-1 hour')
+                ORDER BY h0.id DESC LIMIT 1) AS antes
+        FROM varios v JOIN historial_precios h ON h.id = v.ultimo
+        JOIN productos p ON p.id = v.producto_id JOIN marcas m ON m.id = p.marca_id
+        JOIN ultima u ON u.marca_id = p.marca_id
+        WHERE h.fecha >= datetime(u.fecha, '-1 hour') {filtro}
+        ORDER BY m.nombre, p.codigo_clean""", params)
+    return [dict(f) for f in c.fetchall()
+            if f["antes"] is not None and f["precio"] and abs(float(f["antes"])
+                                                              - float(f["precio"])) >= 0.01]
+
+
+def marcas_con_precios_nuevos():
+    """[{marca_id, marca, fecha (de acá), cambiaron, con_stock}]: las marcas cuya última lista
+    cambió algún precio, la de la carga más nueva primero."""
+    marcas = {}
+    for f in _cambios_de_la_ultima_lista():
+        m = marcas.setdefault(f["marca_id"], {"marca_id": f["marca_id"], "marca": f["marca"],
+                                              "fecha": "", "cambiaron": 0, "con_stock": 0})
+        m["cambiaron"] += 1
+        m["con_stock"] += bool(f["stock"] and f["stock"] > 0)
+        m["fecha"] = max(m["fecha"], f["fecha"] or "")
+    for m in marcas.values():
+        m["fecha"] = dia_de_aca(m["fecha"]) if m["fecha"] else ""
+    return sorted(marcas.values(), key=lambda m: (m["fecha"], m["marca"]), reverse=True)
+
+
+def precios_nuevos_de_la_marca(marca_id, solo_con_stock=True):
+    """[dict] lo que cambió de precio con la última lista de esa marca, con «antes»."""
+    return [f for f in _cambios_de_la_ultima_lista(marca_id)
+            if not solo_con_stock or (f["stock"] and f["stock"] > 0)][:CARTELES_MAXIMOS]
+
+
+def carteles_de_precio(ids):
+    """(carteles, marcas que no salen por estar en otra escala, cuántos sin precio). Cada
+    cartel: {titulo, detalle, precio, barras}. Sin repetir y en el orden en que se eligieron."""
+    ids = list(dict.fromkeys(int(i) for i in ids))[:CARTELES_MAXIMOS]
+    fuera_de_escala = marcas_con_precios_fuera_de_escala()
+    filas = {}
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, m.nombre AS marca
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.id IN ({marcadores})""", tanda)
+        filas.update({f["id"]: f for f in c.fetchall()})
+    carteles, fuera, sin_precio = [], set(), 0
+    for producto_id in ids:
+        f = filas.get(producto_id)
+        if not f:
+            continue
+        if f["marca"] in fuera_de_escala:
+            fuera.add(f["marca"])
+        elif not f["precio"] or float(f["precio"]) <= 0:
+            sin_precio += 1
+        else:
+            carteles.append({"titulo": f"{f['marca']} {f['codigo_raw']}",
+                             "detalle": f["descripcion"] or "", "precio": float(f["precio"]),
+                             "barras": codigo_nuestro(f["id"])})
+    return carteles, sorted(fuera), sin_precio
+
+
+def pdf_de_carteles_de_precio(carteles, dia):
+    """La hoja A4 de carteles, tres columnas por siete filas, con una raya para cortarlos.
+    `dia`: la fecha que dice cada uno («Precio al 27/11/2026»). b"" si no hay nada."""
+    if not carteles:
+        return b""
+    import textwrap
+    from fpdf import FPDF
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(False)
+    ancho, alto = 64, 39
+    por_hoja = _COLUMNAS_DE_CARTELES * _FILAS_DE_CARTELES
+    for n, k in enumerate(carteles):
+        if n % por_hoja == 0:
+            pdf.add_page()
+        x = 6 + (n % _COLUMNAS_DE_CARTELES) * (ancho + 2)
+        y = 8 + ((n // _COLUMNAS_DE_CARTELES) % _FILAS_DE_CARTELES) * (alto + 1)
+        pdf.set_draw_color(170, 170, 170)
+        pdf.set_line_width(0.2)
+        pdf.rect(x, y, ancho, alto)
+        pdf.set_xy(x + 1, y + 1.5)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(ancho - 2, 4, limpiar(k["titulo"])[:34])
+        pdf.set_font("Helvetica", "", 7)
+        for i, renglon in enumerate(textwrap.wrap(limpiar(k["detalle"]), 46)[:2]):
+            pdf.set_xy(x + 1, y + 5.5 + i * 3.2)
+            pdf.cell(ancho - 2, 3.2, renglon)
+        pdf.set_xy(x, y + 12.5)
+        pdf.set_font("Helvetica", "B", 24)
+        pdf.cell(ancho, 10, limpiar(formato_precio(k["precio"])), align="C")
+        # El código de barras nuestro, como en las etiquetas (ver pdf_de_etiquetas_con_barras()):
+        # la barra fina lo más cerca de 0,33 mm que entre, y centrado.
+        texto = f"*{k['barras']}*"
+        fina = min(0.33, (ancho - 4) / (16 * len(texto) + 20))
+        largo = 16 * len(texto) * fina - fina
+        pdf.set_fill_color(0, 0, 0)
+        pdf.code39(texto, x=x + (ancho - largo) / 2, y=y + 24, w=3 * fina, h=9)
+        pdf.set_xy(x + 1, y + 34)
+        pdf.set_font("Helvetica", "", 6)
+        pdf.cell(ancho - 2, 3.5, limpiar(f"{k['barras']} · Precio al {dia}"), align="C")
+    return bytes(pdf.output())
+
+
+def carteles_para_descargar(carteles):
+    """Para el botón de descarga: los carteles ya leídos de la base (ver carteles_de_precio();
+    desde el hilo del botón no se la toca) y el PDF, que se arma al tocarlo."""
+    carteles = list(carteles)
+    dia = f"{hoy_aca():%d/%m/%Y}"
+    return lambda: pdf_de_carteles_de_precio(carteles, dia)
+
+
+def vaciar_los_carteles():
+    """«🗑️ Vaciar» los carteles elegidos (va como on_click)."""
+    st.session_state.pop("carteles_elegidos", None)
+
+
+def sumar_al_cartel(clave_del_producto):
+    """«➕ Sumar» de los carteles elegidos (va como on_click)."""
+    elegido = st.session_state.get(clave_del_producto)
+    elegidos = st.session_state.setdefault("carteles_elegidos", [])
+    if elegido is not None and int(elegido) not in elegidos \
+            and len(elegidos) < CARTELES_MAXIMOS:
+        elegidos.append(int(elegido))
+
+
 def resumen_de_la_cuenta(persona=None, mecanico_id=None, dias=30):
     """Lo de una cuenta en los últimos `dias` días: de un empleado, lo que vendió en 🧾 Ventas
     y lo que tiene del depósito; de un taller, lo que se llevó del depósito y lo que debe.

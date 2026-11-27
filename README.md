@@ -7946,6 +7946,24 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 💲 Los carteles de precio
+
+El precio de la góndola y del mostrador se escribía a mano, y cuando entraba una lista nueva
+quedaba el viejo: el cliente veía uno y en la caja le cobraban otro. En ↩️ Devoluciones →
+🏷️ Etiquetas, **«💲 Carteles de precio»** arma una hoja A4 de 21 carteles (tres por siete, con
+una raya para cortar): marca y código, la descripción en dos renglones, el precio grande, el
+código de barras nuestro —se cobra escaneando el cartel— y «Precio al» con la fecha. Sale de
+**los que se eligen** (por código o escaneando la caja, «➕ Sumar» y «🗑️ Vaciar») o de **los que
+cambiaron de precio con la última lista** de una marca: el último precio del historial está en
+la última carga de la marca y el de antes de esa carga era otro (el mismo código dos veces en una
+lista, la unidad y la caja, no cuenta: con la copia de la base real salían 151 de IMPERIAL que
+eran eso). Por defecto solo lo que hay en stock, que es lo que está en la góndola. No salen los
+que no tienen precio ni los de una lista en otra escala (su precio no es el de venta). Al
+cargar una lista, si cambió el precio de algo que hay en stock, lo avisa con dónde imprimir los
+carteles (`marcas_con_precios_nuevos()`, `carteles_de_precio()` y
+`pdf_de_carteles_de_precio()`, en `logica/deposito.py`; lo controla
+`pruebas_de_la_mercaderia.py`).
+
 ## 🎯 El objetivo de ventas del mes
 
 El dueño sabía cuánto quería vender en el mes, pero nadie sabía cómo venía hasta sumar los
