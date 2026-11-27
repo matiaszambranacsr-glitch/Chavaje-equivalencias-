@@ -53,16 +53,21 @@ if pagina == PAGINAS[11]:
         _desc = st.number_input("Descuento (%):", min_value=0.0,
                                 max_value=DESCUENTO_MAXIMO_EN_LA_CAJA, value=0.0, step=1.0,
                                 key=f"cobro_descuento_{venta_id}")
-        _total = total_con_descuento(venta_id, _desc)
+        # EL RECARGO POR CUOTAS (ver esa sección en logica/ventas.py), a la vista antes de cobrar.
+        _recargo = recargo_por_cuotas(_forma, _cuotas)
+        _total = total_con_descuento(venta_id, _desc, _recargo)
         # «\$»: dos «$» en un mismo texto se leen como una fórmula y se pierden los dos.
         st.markdown(f"### Total: \\${miles(_total, 0)}")
+        if _recargo:
+            st.caption(f"💳 Con {como_porcentaje(_recargo)}% de recargo por {_cuotas} cuotas.")
         # LA SEÑA que ya dejó (ver «LAS SEÑAS»): se cobra lo que falta; de ahí el vuelto.
         if _v.get("sena"):
             st.markdown(f"🔖 Ya dejó \\${miles(_v['sena'], 0)} de seña: **cobrar "
                         f"\\${miles(max(0.0, _total - _v['sena']), 0)}**")
             _total = max(0.0, _total - _v["sena"])
         if _desc:
-            st.caption(f"Era ${miles(_v['total'], 0)}: {como_porcentaje(_desc)}% menos.")
+            st.caption(f"Era ${miles(_v['total'], 0)}: {como_porcentaje(_desc)}% menos"
+                       + (" (antes del recargo)." if _recargo else "."))
         if _forma == "Tarjeta de crédito" and _cuotas > 1:
             st.caption(f"{_cuotas} cuotas de ${miles(_total / _cuotas, 0)}")
         if _forma == "Efectivo":

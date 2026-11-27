@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("recargo_cuotas", "Cobrar con recargo en cuotas con tarjeta",
+     "recargo cuotas interes tarjeta credito financiacion 3 6 12 cuotas sin interes porcentaje "
+     "coeficiente",
+     "El porcentaje de cada cantidad de cuotas se pone en 🗂️ Administrar → 💬 Mensajería y "
+     "cobros, «💳 Recargo por cuotas con tarjeta de crédito» (en 0, sin interés). Al cobrar con "
+     "crédito en esas cuotas, la caja lo suma sola y lo muestra antes de cobrar; el comprobante "
+     "lo dice. Si se cobró mal, «volver a la caja» lo saca.",
+     "🗂️ Administrar", "admin"),
     ("senas", "Anotar una seña (y descontarla al retirar)",
      "sena senas seña señas adelanto anticipo encargo encargar encargue deja plata a cuenta "
      "reserva reservar retira retirar descontar",

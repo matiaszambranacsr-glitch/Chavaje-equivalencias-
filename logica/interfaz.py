@@ -609,6 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("💳 Recargo por cuotas: anotás el porcentaje para cada cantidad de cuotas con tarjeta de crédito y la caja lo suma solo al cobrar, a la vista antes de cobrar y en el comprobante (en 0, sin interés).", "🗂️ Administrar → 💬 Mensajería y cobros"),
     ("🔖 Señas: el cliente encarga algo y deja una parte. Se anota en la caja (entra ese día, en su forma de pago), queda en lo que espera para avisarle cuando entra y, si querés, como pedido al proveedor. Al retirar, la venta ofrece descontarla y se cobra lo que falta; si no la retira, se devuelve.", "💵 Caja"),
     ("📇 Agenda de clientes de mostrador: la venta anota el teléfono (opcional) y, con él, se junta lo que compró, lo que espera, sus presupuestos, sus autos y su chat. Si el que llega ya vino, la venta lo dice al escribir el teléfono. Abajo en Ventas, «📇 Agenda de clientes» los busca por teléfono, nombre o patente.", "🧾 Ventas"),
     ("💲 Carteles de precio para la góndola y el mostrador: marca y código, el precio grande, la fecha y el código de barras para cobrarlo escaneando. De los que elegís, o de los que cambiaron de precio con la última lista de una marca (solo lo que hay en stock). Al cargar una lista, te avisa cuántos cambiaron.", "↩️ Devoluciones → 🏷️ Etiquetas"),

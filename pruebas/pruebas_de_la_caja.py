@@ -802,6 +802,53 @@ def probar(L):
     esperar("en el resumen del día",
             "🔖 Señas: entraron $" in ns["resumen_del_dia"](), True)
     esperar("las que esperan: la de la óptica", [x["id"] for x in ns["senas_activas"]()], [s2])
+    # EL RECARGO POR CUOTAS: el administrador lo pone por cantidad de cuotas; la caja lo aplica
+    # al cobrar con crédito en cuotas (sobre cada precio, como el descuento) y «volver a la caja»
+    # lo saca.
+    st.session_state["nivel_usuario"] = "admin"
+    for _malo in ({1: 5}, {3: 150}, {5: 10}):
+        try:
+            ns["guardar_recargos_por_cuotas"](_malo)
+            fallas.append(f"se guardó un recargo que no va: {_malo}")
+        except ValueError:
+            pass
+    esperar("guardados: el 0 no queda",
+            (ns["guardar_recargos_por_cuotas"]({3: 10, 6: 0, 12: 25}),
+             ns["recargos_por_cuotas"]()), ({3: 10.0, 12: 25.0}, {3: 10.0, 12: 25.0}))
+    esperar("solo con crédito y en las cuotas que tienen",
+            [ns["recargo_por_cuotas"](f, n) for f, n in (("Tarjeta de crédito", 3),
+                                                          ("Efectivo", 3),
+                                                          ("Tarjeta de crédito", 6),
+                                                          ("Tarjeta de crédito", 1))],
+            [10.0, 0.0, 0.0, 0.0])
+    st.session_state["nivel_usuario"] = "operador"
+    v_r, _ = ns["cerrar_venta"]([item("A1", 2)], a_la_caja=True)
+    esperar("antes de cobrar, la caja lo calcula", ns["total_con_descuento"](v_r, 0, 10), 2200.0)
+    esperar("cobrada en 3 cuotas: con el recargo, en cada precio",
+            (ns["cobrar_venta"](v_r, "Tarjeta de crédito", 3)[1],
+             uno("SELECT total FROM ventas WHERE id = ?", v_r),
+             uno("SELECT recargo FROM ventas WHERE id = ?", v_r),
+             uno("SELECT precio FROM ventas_items WHERE venta_id = ?", v_r)),
+            (f"💵 Venta #{v_r} cobrada: $2.200 (Tarjeta de crédito, 3 cuotas, con 10% de "
+             "recargo).", 2200.0, 10.0, 1100.0))
+    esperar("el comprobante lo dice",
+            ("Recargo 10% por 3 cuotas (incluido en los precios)" in
+             ns["texto_del_comprobante"](v_r), ns["pdf_del_comprobante"](ns["una_venta"](v_r))[:4]),
+            (True, b"%PDF"))
+    esperar("cambiar solo la forma, no: se cobró con recargo",
+            ns["cambiar_como_se_pago"](v_r, "Efectivo")[0], False)
+    esperar("volver a la caja lo saca, al centavo",
+            (ns["volver_a_la_caja"](v_r)[0], uno("SELECT total FROM ventas WHERE id = ?", v_r),
+             uno("SELECT recargo FROM ventas WHERE id = ?", v_r),
+             uno("SELECT precio FROM ventas_items WHERE venta_id = ?", v_r)),
+            (True, 2000.0, 0.0, 1000.0))
+    ns["cobrar_venta"](v_r, "Tarjeta de crédito", 12, 10)
+    esperar("con descuento y recargo: los dos, sobre el precio sin descuento",
+            uno("SELECT total FROM ventas WHERE id = ?", v_r), 2250.0)
+    esperar("en efectivo, sin recargo", (ns["volver_a_la_caja"](v_r)[0],
+                                         ns["cobrar_venta"](v_r, "Efectivo", 3)[0],
+                                         uno("SELECT total FROM ventas WHERE id = ?", v_r)),
+            (True, True, 2000.0))
     c.execute("UPDATE senas SET fecha = datetime('now', '-40 days') WHERE id = ?", (s2,))
     esperar("la que nadie retira hace más de los días elegidos, a la campanita",
             ([x["id"] for x in ns["senas_sin_retirar"]()], ns["senas_sin_retirar"](60)),
@@ -896,6 +943,8 @@ def probar(L):
                                  ("anotar una seña en",
                                   lambda: ns["anotar_sena"]("x", "", "y", 1, "Efectivo")),
                                  ("devolver una seña en", lambda: ns["devolver_sena"](1)),
+                                 ("cambiar el recargo por cuotas en",
+                                  lambda: ns["guardar_recargos_por_cuotas"]({3: 1})),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

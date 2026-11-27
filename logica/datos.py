@@ -3238,6 +3238,10 @@ def _esquema_ventas(c):
     # SEÑAS» en logica/ventas.py): esa parte entró a la caja el día de la seña.
     if "sena" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN sena REAL DEFAULT 0")
+    # El recargo por cuotas con que se cobró, en porcentaje (ver «EL RECARGO POR CUOTAS» en
+    # logica/ventas.py): ya está en el precio de cada cosa; acá queda para decirlo.
+    if "recargo" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN recargo REAL DEFAULT 0")
     if "total_de_lista" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN total_de_lista REAL")
     if "cobrada_por" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:

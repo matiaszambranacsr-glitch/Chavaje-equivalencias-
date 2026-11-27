@@ -1018,7 +1018,8 @@ def una_venta(venta_id):
     c.execute("""SELECT v.id, v.fecha, v.usuario, v.cliente, v.forma_de_pago, v.total, v.anulada,
                         v.km, ve.patente, COALESCE(v.cobrada, 1) AS cobrada, v.cuotas,
                         COALESCE(v.descuento, 0) AS descuento, v.total_de_lista, v.mecanico_id,
-                        k.nombre AS cuenta, COALESCE(v.sena, 0) AS sena
+                        k.nombre AS cuenta, COALESCE(v.sena, 0) AS sena,
+                        COALESCE(v.recargo, 0) AS recargo
                  FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
                  LEFT JOIN mecanicos k ON k.id = v.mecanico_id WHERE v.id = ?""",
               (venta_id,))
@@ -1051,6 +1052,9 @@ def texto_del_comprobante(venta_id):
     if venta["descuento"]:
         lineas.append(f"Descuento {como_porcentaje(venta['descuento'])}% (era "
                       f"${miles(venta['total_de_lista'] or 0, 0)})")
+    if venta.get("recargo"):
+        lineas.append(f"Recargo {como_porcentaje(venta['recargo'])}% por {venta['cuotas']} cuotas "
+                      "(incluido en los precios)")
     lineas.append(f"TOTAL: ${miles(venta['total'] or 0, 0)}"
                   + (f" ({como_se_pago(venta)})" if venta["forma_de_pago"] else ""))
     if venta.get("sena"):
@@ -1193,6 +1197,9 @@ def ticket_del_comprobante(venta):
     if venta.get("descuento"):
         partes.append(("texto", f"Descuento {como_porcentaje(venta['descuento'])}% (era "
                                 f"${miles(venta.get('total_de_lista') or 0, 0)})", 9, False))
+    if venta.get("recargo"):
+        partes.append(("texto", f"Recargo {como_porcentaje(venta['recargo'])}% por "
+                                f"{venta['cuotas']} cuotas (incluido en los precios)", 9, False))
     partes.append(("par", "TOTAL" + (f" ({como_se_pago(venta)})" if venta["forma_de_pago"]
                                       else ""), f"${miles(venta['total'] or 0, 0)}", 12, True))
     if venta.get("sena"):
@@ -1260,6 +1267,12 @@ def pdf_del_comprobante(venta):
         pdf.set_font("Helvetica", "", 10)
         pdf.cell(140, 7, limpiar(f"Descuento {como_porcentaje(venta['descuento'])}% (era "
                                  f"${miles(venta.get('total_de_lista') or 0, 0)})"))
+        pdf.ln()
+        pdf.set_font("Helvetica", "B", 12)
+    if venta.get("recargo"):
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(140, 7, limpiar(f"Recargo {como_porcentaje(venta['recargo'])}% por "
+                                 f"{venta['cuotas']} cuotas (incluido en los precios)"))
         pdf.ln()
         pdf.set_font("Helvetica", "B", 12)
     pdf.cell(140, 9, limpiar("TOTAL" + (f" ({como_se_pago(venta)})"
@@ -2051,12 +2064,83 @@ def el_cartel_de(venta):
             + f" · {venta.get('hora') or ''}")
 
 
-def total_con_descuento(venta_id, descuento):
-    """Lo que queda la venta con ese descuento, redondeado como al cobrarla."""
+def total_con_descuento(venta_id, descuento, recargo=0):
+    """Lo que queda la venta con ese descuento (y ese recargo por cuotas), redondeado como al
+    cobrarla."""
     c.execute("SELECT cantidad, precio FROM ventas_items WHERE venta_id = ?", (venta_id,))
     return round(sum(f["cantidad"] * round(float(f["precio"] or 0)
-                                           * (1 - float(descuento or 0) / 100), 2)
+                                           * (1 - float(descuento or 0) / 100)
+                                           * (1 + float(recargo or 0) / 100), 2)
                      for f in c.fetchall()), 2)
+
+
+# EL RECARGO POR CUOTAS: con tarjeta de crédito en cuotas el negocio cobra un recargo (lo que le
+# cobra la tarjeta por financiar), y la cajera lo calculaba aparte con la calculadora: cada una
+# con su número, y en la caja quedaba el precio sin recargo, así que el cierre no daba con el
+# resumen de la tarjeta. El administrador anota el porcentaje de cada cantidad de cuotas (en
+# 🗂️ Administrar → 💬 Mensajería y cobros); al cobrar con crédito en cuotas se aplica solo, y se
+# ve antes de cobrar. Va como el descuento, sobre el precio de cada cosa: así la factura, la
+# devolución (vuelve lo que pagó) y el comprobante cierran sin cuentas aparte. «Volver a la
+# caja» lo saca, como al descuento. Las cuotas sin interés de una promoción: en 0.
+RECARGO_MAXIMO = 100.0
+
+
+def recargos_por_cuotas():
+    """{cuotas: porcentaje} de las que tienen recargo (un pago, nunca)."""
+    try:
+        datos = json.loads(obtener_config("recargos_por_cuotas", "") or "{}")
+    except ValueError:
+        return {}
+    salida = {}
+    for k, v in (datos or {}).items():
+        try:
+            cuotas, por_ciento = int(k), float(v)
+        except (TypeError, ValueError):
+            continue
+        if cuotas in CUOTAS_POSIBLES and cuotas > 1 and 0 < por_ciento <= RECARGO_MAXIMO:
+            salida[cuotas] = por_ciento
+    return salida
+
+
+def recargo_por_cuotas(forma_de_pago, cuotas):
+    """El porcentaje que se le suma a un cobro: solo con crédito y en cuotas que lo tengan."""
+    if forma_de_pago != "Tarjeta de crédito":
+        return 0.0
+    return recargos_por_cuotas().get(int(cuotas or 1), 0.0)
+
+
+def guardar_recargos_por_cuotas(recargos):
+    """{cuotas: porcentaje}; en 0 no tiene. Lo cambia el administrador; queda en el registro."""
+    exigir_nivel("admin", "cambiar el recargo por cuotas")
+    nuevos = {}
+    for k, v in (recargos or {}).items():
+        cuotas, por_ciento = int(k), round(float(v or 0), 2)
+        if cuotas not in CUOTAS_POSIBLES or cuotas <= 1:
+            raise ValueError("El recargo es para 2 cuotas o más.")
+        if not 0 <= por_ciento <= RECARGO_MAXIMO:
+            raise ValueError(f"El recargo tiene que ser entre 0 y {miles(RECARGO_MAXIMO, 0)}%.")
+        if por_ciento:
+            nuevos[cuotas] = por_ciento
+    antes = recargos_por_cuotas()
+    if nuevos != antes:
+        guardar_config("recargos_por_cuotas",
+                       json.dumps({str(k): v for k, v in sorted(nuevos.items())}))
+        anotar_cambio("cambió el recargo por cuotas", "configuración", "recargos_por_cuotas",
+                      antes=antes, despues=nuevos)
+    return nuevos
+
+
+def guardar_recargos_y_avisar(claves):
+    """«💾 Guardar los recargos» (va como on_click): `claves` es {cuotas: clave del campo}."""
+    try:
+        nuevos = guardar_recargos_por_cuotas(
+            {n: st.session_state.get(k) or 0 for n, k in claves.items()})
+        aviso = ("success", "💳 Recargo por cuotas: " + (
+            ", ".join(f"{n} cuotas {como_porcentaje(p)}%" for n, p in sorted(nuevos.items()))
+            or "ninguno (todas sin interés)") + ".")
+    except (PermissionError, ValueError) as _err:
+        aviso = ("warning", el_error_en_castellano(_err))
+    avisar(*aviso)
 
 
 def _descuento_valido(descuento, tope):
@@ -2069,14 +2153,16 @@ def _descuento_valido(descuento, tope):
     return descuento
 
 
-def _aplicar_el_descuento(venta_id, descuento):
-    """Adentro de la transacción del cobro: el precio de cada cosa, con el descuento; devuelve
-    el total nuevo (el que llama lo guarda en la venta). Siempre desde el precio sin descuento
-    (precio_de_lista; en las ventas de antes de guardarlo, el que tiene)."""
-    if descuento:
+def _aplicar_el_descuento(venta_id, descuento, recargo=0):
+    """Adentro de la transacción del cobro: el precio de cada cosa, con el descuento (y el
+    recargo por cuotas); devuelve el total nuevo (el que llama lo guarda en la venta). Siempre
+    desde el precio sin descuento (precio_de_lista; en las ventas de antes de guardarlo, el que
+    tiene)."""
+    if descuento or recargo:
         c.execute("""UPDATE ventas_items
-                     SET precio = ROUND(COALESCE(precio_de_lista, precio) * (1 - ? / 100.0), 2)
-                     WHERE venta_id = ?""", (descuento, venta_id))
+                     SET precio = ROUND(COALESCE(precio_de_lista, precio) * (1 - ? / 100.0)
+                                        * (1 + ? / 100.0), 2)
+                     WHERE venta_id = ?""", (descuento or 0, recargo or 0, venta_id))
     c.execute("SELECT COALESCE(SUM(cantidad * precio), 0) FROM ventas_items WHERE venta_id = ?",
               (venta_id,))
     return round(float(c.fetchone()[0]), 2)
@@ -2097,23 +2183,25 @@ def cobrar_venta(venta_id, forma_de_pago, cuotas=1, descuento=0):
         descuento = _descuento_valido(descuento, DESCUENTO_MAXIMO_EN_LA_CAJA)
     except ValueError as e:
         return False, str(e)
+    recargo = recargo_por_cuotas(forma_de_pago, cuotas)
     with db_lock, transaccion():
         # Se marca cobrada SOLO si seguía esperando: dos cajeros con la misma venta en pantalla
         # no la cobran dos veces.
         c.execute("""UPDATE ventas SET cobrada = 1, forma_de_pago = ?, cuotas = ?, descuento = ?,
-                            cobrada_por = ?, cobrada_en = datetime('now', 'localtime')
+                            recargo = ?, cobrada_por = ?, cobrada_en = datetime('now', 'localtime')
                      WHERE id = ? AND COALESCE(cobrada, 1) = 0 AND anulada = 0""",
-                  (forma_de_pago, cuotas, descuento, obtener_usuario_actual(), venta_id))
+                  (forma_de_pago, cuotas, descuento, recargo, obtener_usuario_actual(), venta_id))
         if c.rowcount != 1:
             return False, "Esa venta ya no está esperando en la caja (¿la cobró otro o se anuló?)."
-        total = _aplicar_el_descuento(venta_id, descuento)
+        total = _aplicar_el_descuento(venta_id, descuento, recargo)
         c.execute("UPDATE ventas SET total = ? WHERE id = ?", (total, venta_id))
         if descuento:
             anotar_cambio("cobró con descuento", "venta", venta_id,
                           despues={"descuento": descuento, "total": total})
     return True, (f"💵 Venta #{venta_id} cobrada: ${miles(total, 0)} "
                   f"({como_se_pago({'forma_de_pago': forma_de_pago, 'cuotas': cuotas})}"
-                  + (f", con {como_porcentaje(descuento)}% de descuento" if descuento else "") + ").")
+                  + (f", con {como_porcentaje(descuento)}% de descuento" if descuento else "")
+                  + (f", con {como_porcentaje(recargo)}% de recargo" if recargo else "") + ").")
 
 
 def poner_a_cuenta(venta_id, mecanico_id=None, descuento=None):
@@ -2855,12 +2943,17 @@ def cambiar_como_se_pago(venta_id, forma_de_pago, cuotas=1):
     if not puede:
         return False, por_que
     with db_lock, transaccion():
-        c.execute("SELECT forma_de_pago, COALESCE(cuotas, 1) AS cuotas, movimiento_id "
-                  "FROM ventas WHERE id = ?", (venta_id,))
+        c.execute("SELECT forma_de_pago, COALESCE(cuotas, 1) AS cuotas, movimiento_id, "
+                  "COALESCE(recargo, 0) AS recargo FROM ventas WHERE id = ?", (venta_id,))
         antes = c.fetchone()
         if antes["movimiento_id"] or antes["forma_de_pago"] == A_CUENTA:
             return False, ("Está a cuenta: volvela a la caja y cobrala como corresponde (así "
                            "se anula el cargo de la cuenta).")
+        # El recargo por cuotas está en el precio: cambiando solo la forma, el cliente que pagó
+        # en efectivo quedaba con el recargo cobrado (ver «EL RECARGO POR CUOTAS»).
+        if antes["recargo"]:
+            return False, ("Se cobró con recargo por cuotas: volvela a la caja y cobrala como "
+                           "corresponde (así se saca el recargo).")
         if antes["forma_de_pago"] == forma_de_pago and antes["cuotas"] == cuotas:
             return False, "Ya estaba así: no se cambió nada."
         c.execute("""UPDATE ventas SET forma_de_pago = ?, cuotas = ?
@@ -2894,6 +2987,7 @@ def volver_a_la_caja(venta_id):
     total = c.execute("SELECT total FROM ventas WHERE id = ?", (venta_id,)).fetchone()[0]
     return True, (f"↩️ Venta #{venta_id} de nuevo en la caja, por ${miles(total, 0)}"
                   + (" (sin el descuento)" if antes["descuento"] else "")
+                  + (" (sin el recargo por cuotas)" if antes["recargo"] else "")
                   + (" y sin el cargo de la cuenta" if antes["movimiento_id"] else "")
                   + ": cobrala como corresponde.")
 
@@ -2903,17 +2997,19 @@ def _volver_a_la_caja(venta_id):
     with db_lock, transaccion():
         c.execute("""SELECT forma_de_pago, COALESCE(cuotas, 1) AS cuotas,
                             COALESCE(descuento, 0) AS descuento, movimiento_id, cobrada_por,
-                            total
+                            total, COALESCE(recargo, 0) AS recargo
                      FROM ventas WHERE id = ?""", (venta_id,))
         antes = c.fetchone()
         # El descuento se había aplicado al precio de cada cosa (ver _aplicar_el_descuento()):
         # cada renglón vuelve al precio sin descuento que tiene guardado. Dividiendo —lo que se
         # hacía, y lo que queda para las ventas de antes de guardarlo— el redondeo de ida y
         # vuelta se comía un centavo ($1.234,50 con 5% volvía en $1.234,49).
-        if antes["descuento"]:
+        if antes["descuento"] or antes["recargo"]:
             c.execute("""UPDATE ventas_items
-                         SET precio = COALESCE(precio_de_lista, ROUND(precio / (1 - ? / 100.0), 2))
-                         WHERE venta_id = ?""", (antes["descuento"], venta_id))
+                         SET precio = COALESCE(precio_de_lista,
+                                               ROUND(precio / ((1 - ? / 100.0) * (1 + ? / 100.0)),
+                                                     2))
+                         WHERE venta_id = ?""", (antes["descuento"], antes["recargo"], venta_id))
         if antes["movimiento_id"]:
             c.execute("UPDATE movimientos_de_cuenta SET anulado = 1 WHERE id = ?",
                       (antes["movimiento_id"],))
@@ -2921,8 +3017,8 @@ def _volver_a_la_caja(venta_id):
                   (venta_id,))
         total = round(float(c.fetchone()[0]), 2)
         c.execute("""UPDATE ventas SET cobrada = 0, forma_de_pago = '', cuotas = 1, descuento = 0,
-                            cobrada_por = NULL, cobrada_en = NULL, movimiento_id = NULL,
-                            total = ?
+                            recargo = 0, cobrada_por = NULL, cobrada_en = NULL,
+                            movimiento_id = NULL, total = ?
                      WHERE id = ? AND COALESCE(cobrada, 1) = 1 AND anulada = 0""",
                   (total, venta_id))
         if c.rowcount != 1:

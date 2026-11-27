@@ -904,6 +904,24 @@ if pagina == PAGINAS[3]:
                     st.info("Sin resultados para esa marca.")
 
     if sub_admin == SUB_ADMIN[2]:
+        # EL RECARGO POR CUOTAS (ver esa sección en logica/ventas.py): el porcentaje de cada
+        # cantidad de cuotas. La clave lleva lo guardado: si otro lo cambia, el campo lo trae.
+        _rec = recargos_por_cuotas()
+        _exp_rec = st.expander("💳 Recargo por cuotas con tarjeta de crédito",
+                               key="exp_recargo_cuotas")
+        with _exp_rec:
+            st.caption("Lo que se le suma al cobrar con crédito en esa cantidad de cuotas (en 0, "
+                       "sin interés). La caja lo muestra antes de cobrar y el comprobante lo dice.")
+            _claves_rec = {}
+            _cuotas_rec = [n for n in CUOTAS_POSIBLES if n > 1]
+            for _i in range(0, len(_cuotas_rec), 4):
+                for _col_r, _n in zip(st.columns(4), _cuotas_rec[_i:_i + 4]):
+                    _claves_rec[_n] = f"recargo_cuotas_{_n}_{_rec.get(_n, 0)}"
+                    _col_r.number_input(f"{_n} cuotas (%)", min_value=0.0,
+                                        max_value=RECARGO_MAXIMO, step=1.0,
+                                        value=float(_rec.get(_n, 0.0)), key=_claves_rec[_n])
+            st.button("💾 Guardar los recargos", key="recargo_cuotas_guardar",
+                      on_click=guardar_recargos_y_avisar, args=(_claves_rec,))
         # EN QUÉ PAPEL SALEN EL COMPROBANTE Y LA FACTURA: hoja A4 o ticket de 80 mm (ver «EL
         # TICKET DE 80 MM» en logica/ventas.py). Se elige una vez; los botones son los mismos.
         # El selector muestra SIEMPRE lo guardado (se le pone antes de dibujarlo), y guarda

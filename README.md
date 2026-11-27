@@ -7946,6 +7946,23 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 💳 El recargo por cuotas
+
+Con tarjeta de crédito en cuotas el negocio cobra un recargo, y la cajera lo calculaba aparte
+con la calculadora: cada una con su número, y en la caja quedaba el precio sin recargo, así que
+el cierre no daba con el resumen de la tarjeta. En 🗂️ Administrar → 💬 Mensajería y cobros,
+**«💳 Recargo por cuotas con tarjeta de crédito»** guarda el porcentaje de cada cantidad de
+cuotas (2 a 24; en 0, sin interés; hasta `RECARGO_MAXIMO`, 100%; queda en el registro de
+cambios). Al cobrar con crédito en esas cuotas la caja lo suma sola y lo dice antes de cobrar
+(«💳 Con 10% de recargo por 3 cuotas», con el valor de cada cuota). Va como el descuento, sobre
+el precio de cada cosa —con descuento, los dos, sobre el precio sin descuento—: así la factura,
+la devolución (vuelve lo que pagó) y el comprobante («Recargo 10% por 3 cuotas») cierran sin
+cuentas aparte. «Volver a la caja» lo saca al centavo, y «cambiar cómo pagó» no se deja si se
+cobró con recargo (el cliente que pagó en efectivo quedaba con el recargo cobrado). Lo vendido
+de las comisiones y del objetivo es lo que pagó el cliente, con el recargo
+(`recargo_por_cuotas()`, `cobrar_venta()` y `_aplicar_el_descuento()`, en `logica/ventas.py`;
+lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
+
 ## 🔖 Las señas
 
 El cliente encarga algo que no hay y deja una parte. Se anotaba en un papel: la plata entraba al

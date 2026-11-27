@@ -1449,6 +1449,16 @@ def probar():
             ([t.startswith("🎯 Objetivo del mes: ") and "$" not in t for t in _barra(vta)],
              [x for x in vta.number_input if (x.key or "").startswith("objetivo_")]),
             ([True], []))
+    # EL RECARGO POR CUOTAS se pone en Administrar → 💬 Mensajería y cobros.
+    _adm_mes.session_state["pagina_actual"] = "🗂️ Administrar"
+    _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
+    _adm_mes.run()
+    [x for x in _adm_mes.number_input if (x.key or "").startswith("recargo_cuotas_3_")][0] \
+        .set_value(12.5)
+    _adm_mes.button(key="recargo_cuotas_guardar").click().run()
+    esperar("el recargo de 3 cuotas, puesto desde Administrar",
+            (ns["recargos_por_cuotas"](), [e.value for e in _adm_mes.exception]), ({3: 12.5}, []))
+    ns["guardar_config"]("recargos_por_cuotas", "")
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()
