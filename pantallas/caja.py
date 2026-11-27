@@ -208,6 +208,29 @@ if pagina == PAGINAS[11]:
                 st.rerun()
             mostrar_la_factura_de(_recien, "caja_recien")
 
+    # EL OBJETIVO DEL MES (ver esa sección en logica/ventas.py): la barra la ven todos los de
+    # la caja; la plata, solo el administrador, que es el que lo pone.
+    _avance = avance_del_objetivo()
+    if _avance or es_admin():
+        _ob1, _ob2 = cols([4, 1], abajo=True)
+        if _avance:
+            _ob1.progress(min(1.0, _avance["por_ciento"] / 100),
+                          text=renglon_del_objetivo(_avance, con_plata=es_admin()))
+        if es_admin():
+            with _ob2.popover("🎯 Objetivo" if _avance else "🎯 Objetivo del mes",
+                              key="pop_objetivo_del_mes", width="stretch"):
+                _obj = objetivo_del_mes()
+                _clave_obj = f"objetivo_{hoy_aca():%Y-%m}_{_obj}"
+                st.number_input(f"Cuánto querés vender en {nombre_del_mes(f'{hoy_aca():%Y-%m}')} "
+                                "($):", min_value=0.0, step=100000.0, value=_obj,
+                                placeholder="Ej: 5000000", key=_clave_obj,
+                                help="Lo vendido es sin lo anulado y con lo devuelto descontado. "
+                                     "Queda para los meses que siguen hasta que lo cambies; "
+                                     "en 0, no hay objetivo. Los empleados ven la barra y el "
+                                     "porcentaje, no la plata.")
+                st.button("💾 Guardar", key="objetivo_guardar", width="stretch",
+                          on_click=guardar_objetivo_y_avisar, args=(_clave_obj,))
+
     # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija. Lo cobrado cuenta
     # el día que se cobró; lo que espera, aparte.
     _caja_hoy = cierre_de_caja()

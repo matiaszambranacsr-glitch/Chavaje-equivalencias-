@@ -609,6 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("🎯 Objetivo del mes: ponés cuánto querés vender y la caja muestra la barra con lo vendido, cuánto hay que vender por día abierto para llegar y si van adelantados o atrasados (los empleados ven el porcentaje, no la plata). Sale también en el resumen del día.", "💵 Caja"),
     ("🪙 Cambio de apertura y 💵 contar los billetes: anotás con cuánto cambio abriste, cargás cuántos billetes hay de cada uno y la app suma, resta el cambio y lo pasa al arqueo con el detalle en la nota.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("💰 Comisión propia de cada vendedor (el que no tiene, cobra la general) y 🧾 la liquidación del mes de cada uno, para mandársela por WhatsApp o en PDF con cada venta.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🏆 Ventas y comisiones por vendedor: elegís el mes (este o los anteriores) y sale cuántas ventas armó cada uno, lo vendido (sin lo anulado y con lo devuelto descontado), el ticket promedio, lo del mes anterior y, con el porcentaje anotado, la comisión. Solo lo ves vos.", "💵 Caja → 📋 Ventas y cierre de caja"),

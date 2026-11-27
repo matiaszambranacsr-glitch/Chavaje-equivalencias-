@@ -92,6 +92,8 @@ ENTIENDE = (
     ("que clientes dejaron de venir", "como:no_vienen"),
     ("anotar un gasto de la caja", "como:salida_de_caja"),
     ("cuanto vendio cada vendedor este mes", "como:mes_por_vendedor"),
+    ("como pongo una meta de ventas para el mes", "como:objetivo_del_mes"),
+    ("donde cambio el objetivo de ventas", "como:objetivo_del_mes"),
     ("comisiones de los empleados", "como:mes_por_vendedor"),
     ("saque plata para pagar el flete", "como:salida_de_caja"),
     ("talleres que ya no compran mas", "como:no_vienen"),
@@ -1057,13 +1059,14 @@ def probar(L):
         "que pedidos hay en el deposito": "dato:deposito",
         "cuanto debe taller negrita": "dato:cuenta", "que tengo pendiente": "dato:pendiente",
         "cuanto debo": "dato:mi_cuenta", "hay mensajes sin leer": "dato:mensajes",
+        "como vamos con el objetivo": "dato:objetivo",
     }
     # Quién recibe cada dato: lo de las pantallas de cada uno, y nada más.
     _quien_d = {
         "invitado": set(),
         "depósito": {"dato:deposito", "dato:pendiente"},
         "operador": {"dato:ventas", "dato:a_cobrar", "dato:deposito", "dato:cuenta",
-                     "dato:pendiente", "dato:mensajes"},
+                     "dato:pendiente", "dato:mensajes", "dato:objetivo"},
         "taller": {"dato:mi_cuenta"},
     }
     if not _prod_d:
@@ -1084,6 +1087,7 @@ def probar(L):
     for _pantalla_d, _pregunta_d, _dato_d in (
             ("💵 Caja", "cuanto vendimos hoy", "dato:ventas"),
             ("💵 Caja", "que falta cobrar", "dato:a_cobrar"),
+            ("💵 Caja", "cuanto falta para el objetivo", "dato:objetivo"),
             ("📦 Depósito", "que pedidos hay en el deposito", "dato:deposito"),
             ("🗂️ Administrar", "cuanto debe taller negrita", "dato:cuenta"),
             ("💬 Mensajes", "hay mensajes sin leer", "dato:mensajes")):
@@ -1094,6 +1098,19 @@ def probar(L):
                                                 "nivel": "operador"})["ficha"] == _dato_d]
         esperar(f"«{_pregunta_d}»: con {_pantalla_d} sí, con cualquier otra no",
                 (_con_esa, _sin_esa), (_dato_d, []))
+    # El objetivo del mes: sin objetivo lo dice; con objetivo, la plata solo al administrador.
+    esperar("sin objetivo, lo dice",
+            responder("como vamos con el objetivo", _roles_d["operador"])["texto"],
+            "🎯 Este mes no tiene objetivo de ventas.")
+    ns["guardar_config"]("objetivos_de_ventas",
+                         '{"%s": 5000000}' % ns["hoy_aca"]().strftime("%Y-%m"))
+    _obj_emp = responder("como vamos con el objetivo", _roles_d["operador"])["texto"]
+    _obj_adm = responder("como vamos con el objetivo",
+                         {**_roles_d["operador"], "nivel": "admin"})["texto"]
+    esperar("con objetivo: el empleado, el porcentaje; el administrador, también la plata",
+            (_obj_emp.startswith("🎯 Objetivo del mes: "), "$" in _obj_emp,
+             "de $5.000.000" in _obj_adm), (True, False, True))
+    ns["guardar_config"]("objetivos_de_ventas", "")
     _ventas_d = responder("cuanto vendimos hoy", _roles_d["operador"])
     cierto("las ventas de hoy: lo cobrado y lo que espera, como dice la caja",
            "\\$1.500" in _ventas_d["texto"] and "\\$900" in _ventas_d["texto"],

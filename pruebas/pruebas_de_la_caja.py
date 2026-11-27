@@ -634,6 +634,77 @@ def probar(L):
             (3000.0, "3 × $1.000"))
     ns["pasar_los_billetes_al_arqueo"](_hoy)
     esperar("menos que el cambio: cero", st.session_state["arqueo_contado"], 0.0)
+
+    # EL OBJETIVO DEL MES: lo pone el administrador, se arrastra a los meses que siguen hasta
+    # que lo cambie (0 lo saca), y el avance dice cuánto por día abierto falta para llegar.
+    from datetime import date as _fecha
+    esperar("sin objetivo, nada", (ns["objetivo_del_mes"](), ns["avance_del_objetivo"](),
+                                   ns["renglon_del_objetivo"](None)), (None, None, ""))
+    _claves_antes, _nivel_antes = g["hay_claves_configuradas"], g["_nivel_de_quien_esta_adentro"]
+    try:
+        g["hay_claves_configuradas"] = lambda: True
+        g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+        ns["guardar_objetivo_del_mes"](1000)
+        fallas.append("un empleado pudo poner el objetivo de ventas")
+    except PermissionError:
+        pass
+    finally:
+        g["hay_claves_configuradas"], g["_nivel_de_quien_esta_adentro"] = (_claves_antes,
+                                                                          _nivel_antes)
+    st.session_state["nivel_usuario"] = "admin"
+    esperar("negativo, sin número o disparatado, no",
+            [ns["guardar_objetivo_del_mes"](x, "2025-01")[0]
+             for x in (-1, "mucho", float("nan"), 1e13)], [False] * 4)
+    esperar("puesto", ns["guardar_objetivo_del_mes"](2400000, "2025-01"),
+            (True, "🎯 Objetivo de enero 2025: $2.400.000."))
+    ns["guardar_objetivo_del_mes"](0, "2025-06")
+    esperar("se arrastra a los meses que siguen, y en 0 se saca desde ese mes",
+            [ns["objetivo_del_mes"](m) for m in ("2024-12", "2025-01", "2025-02", "2025-06",
+                                                 "2025-09")],
+            [None, 2400000.0, 2400000.0, None, None])
+    esperar("en el registro de cambios",
+            cs.execute("SELECT COUNT(*) FROM registro_de_cambios WHERE accion = "
+                       "'cambió el objetivo de ventas'").fetchone()[0], 2)
+    esperar("sin horario cargado, abre de lunes a sábado", ns["dias_que_se_abre"](),
+            (0, 1, 2, 3, 4, 5))
+    # Febrero de 2025 empieza un sábado: de lunes a sábado son 24 días; antes del lunes 10, 7.
+    _av = ns["avance_del_objetivo"]("2025-02", hoy=_fecha(2025, 2, 10))
+    esperar("sin vender nada: quedan 17 días, a $141.176 por día, atrasados",
+            {k: _av[k] for k in ("vendido", "por_ciento", "falta", "quedan", "por_dia",
+                                 "esperado", "cumplido")},
+            {"vendido": 0.0, "por_ciento": 0.0, "falta": 2400000.0, "quedan": 17,
+             "por_dia": 141176.0, "esperado": 700000.0, "cumplido": False})
+    for _fecha_v, _total_v, _anulada_v in (("2025-02-05 15:00:00", 1000000, 0),
+                                           ("2025-02-06 15:00:00", 500000, 1),
+                                           ("2025-03-01 02:00:00", 300000, 0)):
+        cs.execute("INSERT INTO ventas (fecha, usuario, forma_de_pago, total, cobrada, anulada) "
+                   "VALUES (?, 'ana', 'Efectivo', ?, 1, ?)", (_fecha_v, _total_v, _anulada_v))
+    _av = ns["avance_del_objetivo"]("2025-02", hoy=_fecha(2025, 2, 10))
+    esperar("lo anulado no cuenta y la de las 23 del 28 (hora de acá) es de febrero",
+            (_av["vendido"], _av["por_ciento"], _av["por_dia"]), (1000000.0, 41.7, 82353.0))
+    esperar("el renglón del administrador, con la plata",
+            ns["renglon_del_objetivo"](_av),
+            "🎯 Objetivo del mes: 42% ($1.000.000 de $2.400.000) · quedan 17 día(s) "
+            "abierto(s): $82.353 por día para llegar · vamos adelantados")
+    esperar("el del empleado, sin la plata", ns["renglon_del_objetivo"](_av, con_plata=False),
+            "🎯 Objetivo del mes: 42% · quedan 17 día(s) abierto(s) · vamos adelantados")
+    ns["guardar_config"](ns["CLAVE_DEL_HORARIO"], "lun-vie 8:00-18:00")
+    _av = ns["avance_del_objetivo"]("2025-02", hoy=_fecha(2025, 2, 10))
+    esperar("con el horario, solo los días que abre",
+            (ns["dias_que_se_abre"](), _av["quedan"], _av["esperado"]),
+            ((0, 1, 2, 3, 4), 15, 600000.0))
+    ns["guardar_config"](ns["CLAVE_DEL_HORARIO"], "")
+    _av = ns["avance_del_objetivo"]("2025-02", hoy=_fecha(2025, 3, 15))
+    esperar("el mes ya pasado: no quedan días, y lo que faltó",
+            (_av["quedan"], _av["por_dia"], _av["vendido"]), (0, 1100000.0, 1300000.0))
+    ns["guardar_objetivo_del_mes"](1000000, "2025-02")
+    _av = ns["avance_del_objetivo"]("2025-02", hoy=_fecha(2025, 3, 15))
+    esperar("cumplido", (_av["cumplido"], _av["falta"], ns["renglon_del_objetivo"](_av)),
+            (True, 0.0, "🎉 ¡Objetivo del mes cumplido! $1.300.000 de $1.000.000 (130%)"))
+    esperar("y en el resumen del día de ese mes",
+            "🎉 ¡Objetivo del mes cumplido!" in ns["resumen_del_dia"]("2025-02-28"), True)
+    esperar("el del mes que viene no se pisa", ns["objetivo_del_mes"]("2025-03"), 1000000.0)
+    st.session_state["nivel_usuario"] = "operador"
     ns["anotar_salida_de_caja"]("🧾 Gasto", "artículos de limpieza", 120)
     esperar("y en el resumen de la semana, por tipo (lo anulado y lo de 2020, no)",
             [r for r in ns["resumen_de_la_semana"]().split("\n") if r.startswith("💸")],
@@ -715,6 +786,8 @@ def probar(L):
                                     3)),
                                  ("cambiar la comisión de uno",
                                   lambda: ns["guardar_comision_de"]("rosa", 3)),
+                                 ("cambiar el objetivo de ventas en",
+                                  lambda: ns["guardar_objetivo_del_mes"](3)),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

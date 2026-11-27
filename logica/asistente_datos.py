@@ -29,7 +29,7 @@ FUNCIONES_QUE_PUEDE_USAR = (
     "buscar_cuentas", "estado_de_cuenta", "resumen_de_cuentas", "avisos_por_cliente",
     "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "garantias", "hoy_aca",
     "miles", "texto_para_markdown", "presupuestos_para_seguir", "pedidos_sin_llegar",
-    "cuentas_que_dejaron_de_venir",
+    "cuentas_que_dejaron_de_venir", "avance_del_objetivo", "renglon_del_objetivo",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -37,6 +37,11 @@ _DATO_VENTAS = re.compile(
     r"|\bcomo (va|viene|vamos|anda|fue|estuvo) (el dia|la caja|hoy|ayer)\b"
     r"|\b(vendimos|vendi|se vendio) (hoy|ayer)\b")
 _POR_VENDEDOR = re.compile(r"\b(vendedor\w*|empleado\w*|cada uno|comision\w*)\b")
+# «¿Cómo vamos con el objetivo?»: el número de la barra de la caja (ver «EL OBJETIVO DEL MES»).
+# «Cómo pongo una meta» no: eso es la ficha de cómo se hace.
+_DATO_OBJETIVO = re.compile(
+    r"\b(como (vamos|va|venimos|viene|estamos|andamos)|cuanto (falta|nos falta|llevamos|va|"
+    r"vamos))\b.{0,25}\b(objetivo|meta)\b|^(y )?(el )?(objetivo|meta)( del mes)?$")
 _DATO_Y_AYER = re.compile(r"^(y )?(ayer|el de ayer|y el de ayer)$")
 _DATO_A_COBRAR = re.compile(
     r"\b(que|cuanto|cuantas|hay)\b.{0,20}\b(falta|faltan|espera|esperan|queda|quedan)\b.{0,15}"
@@ -123,6 +128,19 @@ def _dato_de_las_ventas(contexto, ayer=False):
         [("📋 El cierre de caja", "ver", "como:cierre")]
         if cierre and _asis_se_puede(cierre, contexto) else [])
     return _asis_dato(texto, botones, "ventas_ayer" if ayer else "ventas")
+
+
+def _dato_del_objetivo(contexto):
+    """La barra del objetivo del mes: con la plata, al administrador; al empleado, el
+    porcentaje (lo mismo que ve en la caja)."""
+    admin = contexto.get("nivel") == "admin"
+    avance = avance_del_objetivo()
+    if not avance:
+        texto = "🎯 Este mes no tiene objetivo de ventas." + (
+            " Se pone en la caja, en «🎯 Objetivo del mes»." if admin else "")
+    else:
+        texto = renglon_del_objetivo(avance, con_plata=admin) + "."
+    return _asis_dato(texto, _asis_ir_a(_CAJA, contexto), "objetivo")
 
 
 def _dato_a_cobrar(contexto):
@@ -303,6 +321,8 @@ def dato_del_momento(llano, contexto):
     if _CAJA in visibles:
         if _DATO_Y_AYER.match(llano) and contexto.get("ultima") == "dato:ventas":
             return _dato_de_las_ventas(contexto, ayer=True)
+        if _DATO_OBJETIVO.search(llano):
+            return _dato_del_objetivo(contexto)
         # «cuánto vendió cada vendedor» no es el número del día: es «🏆 El mes por vendedor».
         if _DATO_VENTAS.search(llano) and not _POR_VENDEDOR.search(llano):
             return _dato_de_las_ventas(contexto, ayer=" ayer" in f" {llano}")

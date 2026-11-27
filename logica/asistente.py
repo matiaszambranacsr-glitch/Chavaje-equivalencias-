@@ -435,6 +435,17 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("objetivo_del_mes", "Ponerle un objetivo de ventas al mes",
+     "objetivo meta metas objetivos mes mensual llegar alcanzar barra progreso cuanto falta "
+     "vender por dia",
+     "En la caja, «🎯 Objetivo del mes»: escribí cuánto querés vender y «💾 Guardar» (queda para "
+     "los meses que siguen hasta que lo cambies; en 0 no hay). Arriba de «📋 Ventas y cierre de "
+     "caja» sale la barra con lo vendido (sin lo anulado y con lo devuelto descontado), los "
+     "días abiertos que quedan, cuánto vender por día para llegar y si van adelantados o "
+     "atrasados. Los días abiertos salen del horario de atención; sin horario, de lunes a "
+     "sábado. Los empleados ven la barra y el porcentaje, no la plata. También sale en el "
+     "resumen del día.",
+     "💵 Caja", "admin"),
     ("mes_por_vendedor", "Ver cuánto vendió cada vendedor en el mes",
      "vendedor vendedores empleado empleados comision comisiones cuanto vendio cada uno mes "
      "mensual ranking",

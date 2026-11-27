@@ -1368,6 +1368,24 @@ def probar():
     esperar("y su liquidación, con la comisión",
             [t.value.split("\n")[-1].startswith("💰 Comisión (7,5%): $")
              for t in _adm_mes.text_area if str(t.key).startswith("liquidacion_")], [True])
+    # EL OBJETIVO DEL MES en la pantalla: lo pone el administrador; la barra sale para todos,
+    # con la plata solo para él.
+    def _barra(sesion):
+        return [p.proto.text for p in sesion.get("progress")]
+    esperar("sin objetivo, no hay barra", _barra(_adm_mes), [])
+    [x for x in _adm_mes.number_input if (x.key or "").startswith("objetivo_")][0] \
+        .set_value(1000000.0)
+    _adm_mes.button(key="objetivo_guardar").click().run()
+    esperar("puesto desde la caja, la barra con la plata",
+            (ns["objetivo_del_mes"](), [t.startswith("🎯 Objetivo del mes: ") and "$" in t
+                                        for t in _barra(_adm_mes)],
+             [e.value for e in _adm_mes.exception]), (1000000.0, [True], []))
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = False
+    vta.run()
+    esperar("el empleado ve la barra, sin la plata y sin poder cambiarlo",
+            ([t.startswith("🎯 Objetivo del mes: ") and "$" not in t for t in _barra(vta)],
+             [x for x in vta.number_input if (x.key or "").startswith("objetivo_")]),
+            ([True], []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

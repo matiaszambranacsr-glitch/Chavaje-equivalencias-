@@ -263,6 +263,13 @@ def resumen_del_dia(dia=None, con_ganancia=False):
     if caja["anuladas"]:
         renglones.append(f"🚫 Anuladas: {miles(caja['anuladas'])} "
                          f"({plata(caja['total_anulado'])}, no cuentan)")
+    # El objetivo del mes, al día del resumen (ver «EL OBJETIVO DEL MES»).
+    try:
+        _avance = avance_del_objetivo(fecha.strftime("%Y-%m"), hoy=fecha)
+        if _avance:
+            renglones.append(renglon_del_objetivo(_avance))
+    except Exception as _err:
+        anotar_error("resumen_del_dia: objetivo", _err)
     if len(caja["por_usuario"]) > 1:
         renglones.append("👤 " + " · ".join(f"{u}: {plata(t)}" for u, _n, t in caja["por_usuario"]))
     # Lo que está esperando, no solo de hoy: es lo que el dueño tiene que saber al cerrar.
@@ -1425,6 +1432,126 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
                   # Que se sepa que queda para reclamar: si no, nadie entra a buscarlo.
                   + (". Queda para reclamárselo al proveedor en ↩️ Devoluciones → 🔧 Garantías"
                      if motivo in MOTIVOS_PARA_RECLAMAR else "") + ".")
+
+
+# EL OBJETIVO DEL MES: el dueño sabía cuánto quería vender en el mes, pero nadie sabía cómo
+# venía hasta sumar el cierre de cada día a fin de mes, cuando ya no había nada que hacer. Lo
+# pone el administrador (queda hasta que lo cambie: el del mes que no tiene se arrastra del
+# anterior), y la caja muestra la barra con lo vendido —como en «🏆 Ventas y comisiones por
+# vendedor»: sin lo anulado y con lo devuelto descontado— y cuánto hay que vender por día abierto
+# para llegar. Los días abiertos salen del horario de atención (el de la respuesta fuera de
+# horario); sin horario, de lunes a sábado. Los feriados no los sabe.
+OBJETIVO_MAXIMO = 1e11                       # más es un número mal escrito
+DIAS_QUE_SE_ABRE_SIN_HORARIO = (0, 1, 2, 3, 4, 5)
+
+
+def objetivos_de_ventas():
+    """{«2026-11»: importe} como los dejó el administrador (0 = sin objetivo desde ese mes)."""
+    try:
+        datos = json.loads(obtener_config("objetivos_de_ventas", "") or "{}")
+    except ValueError:
+        return {}
+    return {str(k): float(v) for k, v in (datos or {}).items()
+            if re.fullmatch(r"\d{4}-\d{2}", str(k)) and isinstance(v, (int, float))
+            and 0 <= v <= OBJETIVO_MAXIMO}
+
+
+def objetivo_del_mes(mes=None):
+    """El objetivo de ese mes (este, si no se dice): el anotado, o el del último mes anterior que
+    tenga. None si no hay (o lo sacaron)."""
+    mes = mes or hoy_aca().strftime("%Y-%m")
+    anteriores = [k for k in objetivos_de_ventas() if k <= mes]
+    if not anteriores:
+        return None
+    valor = objetivos_de_ventas()[max(anteriores)]
+    return valor or None
+
+
+def guardar_objetivo_del_mes(importe, mes=None):
+    """(ok, texto). Lo pone el administrador; 0 o vacío lo saca. Queda en el registro."""
+    exigir_nivel("admin", "cambiar el objetivo de ventas")
+    mes = mes or hoy_aca().strftime("%Y-%m")
+    try:
+        nuevo = round(float(importe or 0), 0)
+    except (TypeError, ValueError):
+        return False, "Escribí cuánto querés vender en el mes."
+    if nuevo < 0 or not nuevo <= OBJETIVO_MAXIMO:    # también el «nan»
+        return False, "Revisá el número del objetivo."
+    antes = objetivo_del_mes(mes)
+    objetivos = objetivos_de_ventas()
+    objetivos[mes] = nuevo
+    guardar_config("objetivos_de_ventas", json.dumps(objetivos, sort_keys=True))
+    anotar_cambio("cambió el objetivo de ventas", "configuración", mes, antes=antes,
+                  despues=nuevo or None)
+    return True, (f"🎯 Objetivo de {nombre_del_mes(mes)}: ${miles(nuevo, 0)}." if nuevo
+                  else "🎯 Sin objetivo de ventas.")
+
+
+def guardar_objetivo_y_avisar(clave_del_campo):
+    """«💾 Guardar» del objetivo del mes (va como on_click)."""
+    try:
+        ok, texto = guardar_objetivo_del_mes(st.session_state.get(clave_del_campo))
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
+def dias_que_se_abre():
+    """Los días de la semana (lunes = 0) que abre el local, según el horario de atención."""
+    dias = set()
+    for d1, d2, _desde, _hasta in tramos_del_horario(respuesta_fuera_de_horario()["horario"]):
+        dias.update(range(d1, d2 + 1) if d1 <= d2 else [*range(d1, 7), *range(0, d2 + 1)])
+    return tuple(sorted(dias)) or DIAS_QUE_SE_ABRE_SIN_HORARIO
+
+
+def avance_del_objetivo(mes=None, hoy=None):
+    """None sin objetivo; si no, {objetivo, vendido, por_ciento, falta, quedan (días abiertos
+    que quedan, con hoy), por_dia (lo que falta repartido en esos días), esperado (lo que a esta
+    altura tendría que estar vendido, a ritmo parejo hasta ayer) y cumplido}."""
+    hoy = hoy or hoy_aca()
+    mes = mes or hoy.strftime("%Y-%m")
+    objetivo = objetivo_del_mes(mes)
+    if not objetivo:
+        return None
+    desde, hasta = rango_del_mes(mes, hoy)
+    vendido = round(sum(x["Vendido"] for x in ventas_por_vendedor(desde, hasta)), 2)
+    abre = set(dias_que_se_abre())
+    primero = date.fromisoformat(desde)
+    ultimo = date(primero.year + (primero.month == 12), primero.month % 12 + 1, 1) \
+        - timedelta(days=1)
+    dias_del_mes = [primero + timedelta(days=i) for i in range((ultimo - primero).days + 1)]
+    abiertos = [d for d in dias_del_mes if d.weekday() in abre] or dias_del_mes
+    pasados = sum(1 for d in abiertos if d < hoy)
+    quedan = len(abiertos) - pasados
+    falta = max(0.0, round(objetivo - vendido, 2))
+    return {"objetivo": objetivo, "vendido": vendido,
+            "por_ciento": round(vendido * 100 / objetivo, 1),
+            "falta": falta, "quedan": quedan,
+            "por_dia": round(falta / quedan, 0) if quedan else falta,
+            "esperado": round(objetivo * pasados / len(abiertos), 0),
+            "cumplido": vendido >= objetivo}
+
+
+def renglon_del_objetivo(avance, con_plata=True):
+    """El renglón de la barra (y del resumen del día): cuánto va, y cuánto por día para llegar.
+    Sin `con_plata` (el empleado), solo el porcentaje y los días."""
+    if not avance:
+        return ""
+    plata = lambda x: f"${miles(x, 0)}"
+    if avance["cumplido"]:
+        return ("🎉 ¡Objetivo del mes cumplido! " + (f"{plata(avance['vendido'])} de "
+                f"{plata(avance['objetivo'])} " if con_plata else "")
+                + f"({miles(avance['por_ciento'], 0)}%)")
+    texto = f"🎯 Objetivo del mes: {miles(avance['por_ciento'], 0)}%"
+    if con_plata:
+        texto += f" ({plata(avance['vendido'])} de {plata(avance['objetivo'])})"
+    if avance["quedan"]:
+        texto += (f" · quedan {avance['quedan']} día(s) abierto(s)"
+                  + (f": {plata(avance['por_dia'])} por día para llegar" if con_plata else ""))
+    if avance["esperado"]:
+        texto += (" · vamos adelantados" if avance["vendido"] >= avance["esperado"]
+                  else " · vamos atrasados")
+    return texto
 
 
 # EL CAMBIO DE APERTURA Y LOS BILLETES. El arqueo pide el efectivo «sin el cambio con el que

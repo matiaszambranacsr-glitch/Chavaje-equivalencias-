@@ -7946,6 +7946,22 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🎯 El objetivo de ventas del mes
+
+El dueño sabía cuánto quería vender en el mes, pero nadie sabía cómo venía hasta sumar los
+cierres a fin de mes, cuando ya no había nada que hacer. En 💵 Caja, **«🎯 Objetivo del mes»**
+(solo el administrador) guarda cuánto se quiere vender; queda para los meses que siguen hasta
+que se cambie (el mes que no tiene arrastra el del último que tuvo; en 0, no hay objetivo desde
+ese mes), y queda en el registro de cambios. Arriba de «📋 Ventas y cierre de caja» sale la
+barra: lo vendido —como en «🏆 Ventas y comisiones por vendedor», sin lo anulado y con lo
+devuelto descontado—, los días abiertos que quedan (con hoy), cuánto hay que vender por día
+para llegar, y si van adelantados o atrasados contra un ritmo parejo hasta ayer. Los días
+abiertos salen del horario de atención de la respuesta fuera de horario; sin horario, de lunes
+a sábado (los feriados no los sabe). Los empleados ven la barra y el porcentaje, no la plata.
+Sale también en el resumen del día, y el asistente contesta «¿cómo vamos con el objetivo?» con
+lo mismo que se ve en la caja (`avance_del_objetivo()` y `renglon_del_objetivo()`, en
+`logica/ventas.py`; lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
+
 ## 🪙 El cambio de apertura y el arqueo contando billetes
 
 El arqueo pide el efectivo «sin el cambio con el que abriste la caja»: la cajera contaba todo el
