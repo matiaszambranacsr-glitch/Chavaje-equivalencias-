@@ -46,7 +46,9 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 
 ## Reglas que el auditor hace cumplir
 
-- Todo `st.expander` y `st.popover` lleva `key=` (sin clave se cierran solos al cambiar el título).
+- Todo `st.expander` y `st.popover` lleva `key=`. Igual, en Streamlit 1.65 el título es parte de
+  su identidad: si cambia, se cierra. Una cuenta que se mueve sola (una tarea de fondo) va
+  adentro, no en el título (así se cerraba «🕯️ Bujías que calzan»).
 - Streamlit corre lo de adentro de un expander aunque esté cerrado: si adentro hay trabajo, va
   perezoso, `x = st.expander(..., key=..., on_change="rerun")` y `if x.open: with x:` (ver «📐
   Buscar por medidas» en `pantallas/buscador.py`). No si adentro hay campos que se leen afuera.

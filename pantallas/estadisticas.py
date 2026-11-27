@@ -1255,13 +1255,19 @@ a traer solas desde Administrar → Mantenimiento.
         # 🕯️ LAS BUJÍAS QUE CALZAN, relacionadas solas. Ver relacionar_las_bujias_que_calzan().
         # Afuera de la cola: se ve aunque no quede nada pendiente.
         _bujias_on = bujias_automaticas_prendido()
+        # SIN LA CUENTA EN EL TÍTULO: Streamlit reconoce un desplegable por su título, aunque
+        # tenga clave. La cuenta de pares la cambia la tarea de fondo, entre un toque y otro, y
+        # el desplegable abierto se cerraba solo (así falló una vez la prueba en GitHub: las
+        # dos bujías se relacionaron entre el toque que lo abría y el que lo miraba). La cuenta
+        # va adentro; «prendido/apagado» cambia solo cuando alguien lo toca.
         _exp_bujias = st.expander(
             "🕯️ Bujías que calzan igual, relacionadas solas — "
-            + ("prendido" if _bujias_on else "apagado")
-            + (f" ({miles(cuantas_bujias_relaciono())} pares)" if _bujias_on else ""),
+            + ("prendido" if _bujias_on else "apagado"),
             key="exp_bujias_que_calzan", on_change="rerun")
         if _exp_bujias.open:
             with _exp_bujias:
+                if _bujias_on:
+                    st.caption(f"Ya relacionó {miles(cuantas_bujias_relaciono())} par(es).")
                 explicar(
                     "Las bujías que tienen la misma rosca, largo, hexágono, asiento y material "
                     "quedan como equivalentes aunque cambie el grado térmico: en el mostrador se "
