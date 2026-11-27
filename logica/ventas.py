@@ -180,15 +180,23 @@ def cierre_de_caja(dia=None):
     # LO DEVUELTO ESE DÍA sale de ese día, por donde entró (la forma de pago de la venta) y de
     # quien lo devolvió: es lo que tiene que faltar en el cajón. Ver devolver_de_una_venta().
     devueltas = devoluciones_del_dia(dia)
+    # LAS SEÑAS (ver esa sección): entran el día que se dejan, por donde se pagaron, y la que se
+    # devuelve sale el día que se devuelve. La venta en la que se descontó cuenta sin esa parte,
+    # que ya había entrado: si no, la seña se contaba dos veces.
+    senas_cobradas, senas_devueltas = senas_del_dia(dia)
 
     def agrupar(campo, vacio, campo_devolucion):
         grupos = {}
         for v in validas:
             g = grupos.setdefault(v[campo] or vacio, [0, 0.0])
             g[0] += 1
-            g[1] += v["total"] or 0
+            g[1] += (v["total"] or 0) - (v.get("sena") or 0)
         for d in devueltas:
             grupos.setdefault(d[campo_devolucion] or vacio, [0, 0.0])[1] -= d["importe"]
+        for s in senas_cobradas:
+            grupos.setdefault(s[campo] or vacio, [0, 0.0])[1] += s["importe"]
+        for s in senas_devueltas:
+            grupos.setdefault(s[campo] or vacio, [0, 0.0])[1] -= s["importe"]
         return sorted(((k, n, round(t, 2)) for k, (n, t) in grupos.items()),
                       key=lambda x: -x[2])
     anuladas = [v for v in ventas if v["anulada"]]
@@ -197,8 +205,16 @@ def cierre_de_caja(dia=None):
     items = [it for v in validas for it in v["items"]]
     con_costo = [it for it in items if it.get("costo") is not None]
     total_devuelto = round(sum(d["importe"] for d in devueltas), 2)
+    total_senas = round(sum(s["importe"] for s in senas_cobradas), 2)
+    total_senas_devueltas = round(sum(s["importe"] for s in senas_devueltas), 2)
+    senas_descontadas = round(sum(v.get("sena") or 0 for v in validas), 2)
     return {"ventas": len(validas),
-            "total": round(sum(v["total"] or 0 for v in validas) - total_devuelto, 2),
+            "total": round(sum(v["total"] or 0 for v in validas) - senas_descontadas
+                           - total_devuelto + total_senas - total_senas_devueltas, 2),
+            "senas": len(senas_cobradas), "total_senas": total_senas,
+            "senas_devueltas": len(senas_devueltas),
+            "total_senas_devueltas": total_senas_devueltas,
+            "senas_descontadas": senas_descontadas,
             "ganancia": round(sum((it["precio"] - it["costo"]) * it["cantidad"]
                                   for it in con_costo)
                               - sum((d["precio"] - d["costo"]) * d["cantidad"]
@@ -252,6 +268,13 @@ def resumen_del_dia(dia=None, con_ganancia=False):
     if caja["devoluciones"]:
         renglones.append(f"↩️ Devuelto: {plata(caja['total_devuelto'])} "
                          f"({miles(caja['devoluciones'])})")
+    if caja["senas"] or caja["senas_devueltas"] or caja["senas_descontadas"]:
+        renglones.append("🔖 Señas: " + " · ".join(x for x in (
+            f"entraron {plata(caja['total_senas'])} ({miles(caja['senas'])})"
+            if caja["senas"] else "",
+            f"devueltas {plata(caja['total_senas_devueltas'])}" if caja["senas_devueltas"] else "",
+            f"descontadas al retirar {plata(caja['senas_descontadas'])}"
+            if caja["senas_descontadas"] else "") if x))
     _salidas = [s for s in salidas_de_caja(dia) if not s["anulada"]]
     if _salidas:
         renglones.append(f"💸 Salidas de caja: {plata(sum(s['importe'] for s in _salidas))} "
@@ -371,7 +394,7 @@ def resumen_de_la_semana(hasta=None, con_ganancia=False):
 
 
 def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=None,
-                 a_la_caja=False, telefono=""):
+                 a_la_caja=False, telefono="", senas=()):
     """Cierra la venta. Devuelve (venta_id, avisos). Ver «VENTAS DEL MOSTRADOR».
 
     `a_la_caja`: la venta queda esperando en la caja, sin forma de pago, hasta que el cajero
@@ -416,15 +439,43 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=
                         (it.get("pedido") or "").strip(), veredicto, it.get("evidencia") or None))
     usuario = usuario or obtener_usuario_actual()
     avisos = []
+    sena_ids = sorted({int(s) for s in senas or ()})
+    if sena_ids and forma_de_pago == A_CUENTA:
+        raise ValueError("La seña se descuenta en una venta que se cobra, no en una a cuenta.")
     with db_lock, transaccion():
         total = round(sum(x[1] * x[2] for x in limpios), 2)
+        # LA SEÑA que ya dejó (ver «LAS SEÑAS»): solo las que siguen esperando, y no más que la
+        # venta. Dos vendedores con la misma seña en pantalla no la descuentan dos veces.
+        sena = 0.0
+        if sena_ids:
+            filas_sena = c.execute(
+                f"SELECT id, importe FROM senas WHERE estado = 'activa' AND id IN "
+                f"({','.join('?' * len(sena_ids))})", sena_ids).fetchall()
+            if len(filas_sena) != len(sena_ids):
+                raise ValueError("Una de las señas ya no está esperando (¿la descontó otro o se "
+                                 "devolvió?).")
+            sena = round(sum(float(f["importe"]) for f in filas_sena), 2)
+            if sena > total:
+                raise ValueError(f"La seña (${miles(sena, 0)}) es más que la venta "
+                                 f"(${miles(total, 0)}): sumá lo que se lleva, o devolvé la "
+                                 "diferencia desde la caja.")
         c.execute("""INSERT INTO ventas (usuario, cliente, forma_de_pago, total, cobrada,
-                                         mecanico_id, total_de_lista, cliente_telefono)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                         mecanico_id, total_de_lista, cliente_telefono, sena)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                   (usuario, (cliente or "").strip(), "" if a_la_caja else (forma_de_pago or ""),
                    total, 0 if a_la_caja else 1, mecanico_id or None, total,
-                   str(telefono or "").strip()[:40] or None))
+                   str(telefono or "").strip()[:40] or None, sena))
         venta_id = c.lastrowid
+        if sena_ids:
+            marcadores = ",".join("?" * len(sena_ids))
+            c.execute(f"""UPDATE consultas_cliente SET estado = 'vendida',
+                                 fecha_cierre = datetime('now')
+                          WHERE estado = 'activa' AND id IN
+                              (SELECT consulta_id FROM senas WHERE id IN ({marcadores}))""",
+                      sena_ids)
+            c.execute(f"""UPDATE senas SET estado = 'usada', venta_id = ?,
+                                 resuelta_en = datetime('now'), resuelta_por = ?
+                          WHERE id IN ({marcadores})""", [venta_id, usuario] + sena_ids)
         for producto_id, cantidad, precio, pedido, veredicto, evidencia in limpios:
             c.execute("""SELECT p.stock, p.codigo_raw, p.descripcion, p.precio_costo,
                                 m.nombre AS marca
@@ -589,6 +640,15 @@ def _anular_la_venta(venta_id):
                      WHERE id = ? AND anulada = 0""", (obtener_usuario_actual(), venta_id))
         if c.rowcount != 1:
             return False, "Esa venta no existe o ya estaba anulada."
+        # La seña que se había descontado vuelve a esperar: el cliente la dejó igual (ver «LAS
+        # SEÑAS»), y lo que encargó también.
+        c.execute("""UPDATE consultas_cliente SET estado = 'activa', fecha_cierre = NULL
+                     WHERE estado = 'vendida' AND id IN
+                         (SELECT consulta_id FROM senas WHERE venta_id = ? AND estado = 'usada')""",
+                  (venta_id,))
+        c.execute("""UPDATE senas SET estado = 'activa', venta_id = NULL, resuelta_en = NULL,
+                            resuelta_por = NULL
+                     WHERE venta_id = ? AND estado = 'usada'""", (venta_id,))
         # Si se había puesto a cuenta, el cargo de la cuenta también queda anulado: si no, el
         # taller seguía debiendo algo que no se llevó. Ver poner_a_cuenta().
         c.execute("""UPDATE movimientos_de_cuenta SET anulado = 1
@@ -633,7 +693,7 @@ def ventas_del_dia(dia=None):
                         v.forma_de_pago, v.total, v.anulada, v.km, ve.patente,
                         COALESCE(v.cobrada, 1) AS cobrada, v.cuotas,
                         COALESCE(v.descuento, 0) AS descuento, v.cobrada_por,
-                        k.nombre AS cuenta
+                        k.nombre AS cuenta, COALESCE(v.sena, 0) AS sena
                  FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
                  LEFT JOIN mecanicos k ON k.id = v.mecanico_id
                  WHERE date(COALESCE(v.cobrada_en, v.fecha), '-3 hours') = ?
@@ -958,7 +1018,7 @@ def una_venta(venta_id):
     c.execute("""SELECT v.id, v.fecha, v.usuario, v.cliente, v.forma_de_pago, v.total, v.anulada,
                         v.km, ve.patente, COALESCE(v.cobrada, 1) AS cobrada, v.cuotas,
                         COALESCE(v.descuento, 0) AS descuento, v.total_de_lista, v.mecanico_id,
-                        k.nombre AS cuenta
+                        k.nombre AS cuenta, COALESCE(v.sena, 0) AS sena
                  FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
                  LEFT JOIN mecanicos k ON k.id = v.mecanico_id WHERE v.id = ?""",
               (venta_id,))
@@ -993,6 +1053,9 @@ def texto_del_comprobante(venta_id):
                       f"${miles(venta['total_de_lista'] or 0, 0)})")
     lineas.append(f"TOTAL: ${miles(venta['total'] or 0, 0)}"
                   + (f" ({como_se_pago(venta)})" if venta["forma_de_pago"] else ""))
+    if venta.get("sena"):
+        lineas.append(f"Seña que ya dejaste: -${miles(venta['sena'], 0)} · A PAGAR: "
+                      f"${miles((venta['total'] or 0) - venta['sena'], 0)}")
     if not venta["cobrada"] and not venta["anulada"]:
         lineas.append("PENDIENTE DE COBRO")
     if venta["anulada"]:
@@ -1132,6 +1195,10 @@ def ticket_del_comprobante(venta):
                                 f"${miles(venta.get('total_de_lista') or 0, 0)})", 9, False))
     partes.append(("par", "TOTAL" + (f" ({como_se_pago(venta)})" if venta["forma_de_pago"]
                                       else ""), f"${miles(venta['total'] or 0, 0)}", 12, True))
+    if venta.get("sena"):
+        partes.append(("par", "Seña que ya dejó", f"-${miles(venta['sena'], 0)}", 9, False))
+        partes.append(("par", "A PAGAR", f"${miles((venta['total'] or 0) - venta['sena'], 0)}",
+                       12, True))
     if not venta.get("cobrada", 1) and not venta["anulada"]:
         partes.append(("centro", "PENDIENTE DE COBRO", 10, True))
     if venta["anulada"]:
@@ -1198,6 +1265,16 @@ def pdf_del_comprobante(venta):
     pdf.cell(140, 9, limpiar("TOTAL" + (f" ({como_se_pago(venta)})"
                                          if venta["forma_de_pago"] else "")), border="T")
     pdf.cell(40, 9, limpiar(f"${miles(venta['total'] or 0, 0)}"), border="T", align="R")
+    if venta.get("sena"):
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(140, 7, limpiar("Seña que ya dejó"))
+        pdf.cell(40, 7, limpiar(f"-${miles(venta['sena'], 0)}"), align="R")
+        pdf.ln()
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(140, 9, "A PAGAR")
+        pdf.cell(40, 9, limpiar(f"${miles((venta['total'] or 0) - venta['sena'], 0)}"),
+                 align="R")
     pdf.ln(12)
     pdf.set_font("Helvetica", "I", 9)
     if not venta.get("cobrada", 1) and not venta["anulada"]:
@@ -1948,7 +2025,7 @@ def ventas_a_cobrar():
     el total, la hora y lo que se lleva."""
     c.execute("""SELECT v.id, v.fecha, substr(datetime(v.fecha, '-3 hours'), 12, 5) AS hora,
                         v.usuario, v.cliente,
-                        v.total, v.mecanico_id, k.nombre AS cuenta
+                        v.total, v.mecanico_id, k.nombre AS cuenta, COALESCE(v.sena, 0) AS sena
                  FROM ventas v LEFT JOIN mecanicos k ON k.id = v.mecanico_id
                  WHERE v.cobrada = 0 AND v.anulada = 0 ORDER BY v.id""")
     # «v.cobrada = 0» y no «COALESCE(v.cobrada, 1) = 0» (dan lo mismo: la vieja sin el dato
@@ -1966,8 +2043,12 @@ def el_cartel_de(venta):
     """Lo que le dice el cartel al cajero: quién vendió, a qué cuenta, el total y la hora."""
     para = (venta.get("cuenta") or (f"{venta['cliente']}, de Mostrador" if venta.get("cliente")
                                     else "Mostrador"))
+    sena = venta.get("sena") or 0
     return (f"🧾 Venta #{venta['id']} — vendió {venta.get('usuario') or '¿?'} · para {para} · "
-            f"${miles(venta.get('total') or 0, 0)} · {venta.get('hora') or ''}")
+            f"${miles(venta.get('total') or 0, 0)}"
+            + (f" (🔖 dejó ${miles(sena, 0)} de seña: cobrar "
+               f"${miles((venta.get('total') or 0) - sena, 0)})" if sena else "")
+            + f" · {venta.get('hora') or ''}")
 
 
 def total_con_descuento(venta_id, descuento):
@@ -2040,11 +2121,14 @@ def poner_a_cuenta(venta_id, mecanico_id=None, descuento=None):
     `mecanico_id`). Con el descuento de la cuenta si no se dice otro, el plazo de la cuenta y
     su límite de crédito, como al entregar el depósito. (ok, texto)."""
     exigir_nivel("empleado", "poner una venta a cuenta")
-    c.execute("""SELECT mecanico_id FROM ventas
+    c.execute("""SELECT mecanico_id, COALESCE(sena, 0) AS sena FROM ventas
                  WHERE id = ? AND COALESCE(cobrada, 1) = 0 AND anulada = 0""", (venta_id,))
     fila = c.fetchone()
     if not fila:
         return False, "Esa venta ya no está esperando en la caja (¿la cobró otro o se anuló?)."
+    if fila["sena"]:
+        return False, (f"Tiene ${miles(fila['sena'], 0)} de seña descontados: se cobra lo que "
+                       "falta (una venta con seña no va a cuenta).")
     mecanico_id = mecanico_id or fila["mecanico_id"]
     if not mecanico_id:
         return False, "Es de Mostrador: elegí a qué cuenta va."
@@ -3018,6 +3102,7 @@ def ficha_del_cliente(telefono):
                                    key=lambda f: f["fecha"] or "", reverse=True)[:5],
             "autos": [f for f in filas if f["tipo"] == "auto"],
             "cuenta": dict(cuenta) if cuenta else None, "chat": chat["id"] if chat else None,
+            "senas": [x for x in senas_activas() if clave_del_telefono(x["telefono"]) == clave],
             "whatsapp": link_de_whatsapp(resumen["telefono"])}
 
 
@@ -3061,6 +3146,11 @@ def mostrar_la_ficha_del_cliente(telefono, donde):
     if ficha["cuenta"]:
         st.info(f"Es el teléfono de la cuenta **{texto_para_markdown(ficha['cuenta']['nombre'])}**"
                 " (🗂️ Administrar → 💳 Cuentas corrientes).")
+    if ficha["senas"]:
+        st.markdown("**🔖 Señas que dejó**")
+        for x in ficha["senas"]:
+            st.markdown(f"- \\${miles(x['importe'], 0)} por {texto_para_markdown(x['que'])} "
+                        f"(el {dia_y_mes_de_aca(x['fecha'])}, {x['forma_de_pago']})")
     if ficha["espera"]:
         st.markdown("**⏳ Lo que espera**")
         for e in ficha["espera"]:
@@ -3087,3 +3177,159 @@ def mostrar_la_ficha_del_cliente(telefono, donde):
                                         .strip() for i in v["items"]),
                        "Total": f"${miles(v['total'] or 0, 0)}"} for v in ficha["compras"]],
                      hide_index=True, width="stretch")
+
+
+# LAS SEÑAS: el cliente encarga algo que no hay y deja una parte. Se anotaba en un papel o en el
+# cuaderno: la plata entraba al cajón sin que el cierre lo supiera (el arqueo decía «Sobran»), y
+# el día que retiraba nadie se acordaba de cuánto había dejado, o se le cobraba entero. Ahora:
+#   · Se anota en 💵 Caja → «🔖 Señas» con quién, qué encargó (del catálogo o escrito), cuánto y
+#     cómo pagó. Entra a la caja ese día, por esa forma de pago (ver cierre_de_caja()).
+#   · Si es un producto del catálogo, queda también en lo que espera el cliente: cuando se carga
+#     en «Entró mercadería» la app avisa para escribirle (ver «AVISARLE QUE LLEGÓ»). Y se puede
+#     anotar como pedido al proveedor en el mismo paso.
+#   · Al retirar, la venta ofrece descontarla (si lleva ese producto, o el teléfono es el de la
+#     seña): la venta vale lo que vale, se cobra lo que falta, y el cierre de ese día cuenta solo
+#     lo que falta (la seña ya había entrado). Anular la venta la vuelve a dejar esperando.
+#   · Si no la retira, «↩️ Devolverla» la saca de la caja del día en que se devuelve.
+SENA_MAXIMA = SALIDA_DE_CAJA_MAXIMA
+ESTADOS_DE_LA_SENA = {"activa": "🔖 Esperando que retire", "usada": "✅ Descontada al retirar",
+                      "reintegrada": "↩️ Devuelta"}
+
+
+def anotar_sena(cliente, telefono, que, importe, forma_de_pago, producto_id=None,
+                pedir_al_proveedor=False):
+    """(ok, texto, id de la seña o None)."""
+    exigir_nivel("empleado", "anotar una seña")
+    cliente, telefono = str(cliente or "").strip()[:80], str(telefono or "").strip()[:40]
+    if not cliente and not telefono:
+        return False, "Poné el nombre o el teléfono: si no, después no sabés de quién es.", None
+    producto = None
+    if producto_id:
+        producto = c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, m.nombre AS marca
+                                FROM productos p JOIN marcas m ON m.id = p.marca_id
+                                WHERE p.id = ?""", (int(producto_id),)).fetchone()
+        if not producto:
+            return False, "Ese producto ya no está en el catálogo.", None
+    que = (str(que or "").strip()
+           or (f"{producto['marca']} {producto['codigo_raw']}" if producto else ""))[:120]
+    if not que:
+        return False, "Escribí qué encargó (o elegilo del catálogo).", None
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "Escribí cuánto dejó.", None
+    if not importe > 0:
+        return False, "La seña tiene que ser más que cero.", None
+    if not importe <= SENA_MAXIMA:
+        return False, f"¿${miles(importe, 0)} de seña? Revisá el número.", None
+    if forma_de_pago not in FORMAS_DE_PAGO:
+        return False, "Elegí cómo pagó la seña.", None
+    usuario = obtener_usuario_actual()
+    with db_lock, transaccion():
+        consulta_id = None
+        if producto:
+            c.execute("""INSERT INTO consultas_cliente (cliente, telefono, producto_id,
+                                                        codigo_buscado, descripcion, cantidad,
+                                                        nota, atendio)
+                         VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+                      (cliente or None, telefono or None, producto["id"], producto["codigo_raw"],
+                       (producto["descripcion"] or "")[:120] or None,
+                       f"Dejó ${miles(importe, 0)} de seña", usuario))
+            consulta_id = c.lastrowid
+        c.execute("""INSERT INTO senas (cliente, telefono, que, producto_id, consulta_id,
+                                        importe, forma_de_pago, usuario)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (cliente or None, telefono or None, que, producto["id"] if producto else None,
+                   consulta_id, importe, forma_de_pago, usuario))
+        sena_id = c.lastrowid
+        anotar_cambio("anotó una seña", "caja", sena_id,
+                      despues={"importe": importe, "forma": forma_de_pago, "que": que})
+    pedido = ""
+    if producto and pedir_al_proveedor:
+        anotados, ya = anotar_el_pedido_al_proveedor([(producto["id"], 1)])
+        pedido = (" Quedó anotado como pedido al proveedor." if anotados else
+                  " Ya estaba pedido al proveedor." if ya else "")
+    return True, (f"🔖 Seña de ${miles(importe, 0)} ({forma_de_pago}) de {cliente or telefono} "
+                  f"por {que}." + (" Cuando entre, la app avisa para escribirle." if producto
+                                   else "") + pedido), sena_id
+
+
+def senas_activas():
+    """[dict] las que esperan que el cliente retire, la más vieja primero."""
+    c.execute("""SELECT id, cliente, telefono, que, producto_id, importe, forma_de_pago,
+                        usuario, fecha
+                 FROM senas WHERE estado = 'activa' ORDER BY id""")
+    return [dict(f) for f in c.fetchall()]
+
+
+def senas_para_la_venta(producto_ids, telefono=""):
+    """Las señas que se pueden descontar en esta venta: las de un producto que lleva, o las del
+    mismo teléfono (ver clave_del_telefono())."""
+    ids, clave = {int(p) for p in producto_ids or () if p}, clave_del_telefono(telefono)
+    return [s for s in senas_activas()
+            if (s["producto_id"] and s["producto_id"] in ids)
+            or (clave and clave_del_telefono(s["telefono"]) == clave)]
+
+
+def senas_del_dia(dia=None):
+    """(las que se dejaron ese día, las que se devolvieron ese día): [dict] con importe,
+    forma_de_pago y usuario (quien la recibió, o quien la devolvió). Ver cierre_de_caja()."""
+    dia = dia or hoy_aca().isoformat()
+    cobradas = [dict(f) for f in c.execute(
+        """SELECT id, importe, forma_de_pago, usuario FROM senas
+           WHERE date(fecha, '-3 hours') = ?""", (dia,))]
+    devueltas = [dict(f) for f in c.execute(
+        """SELECT id, importe, forma_de_pago, resuelta_por AS usuario FROM senas
+           WHERE estado = 'reintegrada' AND date(resuelta_en, '-3 hours') = ?""", (dia,))]
+    return cobradas, devueltas
+
+
+def devolver_sena(sena_id):
+    """No la va a retirar: se le devuelve y sale de la caja de hoy, por donde había entrado.
+    (ok, texto)."""
+    exigir_nivel("empleado", "devolver una seña")
+    with db_lock, transaccion():
+        fila = c.execute("SELECT importe, forma_de_pago, cliente, telefono, consulta_id "
+                         "FROM senas WHERE id = ? AND estado = 'activa'", (int(sena_id),)
+                         ).fetchone()
+        if not fila:
+            return False, "Esa seña ya no está esperando (¿se descontó o ya se devolvió?)."
+        c.execute("""UPDATE senas SET estado = 'reintegrada', resuelta_en = datetime('now'),
+                            resuelta_por = ? WHERE id = ?""",
+                  (obtener_usuario_actual(), int(sena_id)))
+        if fila["consulta_id"]:
+            c.execute("""UPDATE consultas_cliente SET estado = 'cancelada',
+                                fecha_cierre = datetime('now')
+                         WHERE id = ? AND estado = 'activa'""", (fila["consulta_id"],))
+        anotar_cambio("devolvió una seña", "caja", sena_id, antes={"importe": fila["importe"]})
+    return True, (f"↩️ Seña devuelta a {fila['cliente'] or fila['telefono']}: "
+                  f"${miles(fila['importe'], 0)} ({fila['forma_de_pago']}). Sale de la caja de "
+                  "hoy.")
+
+
+def anotar_sena_y_avisar():
+    """«🔖 Anotar la seña» (va como on_click): lee los campos y, si se anotó, los vacía."""
+    st_ = st.session_state
+    producto_id = st_.get("sena_producto") if str(st_.get("sena_codigo") or "").strip() else None
+    try:
+        ok, texto, _ = anotar_sena(st_.get("sena_cliente"), st_.get("sena_telefono"),
+                                   st_.get("sena_que"), st_.get("sena_importe"),
+                                   st_.get("sena_forma"), producto_id,
+                                   bool(st_.get("sena_pedir")))
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    if ok:
+        for clave in ("sena_cliente", "sena_telefono", "sena_que", "sena_importe",
+                      "sena_codigo", "sena_producto", "sena_pedir"):
+            st_.pop(clave, None)
+    avisar("success" if ok else "warning", texto)
+
+
+def devolver_sena_y_avisar(sena_id):
+    """«Sí, devolverla» (va como on_click)."""
+    st.session_state.pop("sena_por_devolver", None)
+    try:
+        ok, texto = devolver_sena(sena_id)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)

@@ -56,6 +56,11 @@ if pagina == PAGINAS[11]:
         _total = total_con_descuento(venta_id, _desc)
         # «\$»: dos «$» en un mismo texto se leen como una fórmula y se pierden los dos.
         st.markdown(f"### Total: \\${miles(_total, 0)}")
+        # LA SEÑA que ya dejó (ver «LAS SEÑAS»): se cobra lo que falta; de ahí el vuelto.
+        if _v.get("sena"):
+            st.markdown(f"🔖 Ya dejó \\${miles(_v['sena'], 0)} de seña: **cobrar "
+                        f"\\${miles(max(0.0, _total - _v['sena']), 0)}**")
+            _total = max(0.0, _total - _v["sena"])
         if _desc:
             st.caption(f"Era ${miles(_v['total'], 0)}: {como_porcentaje(_desc)}% menos.")
         if _forma == "Tarjeta de crédito" and _cuotas > 1:
@@ -211,25 +216,79 @@ if pagina == PAGINAS[11]:
     # EL OBJETIVO DEL MES (ver esa sección en logica/ventas.py): la barra la ven todos los de
     # la caja; la plata, solo el administrador, que es el que lo pone.
     _avance = avance_del_objetivo()
-    if _avance or es_admin():
-        _ob1, _ob2 = cols([4, 1], abajo=True)
-        if _avance:
-            _ob1.progress(min(1.0, _avance["por_ciento"] / 100),
-                          text=renglon_del_objetivo(_avance, con_plata=es_admin()))
-        if es_admin():
-            with _ob2.popover("🎯 Objetivo" if _avance else "🎯 Objetivo del mes",
-                              key="pop_objetivo_del_mes", width="stretch"):
-                _obj = objetivo_del_mes()
-                _clave_obj = f"objetivo_{hoy_aca():%Y-%m}_{_obj}"
-                st.number_input(f"Cuánto querés vender en {nombre_del_mes(f'{hoy_aca():%Y-%m}')} "
-                                "($):", min_value=0.0, step=100000.0, value=_obj,
-                                placeholder="Ej: 5000000", key=_clave_obj,
-                                help="Lo vendido es sin lo anulado y con lo devuelto descontado. "
-                                     "Queda para los meses que siguen hasta que lo cambies; "
-                                     "en 0, no hay objetivo. Los empleados ven la barra y el "
-                                     "porcentaje, no la plata.")
-                st.button("💾 Guardar", key="objetivo_guardar", width="stretch",
-                          on_click=guardar_objetivo_y_avisar, args=(_clave_obj,))
+    if _avance:
+        st.progress(min(1.0, _avance["por_ciento"] / 100),
+                    text=renglon_del_objetivo(_avance, con_plata=es_admin()))
+    # Las señas y el objetivo, en un renglón: en el celular «🔖 Señas» sola quedaba angosta,
+    # abajo de la burbuja del asistente (se vio en el barrido).
+    _ob1, _ob2 = cols([1, 1], apilar_en_celular=False)
+    _pop_senas = _ob1.popover("🔖 Señas", key="pop_senas", on_change="rerun", width="stretch")
+    if es_admin():
+        with _ob2.popover("🎯 Objetivo del mes", key="pop_objetivo_del_mes",
+                          width="stretch"):
+            _obj = objetivo_del_mes()
+            _clave_obj = f"objetivo_{hoy_aca():%Y-%m}_{_obj}"
+            st.number_input(f"Cuánto querés vender en {nombre_del_mes(f'{hoy_aca():%Y-%m}')} "
+                            "($):", min_value=0.0, step=100000.0, value=_obj,
+                            placeholder="Ej: 5000000", key=_clave_obj,
+                            help="Lo vendido es sin lo anulado y con lo devuelto descontado. "
+                                 "Queda para los meses que siguen hasta que lo cambies; "
+                                 "en 0, no hay objetivo. Los empleados ven la barra y el "
+                                 "porcentaje, no la plata.")
+            st.button("💾 Guardar", key="objetivo_guardar", width="stretch",
+                      on_click=guardar_objetivo_y_avisar, args=(_clave_obj,))
+
+    # LAS SEÑAS (ver esa sección en logica/ventas.py): se anotan acá y entran a la caja hoy;
+    # al retirar, la venta las descuenta. Perezoso (arriba, al lado del objetivo): lee la base
+    # solo abierto.
+    if _pop_senas.open:
+        with _pop_senas:
+            st.markdown("**Anotar una seña**")
+            _sn1, _sn2 = cols([1, 1])
+            _sn1.text_input("Cliente:", key="sena_cliente", placeholder="Ej: Juan Pérez")
+            _sn2.text_input("📱 Teléfono:", key="sena_telefono", placeholder="Ej: 11 4567-8901",
+                            help="Para avisarle cuando llegue y que la venta la reconozca.")
+            _q_sena = st.text_input("Código del producto (si está en el catálogo):",
+                                    key="sena_codigo", placeholder="Ej: W712")
+            _prod_sena = {}
+            if _q_sena.strip():
+                _prod_sena = {p_["id"]: p_ for p_ in productos_para_etiquetar(_q_sena)}
+                if _prod_sena:
+                    st.selectbox("Producto:", list(_prod_sena), key="sena_producto",
+                                 format_func=lambda i: (  # rótulo fijo: el producto no cambia
+                                     f"{_prod_sena[i]['marca']} {_prod_sena[i]['codigo_raw']} — "
+                                     f"{(_prod_sena[i]['descripcion'] or '')[:40]}"))
+                    st.checkbox("📝 Anotarlo como pedido al proveedor", key="sena_pedir")
+                else:
+                    st.caption("No está en el catálogo: escribí qué encargó abajo.")
+            st.text_input("Qué encargó:" if not _prod_sena else "Qué encargó (opcional):",
+                          key="sena_que", placeholder="Ej: kit de distribución Gol 1.6")
+            _sn3, _sn4 = cols([1, 1])
+            _sn3.number_input("Cuánto dejó ($):", min_value=0.0, step=1000.0, value=None,
+                              key="sena_importe", placeholder="Ej: 20000")
+            _sn4.selectbox("Cómo pagó:", FORMAS_DE_PAGO, key="sena_forma")
+            st.button("🔖 Anotar la seña", key="sena_anotar", type="primary", width="stretch",
+                      on_click=anotar_sena_y_avisar)
+            _activas = senas_activas()
+            st.markdown(f"**Las que esperan que retire** ({miles(len(_activas))})")
+            if not _activas:
+                st.caption("Ninguna.")
+            _por_devolver = st.session_state.get("sena_por_devolver")
+            for _s in _activas:
+                _sa, _sb = cols([4, 1], abajo=True, apilar_en_celular=False)
+                _sa.caption(f"**{texto_para_markdown(_s['cliente'] or _s['telefono'] or '')}** · "
+                            f"{texto_para_markdown(_s['que'])} · \\${miles(_s['importe'], 0)} "
+                            f"({_s['forma_de_pago']}) · el {dia_y_mes_de_aca(_s['fecha'])}, "
+                            f"{_s['usuario'] or ''}")
+                if _por_devolver == _s["id"]:
+                    _sb.button("✅ Sí", key=f"sena_si_{_s['id']}", width="stretch",
+                               help=f"Devolverle ${miles(_s['importe'], 0)}: sale de la caja "
+                                    "de hoy.", on_click=devolver_sena_y_avisar,
+                               args=(_s["id"],))
+                elif _sb.button("↩️", key=f"sena_devolver_{_s['id']}", width="stretch",
+                                help="No lo va a retirar: devolverle la seña."):
+                    st.session_state["sena_por_devolver"] = _s["id"]
+                    st.rerun()
 
     # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija. Lo cobrado cuenta
     # el día que se cobró; lo que espera, aparte.

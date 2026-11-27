@@ -1284,6 +1284,17 @@ def probar():
     vta.session_state["exp_agenda_clientes"] = False
     vta.session_state["venta_telefono"] = ""
     vta.session_state["venta_cliente"] = ""
+    # LA SEÑA AL RETIRAR: si lleva lo que encargó, se ofrece descontarla (sin tildar), y con el
+    # tilde dice cuánto cobrar.
+    _, _, _sena_v = ns["anotar_sena"]("Pedro", "", "", 500, "Efectivo", pid)
+    vta.run()
+    _tilde = [x for x in vta.checkbox if x.key == f"venta_sena_{_sena_v}"]
+    esperar("se ofrece, sin tildar", [x.value for x in _tilde], [False])
+    _tilde[0].check().run()
+    esperar("tildada: lo que hay que cobrar",
+            any("A cobrar: \\$1.300" in m.value for m in vta.markdown), True)
+    vta.checkbox(key=f"venta_sena_{_sena_v}").uncheck().run()
+    ns["devolver_sena"](_sena_v)
     vta.session_state["venta_items"] = []
     vta.run()
     # CORREGIR UN COBRO desde la caja (ver esa sección en logica/ventas.py): la cajera marcó
@@ -1346,6 +1357,29 @@ def probar():
             (vta.number_input(key="arqueo_contado").value,
              vta.text_input(key="arqueo_nota").value, [e.value for e in vta.exception]),
             (2400.0, "5 × $1.000 · 4 × $100 (menos $3.000 de cambio)", []))
+    # LAS SEÑAS en la caja: se anota una (escrita, sin producto) y se devuelve, con el «¿seguro?».
+    def _con_senas():
+        vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+        vta.session_state["pop_senas"] = True
+    _con_senas()
+    vta.run()
+    vta.text_input(key="sena_cliente").set_value("Marta")
+    vta.text_input(key="sena_que").set_value("kit de embrague Corsa")
+    vta.number_input(key="sena_importe").set_value(5000.0)
+    _con_senas()
+    vta.button(key="sena_anotar").click().run()
+    _sena_m = [x for x in ns["senas_activas"]() if x["cliente"] == "Marta"]
+    esperar("la seña, anotada desde la caja y con los campos vacíos",
+            ([(x["que"], x["importe"], x["forma_de_pago"]) for x in _sena_m],
+             vta.text_input(key="sena_cliente").value, [e.value for e in vta.exception]),
+            ([("kit de embrague Corsa", 5000.0, "Efectivo")], "", []))
+    _con_senas()
+    vta.button(key=f"sena_devolver_{_sena_m[0]['id']}").click().run()
+    _con_senas()
+    vta.button(key=f"sena_si_{_sena_m[0]['id']}").click().run()
+    esperar("y devuelta, después del «¿seguro?»",
+            [x["id"] for x in ns["senas_activas"]() if x["cliente"] == "Marta"], [])
+    vta.session_state["pop_senas"] = False
     # EL MES POR VENDEDOR: el empleado no lo ve; el administrador sí, con la tabla.
     def _mes_por_vendedor(sesion):
         return [p for p in sesion.get("popover")

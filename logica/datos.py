@@ -3141,6 +3141,25 @@ def _esquema_ventas(c):
     )""")
     # EL CAMBIO CON QUE SE ABRIÓ LA CAJA, uno por día de acá. Ver «EL CAMBIO DE APERTURA Y LOS
     # BILLETES» en logica/ventas.py.
+    # LAS SEÑAS (ver esa sección en logica/ventas.py): lo que deja el cliente a cuenta de algo
+    # que encarga. Entra a la caja el día que se deja; al retirar se descuenta de la venta.
+    c.execute("""CREATE TABLE IF NOT EXISTS senas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente TEXT,
+        telefono TEXT,
+        que TEXT NOT NULL,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+        consulta_id INTEGER REFERENCES consultas_cliente(id) ON DELETE SET NULL,
+        importe REAL NOT NULL,
+        forma_de_pago TEXT NOT NULL,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        estado TEXT NOT NULL DEFAULT 'activa',
+        venta_id INTEGER,
+        resuelta_en TEXT,
+        resuelta_por TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_senas_estado ON senas(estado)")
     c.execute("""CREATE TABLE IF NOT EXISTS aperturas_de_caja (
         dia TEXT PRIMARY KEY,
         importe REAL NOT NULL,
@@ -3215,6 +3234,10 @@ def _esquema_ventas(c):
     # «LA AGENDA DE CLIENTES DE MOSTRADOR» en logica/ventas.py).
     if "cliente_telefono" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN cliente_telefono TEXT")
+    # Lo que se descontó de la venta por la seña que el cliente ya había dejado (ver «LAS
+    # SEÑAS» en logica/ventas.py): esa parte entró a la caja el día de la seña.
+    if "sena" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN sena REAL DEFAULT 0")
     if "total_de_lista" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN total_de_lista REAL")
     if "cobrada_por" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:

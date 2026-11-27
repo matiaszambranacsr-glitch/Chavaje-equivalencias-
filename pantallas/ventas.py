@@ -370,6 +370,21 @@ if pagina == PAGINAS[9]:
             for _que, _faltan in lo_que_suele_ir_con_la_venta(venta_items):
                 st.info(f"💡 {_que} suele cambiarse junto con **{', '.join(_faltan)}**. "
                         "Preguntale al cliente si ya lo tiene.")
+            # LA SEÑA QUE YA DEJÓ (ver «LAS SEÑAS» en logica/ventas.py): si lleva lo que encargó
+            # o el teléfono es el de la seña, se ofrece descontarla. Sin tildar por defecto: dos
+            # clientes pueden haber encargado lo mismo.
+            _descontar_vta = []
+            for _s in senas_para_la_venta([x["producto_id"] for x in venta_items],
+                                          st.session_state.get("venta_telefono")):
+                if st.checkbox(f"🔖 Descontar la seña de ${miles(_s['importe'], 0)} de "
+                               f"{_s['cliente'] or _s['telefono']}: {_s['que']} (del "
+                               f"{dia_y_mes_de_aca(_s['fecha'])})", key=f"venta_sena_{_s['id']}"):
+                    _descontar_vta.append(_s["id"])
+            _sena_vta = sum(s["importe"] for s in senas_activas() if s["id"] in _descontar_vta)
+            if _sena_vta:
+                st.markdown(f"**A cobrar: \\${miles(max(0.0, _total_vta - _sena_vta), 0)}** "
+                            f"(\\${miles(_total_vta, 0)} menos \\${miles(_sena_vta, 0)} de "
+                            "seña)")
             _p1, _p3, _p2 = cols([1, 1, 1])
             _cliente_vta = _p1.text_input("Cliente (opcional):", key="venta_cliente")
             # EL TELÉFONO DEL CLIENTE (ver «LA AGENDA DE CLIENTES DE MOSTRADOR»): con él queda en
@@ -434,7 +449,8 @@ if pagina == PAGINAS[9]:
                         + (f" · {_forma_vta}" if _forma_vta and _forma_vta != A_CUENTA else "")
                         + (f" · a la cuenta de {_cuenta_vta['nombre']}" if _cuenta_vta else "")
                         + (f" · {texto_para_markdown(_cliente_vta.strip())}"
-                           if _cliente_vta.strip() else ""))
+                           if _cliente_vta.strip() else "")
+                        + (f" · 🔖 menos \\${miles(_sena_vta, 0)} de seña" if _sena_vta else ""))
                     if _repetida_vta:
                         st.warning(f"🔁 Hace {miles(_repetida_vta['hace'])} segundos grabaste esta "
                                    f"misma venta (#{_repetida_vta['id']}). ¿Es otra venta igual, "
@@ -454,7 +470,8 @@ if pagina == PAGINAS[9]:
                 try:
                     _id_vta, _avisos_vta = cerrar_venta(
                         venta_items, _cliente_vta, _forma_vta, mecanico_id=_mecanico_vta,
-                        a_la_caja=_con_caja or _forma_vta == A_CUENTA, telefono=_tel_vta)
+                        a_la_caja=_con_caja or _forma_vta == A_CUENTA, telefono=_tel_vta,
+                        senas=_descontar_vta)
                 except (ValueError, PermissionError) as _err:
                     st.error(el_error_en_castellano(_err))
                 else:

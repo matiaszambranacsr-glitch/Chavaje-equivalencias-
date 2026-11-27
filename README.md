@@ -7946,6 +7946,29 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🔖 Las señas
+
+El cliente encarga algo que no hay y deja una parte. Se anotaba en un papel: la plata entraba al
+cajón sin que el cierre lo supiera (el arqueo decía «Sobran») y el día que retiraba nadie se
+acordaba de cuánto había dejado, o se le cobraba entero. En 💵 Caja, **«🔖 Señas»**: quién
+(nombre o teléfono), qué encargó —del catálogo, por código, o escrito—, cuánto y cómo pagó.
+**Entra a la caja ese día, por esa forma de pago**: el cierre, el cajón y el arqueo la cuentan, y
+el resumen del día dice «🔖 Señas: entraron…». Si es un producto del catálogo, queda también en lo
+que espera el cliente —cuando se carga en «Entró mercadería» la app avisa para escribirle— y, con
+«📝 Anotarlo como pedido al proveedor», en el seguimiento de pedidos. **Al retirar**, 🧾 Ventas
+ofrece «🔖 Descontar la seña» si lleva ese producto o el teléfono es el de la seña (sin tildar:
+dos clientes pueden haber encargado lo mismo); la venta vale entera (para las comisiones y el
+objetivo), pero se cobra lo que falta, y el cierre de ese día cuenta solo eso: la seña ya había
+entrado. La caja lo dice en el cartel y en el cobro («🔖 Ya dejó $3.000 de seña: cobrar
+$1.000», con el vuelto sobre eso), y el comprobante trae «Seña que ya dejaste» y «A PAGAR». No
+se descuenta más de lo que vale la venta, una venta con seña no va a cuenta, y dos vendedores no
+descuentan la misma. Anular la venta la deja esperando otra vez. Si no la retira, «↩️» (con un
+«¿seguro?») la devuelve: sale de la caja del día en que se devuelve, por donde había entrado. La
+ficha del cliente (📇 Agenda) muestra sus señas. Todo queda en el registro de cambios
+(`anotar_sena()`, `senas_para_la_venta()`, `devolver_sena()` y `senas_del_dia()`, en
+`logica/ventas.py`, y `cierre_de_caja()`; lo controlan `pruebas_de_la_caja.py` y
+`pruebas_de_la_sesion.py`).
+
 ## 📇 La agenda de clientes de mostrador
 
 El que no tiene cuenta —paga en el momento— no quedaba en ningún lado como cliente: lo que

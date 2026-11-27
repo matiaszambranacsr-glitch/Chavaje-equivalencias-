@@ -705,6 +705,103 @@ def probar(L):
             "🎉 ¡Objetivo del mes cumplido!" in ns["resumen_del_dia"]("2025-02-28"), True)
     esperar("el del mes que viene no se pisa", ns["objetivo_del_mes"]("2025-03"), 1000000.0)
     st.session_state["nivel_usuario"] = "operador"
+
+    # LAS SEÑAS: entran a la caja el día que se dejan, por donde se pagaron; al retirar, la venta
+    # cuenta solo lo que falta; anular la venta la deja esperando otra vez; devolverla la saca.
+    def _forma(caja, f):
+        return next((t for x, _, t in caja["por_forma"] if x == f), 0.0)
+    _c0, _ef0 = ns["cierre_de_caja"](), ns["efectivo_esperado"]()
+    esperar("sin nombre ni teléfono, sin qué, en cero, disparatada, de otra forma, o de un "
+            "producto que no existe: no",
+            [ns["anotar_sena"](*x)[0] for x in (
+                ("", "", "kit", 100, "Efectivo"), ("Juan", "", "", 100, "Efectivo"),
+                ("Juan", "", "kit", 0, "Efectivo"), ("Juan", "", "kit", 1e12, "Efectivo"),
+                ("Juan", "", "kit", 100, "Bitcoin"), ("Juan", "", "", 100, "Efectivo", 999999))],
+            [False] * 6)
+    ok_s1, texto_s1, s1 = ns["anotar_sena"]("Juan", "11 4567-8901", "", 1500, "Efectivo",
+                                            ids["B1"], pedir_al_proveedor=True)
+    esperar("anotada, del catálogo: avisa al entrar y queda pedida al proveedor",
+            (ok_s1, texto_s1), (True, "🔖 Seña de $1.500 (Efectivo) de Juan por PRUEBA B1. "
+                                      "Cuando entre, la app avisa para escribirle. Quedó "
+                                      "anotado como pedido al proveedor."))
+    esperar("queda en lo que espera el cliente, y pedida",
+            (tuple(c.execute("SELECT estado, nota FROM consultas_cliente WHERE id = (SELECT "
+                             "consulta_id FROM senas WHERE id = ?)", (s1,)).fetchone()),
+             uno("SELECT COUNT(*) FROM pedidos_a_proveedores WHERE producto_id = ?", ids["B1"])),
+            (("activa", "Dejó $1.500 de seña"), 1))
+    _, _, s2 = ns["anotar_sena"]("", "351 111-2222", "Óptica Fiat 147", 800, "Transferencia")
+    _c1 = ns["cierre_de_caja"]()
+    esperar("entra a la caja hoy, por donde se pagó",
+            (round(_c1["total"] - _c0["total"], 2), round(_forma(_c1, "Efectivo")
+                                                         - _forma(_c0, "Efectivo"), 2),
+             round(_forma(_c1, "Transferencia") - _forma(_c0, "Transferencia"), 2),
+             _c1["senas"] - _c0["senas"], round(ns["efectivo_esperado"]() - _ef0, 2)),
+            (2300.0, 1500.0, 800.0, 2, 1500.0))
+    esperar("cuáles se pueden descontar: por el producto o por el teléfono",
+            ([x["id"] for x in ns["senas_para_la_venta"]([ids["B1"]])],
+             [x["id"] for x in ns["senas_para_la_venta"]([ids["A1"]], "0351 15 111-2222")],
+             ns["senas_para_la_venta"]([ids["A1"]])), ([s1], [s2], []))
+    v1, _ = ns["cerrar_venta"]([item("B1")], "Juan", "Efectivo", senas=[s1])
+    _c2 = ns["cierre_de_caja"]()
+    esperar("al retirar: la venta vale entera, entra lo que falta, y la seña queda usada",
+            (uno("SELECT total FROM ventas WHERE id = ?", v1),
+             round(_forma(_c2, "Efectivo") - _forma(_c1, "Efectivo"), 2),
+             round(_c2["senas_descontadas"] - _c1["senas_descontadas"], 2),
+             tuple(c.execute("SELECT estado, venta_id FROM senas WHERE id = ?", (s1,)).fetchone()),
+             uno("SELECT estado FROM consultas_cliente WHERE id = (SELECT consulta_id FROM senas "
+                 "WHERE id = ?)", s1)),
+            (2500.0, 1000.0, 1500.0, ("usada", v1), "vendida"))
+    for _que_s, _hacer_s in (
+            ("la misma seña otra vez", lambda: ns["cerrar_venta"]([item("B1")], "", "Efectivo",
+                                                                   senas=[s1])),
+            ("una seña más grande que la venta",
+             lambda: ns["cerrar_venta"]([item("A1")], "", "Efectivo",
+                                        senas=[ns["anotar_sena"]("Ana", "", "x", 3000,
+                                                                 "Efectivo", ids["A1"])[2]])),
+            ("una venta a cuenta con seña",
+             lambda: ns["cerrar_venta"]([item("A1")], "", ns["A_CUENTA"], a_la_caja=True,
+                                        senas=[s2]))):
+        try:
+            _hacer_s()
+            fallas.append(f"se pudo vender con {_que_s}")
+        except ValueError:
+            pass
+    s3 = uno("SELECT MAX(id) FROM senas WHERE cliente = 'Ana'")
+    v2, _ = ns["cerrar_venta"]([item("A1", 4)], "Ana", a_la_caja=True, senas=[s3])
+    _espera_v2 = next(v for v in ns["ventas_a_cobrar"]() if v["id"] == v2)
+    esperar("en la caja: el cartel dice cuánto cobrar, y a cuenta no va",
+            ("dejó $3.000 de seña: cobrar $1.000" in ns["el_cartel_de"](_espera_v2),
+             ns["poner_a_cuenta"](v2, taller)[0]), (True, False))
+    _c3 = ns["cierre_de_caja"]()
+    ns["cobrar_venta"](v2, "Efectivo")
+    esperar("cobrada: entra lo que falta",
+            round(_forma(ns["cierre_de_caja"](), "Efectivo") - _forma(_c3, "Efectivo"), 2), 1000.0)
+    esperar("el comprobante dice la seña y lo que pagó",
+            ("Seña que ya dejaste: -$3.000 · A PAGAR: $1.000" in ns["texto_del_comprobante"](v2),
+             ns["pdf_del_comprobante"](ns["una_venta"](v2))[:4]), (True, b"%PDF"))
+    st.session_state["nivel_usuario"] = "admin"
+    _c4 = ns["cierre_de_caja"]()
+    ns["anular_venta"](v1)
+    esperar("anulada la venta, la seña vuelve a esperar (y lo encargado también)",
+            (tuple(c.execute("SELECT estado, venta_id FROM senas WHERE id = ?", (s1,)).fetchone()),
+             uno("SELECT estado FROM consultas_cliente WHERE id = (SELECT consulta_id FROM senas "
+                 "WHERE id = ?)", s1),
+             round(_forma(ns["cierre_de_caja"](), "Efectivo") - _forma(_c4, "Efectivo"), 2)),
+            (("activa", None), "activa", -1000.0))
+    st.session_state["nivel_usuario"] = "operador"
+    _c5 = ns["cierre_de_caja"]()
+    esperar("devuelta: sale de la caja de hoy, por donde entró; dos veces, no",
+            (ns["devolver_sena"](s1),
+             round(_forma(ns["cierre_de_caja"](), "Efectivo") - _forma(_c5, "Efectivo"), 2),
+             ns["cierre_de_caja"]()["senas_devueltas"] - _c5["senas_devueltas"],
+             ns["devolver_sena"](s1)[0],
+             uno("SELECT estado FROM consultas_cliente WHERE id = (SELECT consulta_id FROM senas "
+                 "WHERE id = ?)", s1)),
+            ((True, "↩️ Seña devuelta a Juan: $1.500 (Efectivo). Sale de la caja de hoy."),
+             -1500.0, 1, False, "cancelada"))
+    esperar("en el resumen del día",
+            "🔖 Señas: entraron $" in ns["resumen_del_dia"](), True)
+    esperar("las que esperan: la de la óptica", [x["id"] for x in ns["senas_activas"]()], [s2])
     ns["anotar_salida_de_caja"]("🧾 Gasto", "artículos de limpieza", 120)
     esperar("y en el resumen de la semana, por tipo (lo anulado y lo de 2020, no)",
             [r for r in ns["resumen_de_la_semana"]().split("\n") if r.startswith("💸")],
@@ -788,6 +885,9 @@ def probar(L):
                                   lambda: ns["guardar_comision_de"]("rosa", 3)),
                                  ("cambiar el objetivo de ventas en",
                                   lambda: ns["guardar_objetivo_del_mes"](3)),
+                                 ("anotar una seña en",
+                                  lambda: ns["anotar_sena"]("x", "", "y", 1, "Efectivo")),
+                                 ("devolver una seña en", lambda: ns["devolver_sena"](1)),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

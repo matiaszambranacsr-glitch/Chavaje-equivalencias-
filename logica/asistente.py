@@ -435,6 +435,15 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("senas", "Anotar una seña (y descontarla al retirar)",
+     "sena senas seña señas adelanto anticipo encargo encargar encargue deja plata a cuenta "
+     "reserva reservar retira retirar descontar",
+     "En 💵 Caja, «🔖 Señas»: quién, qué encargó (el código si está en el catálogo), cuánto y "
+     "cómo pagó, y «🔖 Anotar la seña». Entra a la caja hoy. Si es del catálogo, la app avisa "
+     "cuando entra y se puede anotar como pedido al proveedor. Cuando lo retira, en 🧾 Ventas "
+     "tildá «🔖 Descontar la seña» y se cobra lo que falta. Si no lo va a retirar, «↩️» la "
+     "devuelve.",
+     "💵 Caja", "empleado"),
     ("agenda", "Ver la ficha de un cliente de mostrador (la agenda)",
      "agenda cliente clientes mostrador ficha telefono celular historial que compro compras "
      "anteriores ya vino conocido particular contacto contactos",

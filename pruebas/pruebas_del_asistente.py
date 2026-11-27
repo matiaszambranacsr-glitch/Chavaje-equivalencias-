@@ -95,6 +95,8 @@ ENTIENDE = (
     ("como pongo una meta de ventas para el mes", "como:objetivo_del_mes"),
     ("quiero imprimir los carteles de precio para la gondola", "como:carteles"),
     ("como veo lo que compro un cliente por su telefono", "como:agenda"),
+    ("un cliente quiere dejar una seña", "como:senas"),
+    ("como descuento la sena cuando retira", "como:senas"),
     ("donde cambio el objetivo de ventas", "como:objetivo_del_mes"),
     ("comisiones de los empleados", "como:mes_por_vendedor"),
     ("saque plata para pagar el flete", "como:salida_de_caja"),
