@@ -7946,6 +7946,31 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🚚 Lo que le debés a cada proveedor
+
+La app sabía lo que te deben los talleres, pero no lo que vos le debés a cada proveedor: las
+facturas de compra estaban en una carpeta y el vencimiento, en la cabeza de alguien (o se pagaba
+tarde, con recargo, o dos veces). En 🗂️ Administrar → **🚚 Proveedores** (lo anota el
+administrador):
+- **«🧾 Anotar una factura de compra»**: el proveedor (se elige de los conocidos —los que ya
+  tienen facturas o pagos y las marcas de las listas— o se escribe uno nuevo; «distribuidora
+  norte» y «DISTRIBUIDORA  NORTE» son el mismo), el importe, el número, la fecha y cuándo vence
+  (si no se dice, a los `DIAS_DE_PLAZO_DE_UN_PROVEEDOR` días, 30).
+- **«💸 Anotar un pago»**: cuánto y cómo. **En «💵 Efectivo de la caja» queda también como
+  salida de caja** («🚚 Pago a un proveedor»), así el cajón y el arqueo lo descuentan sin anotarlo
+  dos veces; anular el pago anula su salida.
+- Arriba, cuánto le debés en total y lo vencido, y por proveedor lo que debe, lo vencido, el
+  próximo vencimiento y cuántas facturas tienen algo sin pagar: los pagos van a lo que vence
+  primero, como en las cuentas de los talleres. «Ver la cuenta de» trae sus facturas y pagos
+  con el saldo, y «🚫» para anular (queda tachado).
+- La campanita (solo al administrador) avisa lo vencido —fuerte— y lo que vence en
+  `DIAS_PARA_AVISAR_UNA_FACTURA` días (3). Los dos plazos se cambian en «⏱️ Los tiempos de la
+  página».
+
+(`anotar_factura_de_proveedor()`, `anotar_pago_a_proveedor()`, `cuentas_con_proveedores()`,
+`movimientos_con_el_proveedor()` y `anular_movimiento_de_proveedor()`, en `logica/ventas.py`;
+lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`.)
+
 ## 📄 La lista de precios para un taller
 
 El taller pedía «pasame los precios de lo que te compro» y se le mandaba la lista entera del

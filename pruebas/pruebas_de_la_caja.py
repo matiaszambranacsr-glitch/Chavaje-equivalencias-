@@ -1113,6 +1113,63 @@ def probar(L):
             ("", b""))
     ns["guardar_comision_de"]("rosa", None)
     esperar("sin la propia, vuelve a la general", ns["comision_de"]("rosa"), 5.0)
+
+    # LO QUE SE LE DEBE A CADA PROVEEDOR: facturas con vencimiento, pagos a lo más viejo, el
+    # efectivo sale del cajón como salida de caja, y anular el pago anula la salida.
+    from datetime import timedelta as _tdp
+    _hoy_p = ns["hoy_aca"]()
+    st.session_state["nivel_usuario"] = "admin"
+    esperar("el nombre, prolijo", ns["nombre_de_proveedor"]("  distribuidora   norte "),
+            "DISTRIBUIDORA NORTE")
+    esperar("sin proveedor, sin importe, vence antes de la fecha o fecha que no se entiende: no",
+            [ns["anotar_factura_de_proveedor"](*x)[0] for x in (
+                ("", 100), ("X", 0), ("X", 100, _hoy_p - _tdp(days=10), "", _hoy_p),
+                ("X", 100, "mañana"))], [False] * 4)
+    esperar("anotada",
+            ns["anotar_factura_de_proveedor"]("Distribuidora Norte", 100000,
+                                              _hoy_p - _tdp(days=5), "A-1",
+                                              _hoy_p - _tdp(days=35))[0], True)
+    ns["anotar_factura_de_proveedor"]("distribuidora norte", 50000, _hoy_p + _tdp(days=2), "A-2",
+                                      _hoy_p - _tdp(days=28))
+    ns["anotar_factura_de_proveedor"]("Otro SA", 30000)
+    _cuentas_p = lambda: {k["proveedor"]: (k["debe"], k["vencido"], k["proximo"], k["abiertas"])
+                          for k in ns["cuentas_con_proveedores"]()}
+    esperar("lo que se debe, lo vencido y lo próximo (sin vencimiento, a los días de plazo)",
+            _cuentas_p(),
+            {"DISTRIBUIDORA NORTE": (150000.0, 100000.0, (_hoy_p - _tdp(days=5)).isoformat(), 2),
+             "OTRO SA": (30000.0, 0.0, (_hoy_p + _tdp(days=30)).isoformat(), 1)})
+    _salidas_antes = ns["total_de_salidas"]()
+    esperar("pagado en efectivo: sale del cajón",
+            ns["anotar_pago_a_proveedor"]("Distribuidora Norte", 120000, "💵 Efectivo de la caja"),
+            (True, "💸 Pago a DISTRIBUIDORA NORTE: $120.000 (💵 Efectivo de la caja) — salió del "
+                   "cajón."))
+    esperar("la salida de caja, y el pago a lo más viejo",
+            (round(ns["total_de_salidas"]() - _salidas_antes, 2),
+             _cuentas_p()["DISTRIBUIDORA NORTE"]),
+            (120000.0, (30000.0, 0.0, (_hoy_p + _tdp(days=2)).isoformat(), 1)))
+    esperar("lo que vence en los próximos días, para avisar",
+            [k["proveedor"] for k in ns["facturas_para_avisar"]()], ["DISTRIBUIDORA NORTE"])
+    ns["anotar_pago_a_proveedor"]("OTRO SA", 30000, "🏦 Transferencia")
+    esperar("el que no debe nada, sale", list(_cuentas_p()), ["DISTRIBUIDORA NORTE"])
+    _movs_p = ns["movimientos_con_el_proveedor"]("distribuidora NORTE")
+    esperar("la cuenta de uno, en orden, con el saldo",
+            [(m["tipo"], m["saldo"]) for m in _movs_p],
+            [("factura", 100000.0), ("factura", 150000.0), ("pago", 30000.0)])
+    _pago_p = [m for m in _movs_p if m["tipo"] == "pago"][0]["id"]
+    esperar("anular el pago en efectivo anula su salida de caja; dos veces, no",
+            (ns["anular_movimiento_de_proveedor"]("pago", _pago_p)[0],
+             ns["anular_movimiento_de_proveedor"]("pago", _pago_p)[0],
+             round(ns["total_de_salidas"]() - _salidas_antes, 2),
+             _cuentas_p()["DISTRIBUIDORA NORTE"][:2]), (True, False, 0.0, (150000.0, 100000.0)))
+    ns["invalidar_salud"]()
+    esperar("la campanita, fuerte por lo vencido",
+            [(p_["nivel"], p_["titulo"]) for p_ in ns["diagnostico_de_salud"]()
+             if "para pagar" in p_["titulo"]],
+            [("alto", "🧾 1 proveedor(es) para pagar: $100.000 vencidos")])
+    esperar("los conocidos, para elegir sin escribir",
+            {"DISTRIBUIDORA NORTE", "OTRO SA", "PRUEBA"} <= set(ns["proveedores_conocidos"]()),
+            True)
+    st.session_state["nivel_usuario"] = "operador"
     _claves_antes = g["hay_claves_configuradas"]
     try:
         g["hay_claves_configuradas"] = lambda: True
@@ -1135,6 +1192,10 @@ def probar(L):
                                   lambda: ns["guardar_trato_de_la_cuenta"](taller, None)),
                                  ("anotar un gasto fijo en",
                                   lambda: ns["anotar_gasto_fijo"]("x", 1)),
+                                 ("anotar una factura de un proveedor en",
+                                  lambda: ns["anotar_factura_de_proveedor"]("x", 1)),
+                                 ("anotar un pago a un proveedor en",
+                                  lambda: ns["anotar_pago_a_proveedor"]("x", 1, "Otro")),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

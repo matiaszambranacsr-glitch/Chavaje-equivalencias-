@@ -105,6 +105,7 @@ ENTIENDE = (
     ("donde anoto el alquiler y los sueldos", "como:gastos_fijos"),
     ("como hago el cambio de turno de la cajera", "como:turnos"),
     ("quiero pasarle la lista de precios a un taller", "como:lista_taller"),
+    ("donde anoto la factura de compra de un proveedor", "como:proveedores"),
     ("a que hora se vende mas", "como:cierre_mes"),
     ("como descuento la sena cuando retira", "como:senas"),
     ("donde cambio el objetivo de ventas", "como:objetivo_del_mes"),

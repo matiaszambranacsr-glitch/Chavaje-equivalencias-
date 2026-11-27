@@ -1563,6 +1563,28 @@ def probar():
     _adm_mes.radio(key=f"lista_de_{_cta_rec}").set_value("Una marca (lo que hay en stock)").run()
     esperar("con una marca, sin errores", [e.value for e in _adm_mes.exception], [])
     _adm_mes.session_state[f"pop_lista_{_cta_rec}"] = False
+    # LO QUE LE DEBÉS A CADA PROVEEDOR, en su solapa: se anota una factura y un pago.
+    _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][7]
+    _adm_mes.run()
+    _prov_s = _adm_mes.selectbox(key="prov_factura_proveedor")
+    _nombre_ps = _prov_s.options[0]
+    _prov_s.set_value(_nombre_ps)
+    _adm_mes.number_input(key="prov_factura_importe").set_value(80000.0)
+    _adm_mes.button(key="prov_factura_anotar").click().run()
+    esperar("la factura, anotada desde la pantalla",
+            ([(k["proveedor"], k["debe"]) for k in ns["cuentas_con_proveedores"]()],
+             [e.value for e in _adm_mes.exception]), ([(_nombre_ps, 80000.0)], []))
+    _adm_mes.selectbox(key="prov_pago_proveedor").set_value(_nombre_ps)
+    _adm_mes.number_input(key="prov_pago_importe").set_value(30000.0)
+    _adm_mes.radio(key="prov_pago_medio").set_value("🏦 Transferencia")
+    _adm_mes.button(key="prov_pago_anotar").click().run()
+    esperar("y el pago",
+            ([(k["proveedor"], k["debe"]) for k in ns["cuentas_con_proveedores"]()],
+             [e.value for e in _adm_mes.exception]), ([(_nombre_ps, 50000.0)], []))
+    _adm_mes.selectbox(key="prov_ver").set_value(_nombre_ps).run()
+    esperar("su cuenta, con «🚫» para anular",
+            (len([b for b in _adm_mes.button if (b.key or "").startswith("prov_anular_")]),
+             [e.value for e in _adm_mes.exception]), (2, []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

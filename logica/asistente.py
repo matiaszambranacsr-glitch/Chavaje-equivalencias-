@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("proveedores", "Anotar lo que le debés a un proveedor (facturas y pagos)",
+     "proveedor proveedores le debo debemos compra compras vence pagarle pago a proveedor "
+     "cuenta con el proveedor deuda",
+     "En 🗂️ Administrar → 🚚 Proveedores: «🧾 Anotar una factura de compra» (proveedor, importe "
+     "y cuándo vence) y «💸 Anotar un pago» (en efectivo de la caja sale también como salida "
+     "de caja). Arriba ves cuánto le debés a cada uno y lo vencido; la campanita avisa lo que "
+     "vence. Solo el administrador.",
+     "🗂️ Administrar", "admin"),
     ("lista_taller", "Mandarle a un taller la lista de precios con su descuento",
      "lista de precios lista precios taller mandarle pasarle descuento pdf whatsapp lo que "
      "compra marca",

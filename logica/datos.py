@@ -3156,6 +3156,33 @@ def _esquema_ventas(c):
     )""")
     # EL CAMBIO CON QUE SE ABRIÓ LA CAJA, uno por día de acá. Ver «EL CAMBIO DE APERTURA Y LOS
     # BILLETES» en logica/ventas.py.
+    # LO QUE SE LE DEBE A CADA PROVEEDOR (ver esa sección en logica/ventas.py): las facturas de
+    # compra con su vencimiento y lo que se les pagó. El pago en efectivo es también una salida
+    # de caja (salida_id).
+    c.execute("""CREATE TABLE IF NOT EXISTS facturas_de_proveedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proveedor TEXT NOT NULL,
+        numero TEXT,
+        fecha TEXT,
+        vence TEXT NOT NULL,
+        importe REAL NOT NULL,
+        nota TEXT,
+        usuario TEXT,
+        creada TEXT DEFAULT (datetime('now')),
+        anulada INTEGER DEFAULT 0
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS pagos_a_proveedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proveedor TEXT NOT NULL,
+        importe REAL NOT NULL,
+        medio TEXT,
+        dia TEXT,
+        nota TEXT,
+        salida_id INTEGER,
+        usuario TEXT,
+        creado TEXT DEFAULT (datetime('now')),
+        anulado INTEGER DEFAULT 0
+    )""")
     # LOS GASTOS FIJOS (ver esa sección en logica/ventas.py): alquiler, luz, sueldos. Valen
     # desde un mes (AAAA-MM) hasta otro (o siempre); cambiar uno cierra el viejo y abre otro, así
     # los meses de antes no se mueven.

@@ -3900,3 +3900,249 @@ def cierre_del_mes_para_descargar(mes, con_ganancia=False):
     """Para el botón de descarga: los datos se leen ahora; el Excel se arma al tocarlo."""
     hojas = excel_del_cierre_del_mes(mes, con_ganancia=con_ganancia)
     return lambda: excel_de_varias_hojas(hojas)
+
+
+# LO QUE SE LE DEBE A CADA PROVEEDOR: la app sabía lo que te deben los talleres, pero no lo que
+# vos le debés a cada proveedor: las facturas de compra estaban en una carpeta y el vencimiento,
+# en la cabeza de alguien (o se pagaba tarde, con recargo, o dos veces). Se anota la factura con
+# su vencimiento (si no se dice, a los DIAS_DE_PLAZO_DE_UN_PROVEEDOR) y lo que se le paga; los
+# pagos van a lo más viejo, como en las cuentas de los talleres. El pago en efectivo sale del
+# cajón: queda también como salida de caja «🚚 Pago a un proveedor», así el arqueo lo descuenta
+# sin anotarlo dos veces. La campanita avisa lo vencido y lo que vence en
+# DIAS_PARA_AVISAR_UNA_FACTURA días. Lo anota el administrador.
+DIAS_DE_PLAZO_DE_UN_PROVEEDOR = 30
+DIAS_PARA_AVISAR_UNA_FACTURA = 3
+MEDIOS_DE_PAGO_A_PROVEEDOR = ("💵 Efectivo de la caja", "🏦 Transferencia", "🧾 Cheque propio",
+                              "Otro")
+
+
+def nombre_de_proveedor(texto):
+    """«  distribuidora  norte » → «DISTRIBUIDORA NORTE»: el mismo proveedor escrito de dos
+    maneras no queda como dos cuentas."""
+    return re.sub(r"\s+", " ", str(texto or "")).strip().upper()[:80]
+
+
+def proveedores_conocidos():
+    """Los que ya tienen facturas o pagos, y las marcas de las listas: para elegir sin escribir."""
+    nombres = {f[0] for f in c.execute("SELECT proveedor FROM facturas_de_proveedores "
+                                       "UNION SELECT proveedor FROM pagos_a_proveedores")}
+    nombres |= {nombre_de_proveedor(f[0]) for f in c.execute(
+        "SELECT nombre FROM marcas WHERE tipo = 'PROVEEDOR'")}
+    return sorted(n for n in nombres if n)
+
+
+def _fecha_iso(valor, por_defecto):
+    if not valor:
+        return por_defecto
+    if isinstance(valor, date):
+        return valor.isoformat()
+    return date.fromisoformat(str(valor)[:10]).isoformat()
+
+
+def anotar_factura_de_proveedor(proveedor, importe, vence=None, numero="", fecha=None, nota=""):
+    """(ok, texto)."""
+    exigir_nivel("admin", "anotar una factura de un proveedor")
+    proveedor = nombre_de_proveedor(proveedor)
+    if not proveedor:
+        return False, "Elegí o escribí el proveedor."
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "Escribí el importe de la factura."
+    if not 0 < importe <= SALIDA_DE_CAJA_MAXIMA:
+        return False, "El importe tiene que ser más que cero (y no disparatado)."
+    try:
+        fecha = _fecha_iso(fecha, hoy_aca().isoformat())
+        vence = _fecha_iso(vence, (date.fromisoformat(fecha)
+                                   + timedelta(days=DIAS_DE_PLAZO_DE_UN_PROVEEDOR)).isoformat())
+    except ValueError:
+        return False, "La fecha no se entiende."
+    if vence < fecha:
+        return False, "Vence antes de la fecha de la factura: revisalo."
+    with db_lock:
+        c.execute("""INSERT INTO facturas_de_proveedores (proveedor, numero, fecha, vence, importe,
+                                                          nota, usuario)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (proveedor, str(numero or "").strip()[:40] or None, fecha, vence, importe,
+                   str(nota or "").strip()[:200] or None, obtener_usuario_actual()))
+        anotar_cambio("anotó una factura de un proveedor", "proveedor", c.lastrowid,
+                      despues={"proveedor": proveedor, "importe": importe, "vence": vence})
+        conn.commit()
+    return True, (f"🧾 Factura de {proveedor} por ${miles(importe, 0)}, vence el "
+                  f"{vence[8:10]}/{vence[5:7]}/{vence[:4]}.")
+
+
+def anotar_pago_a_proveedor(proveedor, importe, medio, nota=""):
+    """(ok, texto). El de «💵 Efectivo de la caja» es también una salida de caja de hoy."""
+    exigir_nivel("admin", "anotar un pago a un proveedor")
+    proveedor = nombre_de_proveedor(proveedor)
+    if not proveedor:
+        return False, "Elegí el proveedor."
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "Escribí cuánto le pagaste."
+    if not 0 < importe <= SALIDA_DE_CAJA_MAXIMA:
+        return False, "El importe tiene que ser más que cero (y no disparatado)."
+    if medio not in MEDIOS_DE_PAGO_A_PROVEEDOR:
+        return False, "Elegí cómo le pagaste."
+    nota = str(nota or "").strip()[:200]
+    dia, usuario = hoy_aca().isoformat(), obtener_usuario_actual()
+    with db_lock, transaccion():
+        salida_id = None
+        if medio == MEDIOS_DE_PAGO_A_PROVEEDOR[0]:
+            c.execute("INSERT INTO salidas_de_caja (dia, tipo, concepto, importe, usuario) "
+                      "VALUES (?, ?, ?, ?, ?)",
+                      (dia, TIPOS_DE_SALIDA_DE_CAJA[1],
+                       f"{proveedor}" + (f": {nota}" if nota else ""), importe, usuario))
+            salida_id = c.lastrowid
+            anotar_cambio("salida de caja", "caja", salida_id, despues=importe,
+                          detalle=f"{TIPOS_DE_SALIDA_DE_CAJA[1]}: {proveedor}")
+        c.execute("""INSERT INTO pagos_a_proveedores (proveedor, importe, medio, dia, nota,
+                                                      salida_id, usuario)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (proveedor, importe, medio, dia, nota or None, salida_id, usuario))
+        anotar_cambio("anotó un pago a un proveedor", "proveedor", c.lastrowid,
+                      despues={"proveedor": proveedor, "importe": importe, "medio": medio})
+    return True, (f"💸 Pago a {proveedor}: ${miles(importe, 0)} ({medio})"
+                  + (" — salió del cajón." if salida_id else "."))
+
+
+def anular_movimiento_de_proveedor(tipo, movimiento_id):
+    """`tipo`: «factura» o «pago». No se borra: queda anulado. Un pago en efectivo anula también
+    su salida de caja. (ok, texto)."""
+    exigir_nivel("admin", "anular algo de un proveedor")
+    with db_lock, transaccion():
+        if tipo == "factura":
+            c.execute("UPDATE facturas_de_proveedores SET anulada = 1 WHERE id = ? AND anulada = 0",
+                      (int(movimiento_id),))
+        elif tipo == "pago":
+            fila = c.execute("SELECT salida_id FROM pagos_a_proveedores WHERE id = ? AND anulado = 0",
+                             (int(movimiento_id),)).fetchone()
+            c.execute("UPDATE pagos_a_proveedores SET anulado = 1 WHERE id = ? AND anulado = 0",
+                      (int(movimiento_id),))
+            if c.rowcount == 1 and fila and fila["salida_id"]:
+                c.execute("UPDATE salidas_de_caja SET anulada = 1, anulada_por = ? WHERE id = ?",
+                          (obtener_usuario_actual(), fila["salida_id"]))
+        else:
+            return False, "No sé qué anular."
+        if c.rowcount != 1:
+            return False, "Eso ya estaba anulado."
+        anotar_cambio(f"anuló {'una factura' if tipo == 'factura' else 'un pago'} de un proveedor",
+                      "proveedor", movimiento_id)
+    return True, "🚫 Anulado."
+
+
+def cuentas_con_proveedores(hoy=None):
+    """[{proveedor, debe, vencido, proximo (el vencimiento más cercano de lo que queda), abiertas
+    (facturas con algo sin pagar)}], con lo pagado imputado a lo que vence primero. Lo vencido
+    primero; los que no deben nada, no."""
+    hoy = (hoy or hoy_aca()).isoformat()
+    pagado = {f["proveedor"]: float(f["total"]) for f in c.execute(
+        "SELECT proveedor, SUM(importe) AS total FROM pagos_a_proveedores WHERE anulado = 0 "
+        "GROUP BY proveedor")}
+    cuentas = {}
+    for f in c.execute("SELECT proveedor, vence, importe FROM facturas_de_proveedores "
+                       "WHERE anulada = 0 ORDER BY proveedor, vence, id"):
+        k = cuentas.setdefault(f["proveedor"], {"proveedor": f["proveedor"], "debe": 0.0,
+                                                "vencido": 0.0, "proximo": None, "abiertas": 0,
+                                                "_resto": pagado.get(f["proveedor"], 0.0)})
+        importe = float(f["importe"])
+        cubierto = min(importe, k["_resto"])
+        k["_resto"] -= cubierto
+        queda = round(importe - cubierto, 2)
+        if queda > 0:
+            k["abiertas"] += 1
+            if f["vence"] < hoy:
+                k["vencido"] = round(k["vencido"] + queda, 2)
+            if k["proximo"] is None:
+                k["proximo"] = f["vence"]
+    for proveedor, total in pagado.items():
+        cuentas.setdefault(proveedor, {"proveedor": proveedor, "debe": 0.0, "vencido": 0.0,
+                                       "proximo": None, "abiertas": 0, "_resto": total})
+    salida = []
+    for k in cuentas.values():
+        facturado = sum(float(f[0]) for f in c.execute(
+            "SELECT importe FROM facturas_de_proveedores WHERE anulada = 0 AND proveedor = ?",
+            (k["proveedor"],)))
+        k["debe"] = round(facturado - pagado.get(k["proveedor"], 0.0), 2)
+        k.pop("_resto", None)
+        if abs(k["debe"]) >= 0.01:
+            salida.append(k)
+    return sorted(salida, key=lambda k: (-k["vencido"], k["proximo"] or "9999", -k["debe"]))
+
+
+def facturas_para_avisar(hoy=None, dias=None):
+    """Las cuentas con algo vencido o que vence en `dias` (DIAS_PARA_AVISAR_UNA_FACTURA)."""
+    hoy = hoy or hoy_aca()
+    limite = (hoy + timedelta(days=int(dias if dias is not None
+                                       else DIAS_PARA_AVISAR_UNA_FACTURA))).isoformat()
+    return [k for k in cuentas_con_proveedores(hoy)
+            if k["vencido"] or (k["proximo"] and k["proximo"] <= limite)]
+
+
+def movimientos_con_el_proveedor(proveedor):
+    """[dict] las facturas y los pagos de un proveedor, en orden, con el saldo después de cada
+    uno: tipo, id, dia, que, importe (la factura suma, el pago resta), saldo, anulado."""
+    proveedor = nombre_de_proveedor(proveedor)
+    filas = [{"tipo": "factura", "id": f["id"], "dia": f["fecha"] or "",
+              "que": f"Factura {f['numero'] or ''}".strip() + f" (vence {f['vence'][8:10]}/"
+                     f"{f['vence'][5:7]})", "importe": float(f["importe"]),
+              "anulado": bool(f["anulada"]), "orden": f["creada"]}
+             for f in c.execute("SELECT * FROM facturas_de_proveedores WHERE proveedor = ?",
+                                (proveedor,))]
+    filas += [{"tipo": "pago", "id": f["id"], "dia": f["dia"] or "",
+               "que": f"Pago ({f['medio']})" + (f": {f['nota']}" if f["nota"] else ""),
+               "importe": -float(f["importe"]), "anulado": bool(f["anulado"]),
+               "orden": f["creado"]}
+              for f in c.execute("SELECT * FROM pagos_a_proveedores WHERE proveedor = ?",
+                                 (proveedor,))]
+    filas.sort(key=lambda f: (f["dia"], f["orden"] or "", f["tipo"] != "factura", f["id"]))
+    saldo = 0.0
+    for f in filas:
+        if not f["anulado"]:
+            saldo = round(saldo + f["importe"], 2)
+        f["saldo"] = saldo
+    return filas
+
+
+def anotar_factura_y_avisar():
+    """«🧾 Anotar la factura» (va como on_click): lee los campos y, si anotó, los vacía."""
+    st_ = st.session_state
+    try:
+        ok, texto = anotar_factura_de_proveedor(st_.get("prov_factura_proveedor"),
+                                                st_.get("prov_factura_importe"),
+                                                st_.get("prov_factura_vence"),
+                                                st_.get("prov_factura_numero"),
+                                                st_.get("prov_factura_fecha"),
+                                                st_.get("prov_factura_nota"))
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    if ok:
+        for clave in ("prov_factura_importe", "prov_factura_numero", "prov_factura_nota"):
+            st_.pop(clave, None)
+    avisar("success" if ok else "warning", texto)
+
+
+def anotar_pago_a_proveedor_y_avisar():
+    """«💸 Anotar el pago» (va como on_click)."""
+    st_ = st.session_state
+    try:
+        ok, texto = anotar_pago_a_proveedor(st_.get("prov_pago_proveedor"),
+                                            st_.get("prov_pago_importe"),
+                                            st_.get("prov_pago_medio"), st_.get("prov_pago_nota"))
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    if ok:
+        for clave in ("prov_pago_importe", "prov_pago_nota"):
+            st_.pop(clave, None)
+    avisar("success" if ok else "warning", texto)
+
+
+def anular_de_proveedor_y_avisar(tipo, movimiento_id):
+    """«🚫» de una factura o un pago (va como on_click)."""
+    try:
+        ok, texto = anular_movimiento_de_proveedor(tipo, movimiento_id)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)

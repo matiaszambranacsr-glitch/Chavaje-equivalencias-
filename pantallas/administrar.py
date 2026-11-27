@@ -2173,3 +2173,78 @@ if pagina == PAGINAS[3]:
                                        "Pagado": "✅" if p_ else "❌ no"}
                                       for f_, c_, n_, m_, p_ in _rech["cheques"]],
                                      width="stretch", hide_index=True)
+
+    # ---------- LO QUE LE DEBÉS A CADA PROVEEDOR: ver esa sección en logica/ventas.py ----------
+    if sub_admin == SUB_ADMIN[7]:
+        _prov = cuentas_con_proveedores()
+        if _prov:
+            _q_p = fila_de_numeros(2)
+            _q_p[0].metric("🧾 Les debés", f"${miles(sum(k['debe'] for k in _prov), 0)}")
+            _q_p[1].metric("🔴 Vencido", f"${miles(sum(k['vencido'] for k in _prov), 0)}")
+            st.dataframe([{"Proveedor": k["proveedor"], "Debe": f"${miles(k['debe'], 0)}",
+                           "Vencido": f"${miles(k['vencido'], 0)}" if k["vencido"] else "",
+                           "Próximo vencimiento": (f"{k['proximo'][8:10]}/{k['proximo'][5:7]}"
+                                                   if k["proximo"] else ""),
+                           "Facturas sin pagar": k["abiertas"]} for k in _prov],
+                         hide_index=True, width="stretch")
+        else:
+            st.caption("No le debés nada a ningún proveedor (o todavía no anotaste facturas).")
+        _conocidos_p = proveedores_conocidos()
+        _pf, _pp = cols([1, 1])
+        with _pf.container(border=True, key="prov_caja_factura"):
+            st.markdown("**🧾 Anotar una factura de compra**")
+            st.selectbox("Proveedor:", _conocidos_p, index=None, accept_new_options=True,
+                         placeholder="Elegí o escribí uno nuevo", key="prov_factura_proveedor")
+            _pf1, _pf2 = cols([1, 1])
+            _pf1.number_input("Importe ($):", min_value=0.0, step=1000.0, value=None,
+                              key="prov_factura_importe", placeholder="Ej: 250000")
+            _pf2.text_input("N.º de factura:", key="prov_factura_numero",
+                            placeholder="Ej: A-0003-00012345")
+            _pf3, _pf4 = cols([1, 1])
+            _pf3.date_input("Fecha:", value=hoy_aca(), key="prov_factura_fecha",
+                            format="DD/MM/YYYY")
+            _pf4.date_input("Vence:", value=hoy_aca() + timedelta(
+                days=DIAS_DE_PLAZO_DE_UN_PROVEEDOR), key="prov_factura_vence",
+                format="DD/MM/YYYY")
+            st.text_input("Nota (opcional):", key="prov_factura_nota")
+            st.button("🧾 Anotar la factura", key="prov_factura_anotar", type="primary",
+                      width="stretch", on_click=anotar_factura_y_avisar)
+        with _pp.container(border=True, key="prov_caja_pago"):
+            st.markdown("**💸 Anotar un pago**")
+            _con_deuda = [k["proveedor"] for k in _prov if k["debe"] > 0]
+            st.selectbox("Proveedor:", _con_deuda + [n for n in _conocidos_p
+                                                     if n not in _con_deuda],
+                         index=None, accept_new_options=True, placeholder="Elegí el proveedor",
+                         key="prov_pago_proveedor")
+            st.number_input("Cuánto ($):", min_value=0.0, step=1000.0, value=None,
+                            key="prov_pago_importe", placeholder="Ej: 100000")
+            st.radio("Cómo:", MEDIOS_DE_PAGO_A_PROVEEDOR, key="prov_pago_medio",
+                     help="En efectivo de la caja queda también como salida de caja: el arqueo "
+                          "lo descuenta solo.")
+            st.text_input("Nota (opcional):", key="prov_pago_nota")
+            st.button("💸 Anotar el pago", key="prov_pago_anotar", type="primary",
+                      width="stretch", on_click=anotar_pago_a_proveedor_y_avisar)
+        # EL DETALLE DE UNO: facturas y pagos, con el saldo, y «🚫» para anular.
+        _todos_p = [k["proveedor"] for k in _prov] + [n for n in proveedores_conocidos()
+                                                       if n not in {k["proveedor"] for k in _prov}]
+        _ver_p = st.selectbox("Ver la cuenta de:", _todos_p, index=None,
+                              placeholder="Elegí un proveedor", key="prov_ver")
+        if _ver_p:
+            _movs_p = movimientos_con_el_proveedor(_ver_p)
+            if not _movs_p:
+                st.caption("Sin facturas ni pagos anotados.")
+            for _m in reversed(_movs_p[-30:]):
+                _mp1, _mp2 = cols([5, 1], abajo=True, apilar_en_celular=False)
+                _signo = "+" if _m["importe"] > 0 else "-"
+                _mp1.caption(("~~" if _m["anulado"] else "")
+                             + f"{_m['dia'][8:10]}/{_m['dia'][5:7]} · "
+                             + texto_para_markdown(_m["que"])
+                             + f" · {_signo}\\${miles(abs(_m['importe']), 0)}"
+                             + ("~~ (anulado)" if _m["anulado"] else
+                                f" · saldo \\${miles(_m['saldo'], 0)}"))
+                if not _m["anulado"]:
+                    _mp2.button("🚫", key=f"prov_anular_{_m['tipo']}_{_m['id']}",
+                                width="stretch", help="Anularlo (queda tachado).",
+                                on_click=anular_de_proveedor_y_avisar,
+                                args=(_m["tipo"], _m["id"]))
+

@@ -541,6 +541,22 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/pedidos_al_proveedor", _err)
 
+    # LO QUE SE LE DEBE A LOS PROVEEDORES (ver esa sección en logica/ventas.py): lo vencido y
+    # lo que vence en los próximos días, para pagarlo a tiempo.
+    try:
+        _facturas = facturas_para_avisar()
+        if _facturas:
+            _vencido_p = sum(k["vencido"] for k in _facturas)
+            sumar("alto" if _vencido_p else "medio",
+                  f"🧾 {len(_facturas)} proveedor(es) para pagar"
+                  + (f": ${miles(_vencido_p, 0)} vencidos" if _vencido_p else
+                     f" en {DIAS_PARA_AVISAR_UNA_FACTURA} días o menos"),
+                  "A " + ", ".join(k["proveedor"] for k in _facturas[:3])
+                  + (" …" if len(_facturas) > 3 else "") + ". Al pagar, «💸 Anotar un pago».",
+                  miga_hasta("Proveedores"), solo_admin=True)
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/proveedores", _err)
+
     # LOS CHEQUES PARA DEPOSITAR (ver esa sección en logica/mecanico.py): el que no se deposita
     # a tiempo, el banco lo rechaza.
     try:

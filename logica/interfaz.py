@@ -186,7 +186,7 @@ PARA_QUE_SIRVE = {
 SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
              "🔎 Búsquedas sin resultado", "📌 Para pedir", "🔗 Equivalencias sugeridas"]
 SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos",
-             "🧹 Mantenimiento", "👥 Usuarios", "💳 Cuentas corrientes"]
+             "🧹 Mantenimiento", "👥 Usuarios", "💳 Cuentas corrientes", "🚚 Proveedores"]
 # Ordenadas por cómo se usan: primero identificar el auto (patente, chasis, motor), después
 # consultarlo. Antes «Códigos DTC» quedaba segundo, entre dos formas de identificar el auto.
 SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo",
@@ -234,6 +234,8 @@ PARA_QUE_SIRVE_LA_SOLAPA = {
                        "están mal y cuidar la base. Buscalas por lo que querés hacer.",
     "👥 Usuarios": "Las contraseñas de los empleados y de los talleres que entran a su portal.",
     "💳 Cuentas corrientes": "Lo que se lleva cada taller a cuenta, lo que paga y lo que debe.",
+    "🚚 Proveedores": "Lo que le debés a cada proveedor: sus facturas, cuándo vencen y lo que "
+                     "les pagaste.",
     "🔤 Por patente": "Todo lo de un auto a partir de la patente: qué es y qué se le puso.",
     "🔢 Chasis / VIN": "Leer el número de chasis para saber marca, modelo y año.",
     "⚙️ Número de motor": "Qué motor es por su número, y qué repuestos se le pusieron.",
@@ -609,6 +611,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("🚚 Lo que le debés a cada proveedor: anotás sus facturas de compra con el vencimiento y lo que les pagás (en efectivo de la caja, queda también como salida de caja). Ves cuánto le debés a cada uno, lo vencido y lo próximo a vencer; la campanita te avisa a tiempo.", "🗂️ Administrar → 🚚 Proveedores"),
     ("📄 Lista de precios para un taller: de lo que compró o de una marca (lo que hay en stock), con su precio de lista y el suyo con su descuento, para mandársela por WhatsApp o en PDF.", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("🔄 Turnos de caja: cada arqueo cierra el turno de quien lo hace, y la tabla dice lo que faltó o sobró en cada turno (no en el día entero): si a la mañana faltaron $100, no le caen a la de la tarde. También en el resumen del día y en los arqueos por cajero del mes.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("💸 Gastos fijos y lo que quedó: anotás alquiler, luz, sueldos (valen todos los meses hasta que los saques) y el cierre del mes muestra la ganancia estimada menos los gastos de la caja y los fijos.", "💵 Caja → 📋 Ventas y cierre de caja"),
@@ -832,6 +835,10 @@ TIEMPOS_QUE_ELIGE_EL_ADMINISTRADOR = (
      "A un auto «le toca pronto» un cambio cuando faltan menos de", "días", 1, 180),
     ("📋 Presupuestos y clientes", "DIAS_SIN_REPETIR_EL_AVISO",
      "A quien se le avisó del service, no volver a avisarle por", "días", 1, 180),
+    ("🛒 Para pedir y proveedores", "DIAS_DE_PLAZO_DE_UN_PROVEEDOR",
+     "Una factura de un proveedor vence, si no se dice otra cosa, a los", "días", 1, 180),
+    ("🛒 Para pedir y proveedores", "DIAS_PARA_AVISAR_UNA_FACTURA",
+     "Una factura de un proveedor va a la campanita cuando le faltan", "días", 0, 30),
     ("📋 Presupuestos y clientes", "DIAS_PARA_AVISAR_UN_CHEQUE",
      "Un cheque para depositar avisa fuerte en la campanita cuando le faltan", "días", 1, 29),
     ("📋 Presupuestos y clientes", "DIAS_PARA_AVISAR_UNA_SENA",
