@@ -726,17 +726,163 @@ def guardar_comision_por_ciento(valor):
                       "comision_por_ciento", antes=antes, despues=nuevo)
 
 
+# LA COMISIÓN DE CADA UNO: el que recién empieza y el encargado no siempre cobran lo mismo. Se
+# anota la propia de un vendedor; el que no tiene, cobra la general.
+def comisiones_propias():
+    """{vendedor: porcentaje} de los que tienen una propia."""
+    try:
+        datos = json.loads(obtener_config("comisiones_por_vendedor", "") or "{}")
+    except ValueError:
+        return {}
+    return {str(k): float(v) for k, v in (datos or {}).items()
+            if isinstance(v, (int, float)) and 0 <= v <= COMISION_MAXIMA}
+
+
+def comision_de(vendedor):
+    """El porcentaje de ese vendedor: el propio, o el general."""
+    return comisiones_propias().get(str(vendedor), comision_por_ciento())
+
+
+def guardar_comision_de(vendedor, valor):
+    """La propia de un vendedor; None la saca (vuelve a la general). La anota el administrador."""
+    exigir_nivel("admin", "cambiar la comisión de un vendedor")
+    vendedor = str(vendedor or "").strip()
+    if not vendedor:
+        raise ValueError("Elegí el vendedor.")
+    propias = comisiones_propias()
+    antes = propias.get(vendedor)
+    if valor is None:
+        propias.pop(vendedor, None)
+    else:
+        nuevo = round(float(valor), 2)
+        if not 0 <= nuevo <= COMISION_MAXIMA:
+            raise ValueError(f"La comisión tiene que ser entre 0 y {COMISION_MAXIMA}%.")
+        propias[vendedor] = nuevo
+    if propias.get(vendedor) != antes:
+        guardar_config("comisiones_por_vendedor", json.dumps(propias, sort_keys=True))
+        anotar_cambio("cambió la comisión de un vendedor", "configuración", vendedor,
+                      antes=antes, despues=propias.get(vendedor))
+
+
 def comisiones_del_mes(mes, hoy=None):
-    """ventas_por_vendedor() del mes, con «Comisión» (lo vendido por el porcentaje anotado) y
-    «Mes anterior» (lo que vendió cada uno el mes de antes, entero)."""
+    """ventas_por_vendedor() del mes, con «%» (el de cada uno), «Comisión» (lo vendido por ese
+    porcentaje) y «Mes anterior» (lo que vendió cada uno el mes de antes, entero)."""
     desde, hasta = rango_del_mes(mes, hoy)
     anterior_hasta = date.fromisoformat(desde) - timedelta(days=1)
     anterior = {x["Vendedor"]: x["Vendido"] for x in ventas_por_vendedor(
         anterior_hasta.replace(day=1).isoformat(), anterior_hasta.isoformat())}
-    por_ciento = comision_por_ciento()
-    return [{**x, "Comisión": round(x["Vendido"] * por_ciento / 100, 2),
-             "Mes anterior": anterior.get(x["Vendedor"], 0.0)}
-            for x in ventas_por_vendedor(desde, hasta)]
+    propias, general = comisiones_propias(), comision_por_ciento()
+    salida = []
+    for x in ventas_por_vendedor(desde, hasta):
+        por_ciento = propias.get(x["Vendedor"], general)
+        salida.append({**x, "%": por_ciento,
+                       "Comisión": round(x["Vendido"] * por_ciento / 100, 2),
+                       "Mes anterior": anterior.get(x["Vendedor"], 0.0)})
+    return salida
+
+
+def guardar_comision_y_avisar(vendedor, clave_del_campo, a_la_general=False):
+    """«💾 Guardar» y «Usar la general» de la comisión propia (van como on_click)."""
+    try:
+        guardar_comision_de(vendedor, None if a_la_general
+                            else st.session_state.get(clave_del_campo))
+    except (PermissionError, ValueError) as _err:
+        error = el_error_en_castellano(_err)
+    else:
+        error = ""
+    if error:
+        avisar("error", error)
+    else:
+        avisar("success", f"💰 {vendedor}: comisión de {como_porcentaje(comision_de(vendedor))}%"
+                          + (" (la general)." if vendedor not in comisiones_propias() else "."))
+
+
+# LA LIQUIDACIÓN DE UN VENDEDOR: lo del mes con cada venta, para dársela o mandársela y que
+# pueda controlar de dónde sale el número (antes era un total dicho de palabra).
+def ventas_del_vendedor(desde, hasta, vendedor):
+    """Las ventas no anuladas de ese vendedor entre dos días de acá, la más vieja primero:
+    [dict] con id, dia, cliente, total y devuelto."""
+    return [dict(f) for f in c.execute(
+        """SELECT v.id, date(v.fecha, '-3 hours') AS dia,
+                  COALESCE(NULLIF(v.cliente, ''), k.nombre, '') AS cliente, v.total,
+                  COALESCE((SELECT SUM(d.importe) FROM ventas_devoluciones d
+                            WHERE d.venta_id = v.id
+                              AND date(d.fecha, '-3 hours') BETWEEN ? AND ?), 0) AS devuelto
+           FROM ventas v LEFT JOIN mecanicos k ON k.id = v.mecanico_id
+           WHERE v.anulada = 0 AND COALESCE(NULLIF(v.usuario, ''), 'Sin decir') = ?
+             AND date(v.fecha, '-3 hours') BETWEEN ? AND ?
+           ORDER BY v.id""", (desde, hasta, str(vendedor), desde, hasta))]
+
+
+def liquidacion_del_vendedor(mes, vendedor, hoy=None):
+    """El texto de la liquidación del mes de un vendedor, para WhatsApp. "" si no vendió."""
+    fila = next((x for x in comisiones_del_mes(mes, hoy) if x["Vendedor"] == vendedor), None)
+    if not fila:
+        return ""
+    plata = lambda x: f"${miles(x, 0)}"
+    renglones = [f"🏆 Liquidación de {nombre_del_mes(mes)} — {vendedor}",
+                 f"🧾 Ventas: {miles(fila['Ventas'])} por {plata(fila['Vendido'] + fila['Devuelto'])}"]
+    if fila["Devuelto"]:
+        renglones.append(f"↩️ Devuelto: {plata(fila['Devuelto'])}")
+    renglones.append(f"💵 Vendido: {plata(fila['Vendido'])}")
+    if fila["%"]:
+        renglones.append(f"💰 Comisión ({como_porcentaje(fila['%'])}%): {plata(fila['Comisión'])}")
+    return "\n".join(renglones)
+
+
+def liquidacion_para_descargar(mes, vendedor, hoy=None):
+    """Para el botón de descarga: los datos se leen ahora y el PDF se arma al tocarlo, en otro
+    hilo que no toca la base (ver comprobante_para_descargar())."""
+    fila = next((x for x in comisiones_del_mes(mes, hoy) if x["Vendedor"] == vendedor), None)
+    desde, hasta = rango_del_mes(mes, hoy)
+    ventas = ventas_del_vendedor(desde, hasta, vendedor) if fila else []
+    return lambda: pdf_de_la_liquidacion(mes, vendedor, fila, ventas, desde, hasta)
+
+
+def pdf_de_la_liquidacion(mes, vendedor, fila, ventas, desde, hasta):
+    """La liquidación del mes de un vendedor en PDF, con cada venta (los datos, ya leídos: ver
+    liquidacion_para_descargar()). b"" si no vendió."""
+    from fpdf import FPDF
+    if not fila:
+        return b""
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.cell(0, 10, limpiar(f"El Chavo - Liquidación de {nombre_del_mes(mes)}"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, limpiar(f"Vendedor: {vendedor}   Del {desde[8:10]}/{desde[5:7]} al "
+                           f"{hasta[8:10]}/{hasta[5:7]}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    for texto, ancho in (("Día", 22), ("Venta", 22), ("Cliente", 86), ("Total", 30),
+                         ("Devuelto", 30)):
+        pdf.cell(ancho, 7, texto, border="B", align="L" if texto in ("Día", "Venta", "Cliente")
+                 else "R")
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 10)
+    for v in ventas:
+        pdf.cell(22, 6, limpiar(f"{v['dia'][8:10]}/{v['dia'][5:7]}"))
+        pdf.cell(22, 6, f"#{v['id']}")
+        pdf.cell(86, 6, limpiar(str(v["cliente"] or "")[:42]))
+        pdf.cell(30, 6, limpiar(f"${miles(v['total'] or 0, 0)}"), align="R")
+        pdf.cell(30, 6, limpiar(f"${miles(v['devuelto'], 0)}" if v["devuelto"] else ""),
+                 align="R")
+        pdf.ln()
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 11)
+    for texto, valor in (("Vendido (sin lo anulado y con lo devuelto descontado)",
+                          fila["Vendido"]),) + (
+            ((f"Comisión ({como_porcentaje(fila['%'])}%)", fila["Comisión"]),)
+            if fila["%"] else ()):
+        pdf.cell(150, 8, limpiar(texto), border="T")
+        pdf.cell(40, 8, limpiar(f"${miles(valor, 0)}"), border="T", align="R")
+        pdf.ln()
+    return bytes(pdf.output())
 
 
 def devoluciones_del_dia(dia=None):
@@ -1279,6 +1425,80 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
                   # Que se sepa que queda para reclamar: si no, nadie entra a buscarlo.
                   + (". Queda para reclamárselo al proveedor en ↩️ Devoluciones → 🔧 Garantías"
                      if motivo in MOTIVOS_PARA_RECLAMAR else "") + ".")
+
+
+# EL CAMBIO DE APERTURA Y LOS BILLETES. El arqueo pide el efectivo «sin el cambio con el que
+# se abrió»: la cajera contaba todo el cajón y restaba de memoria, y el cambio no quedaba en
+# ningún lado. Ahora el cambio de apertura se anota (uno por día), y en «💵 Contar los billetes»
+# se carga cuántos hay de cada uno: la app suma, resta el cambio y pasa el número al arqueo, con
+# el detalle de billetes en la nota.
+DENOMINACIONES_DE_BILLETES = (20000, 10000, 2000, 1000, 500, 200, 100, 50, 20, 10)
+
+
+def cambio_de_apertura(dia=None):
+    """Con cuánto cambio se abrió la caja ese día (hoy, si no se dice), o None."""
+    fila = c.execute("SELECT importe FROM aperturas_de_caja WHERE dia = ?",
+                     (dia or hoy_aca().isoformat(),)).fetchone()
+    return float(fila["importe"]) if fila else None
+
+
+def anotar_cambio_de_apertura(importe, dia=None):
+    """(ok, texto). Uno por día: anotarlo otra vez lo corrige (queda en el registro)."""
+    exigir_nivel("empleado", "anotar el cambio de apertura")
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "Escribí con cuánto cambio se abrió."
+    if importe < 0:
+        return False, "El cambio no puede ser negativo."
+    if not importe <= SALIDA_DE_CAJA_MAXIMA:  # también el «nan» que deja pasar float()
+        return False, f"¿${miles(importe, 0)} de cambio? Revisá el número."
+    dia = dia or hoy_aca().isoformat()
+    antes = cambio_de_apertura(dia)
+    with db_lock, transaccion():
+        c.execute("INSERT INTO aperturas_de_caja (dia, importe, usuario) VALUES (?, ?, ?) "
+                  "ON CONFLICT(dia) DO UPDATE SET importe = excluded.importe, "
+                  "usuario = excluded.usuario, fecha = datetime('now')",
+                  (dia, importe, obtener_usuario_actual()))
+        anotar_cambio("cambio de apertura", "caja", dia, antes=antes, despues=importe)
+    return True, f"🪙 Cambio de apertura: ${miles(importe, 0)}."
+
+
+def total_de_billetes(conteo, monedas=0):
+    """{denominación: cuántos} y las monedas en pesos → el total."""
+    return round(sum(int(d) * max(0, int(n or 0)) for d, n in (conteo or {}).items())
+                 + max(0.0, float(monedas or 0)), 2)
+
+
+def detalle_de_billetes(conteo, monedas=0):
+    """«3 × $20.000 · 2 × $1.000 · monedas $350», para la nota del arqueo."""
+    partes = [f"{int(n)} × ${miles(int(d))}" for d, n in sorted(
+        (conteo or {}).items(), key=lambda x: -int(x[0])) if int(n or 0) > 0]
+    if float(monedas or 0) > 0:
+        partes.append(f"monedas ${miles(float(monedas), 0)}")
+    return " · ".join(partes)
+
+
+def anotar_cambio_de_apertura_y_avisar(clave_del_campo, dia):
+    """«💾 Anotar» del cambio de apertura (va como on_click)."""
+    try:
+        ok, texto = anotar_cambio_de_apertura(st.session_state.get(clave_del_campo), dia)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
+def pasar_los_billetes_al_arqueo(dia):
+    """«Pasar al arqueo» (va como on_click): el total de los billetes contados, menos el cambio
+    de apertura, va a «Efectivo contado», y el detalle a la nota."""
+    conteo = {d: st.session_state.get(f"billete_{d}") or 0 for d in DENOMINACIONES_DE_BILLETES}
+    monedas = st.session_state.get("billete_monedas") or 0
+    total = total_de_billetes(conteo, monedas)
+    cambio = cambio_de_apertura(dia) or 0.0
+    st.session_state["arqueo_contado"] = max(0.0, round(total - cambio, 2))
+    st.session_state["arqueo_nota"] = (detalle_de_billetes(conteo, monedas)
+                                       + (f" (menos ${miles(cambio, 0)} de cambio)"
+                                          if cambio else ""))[:200]
 
 
 def arquear_la_caja(dia, efectivo_contado, nota=""):

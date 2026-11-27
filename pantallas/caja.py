@@ -271,11 +271,12 @@ if pagina == PAGINAS[11]:
                                    f"{_hasta_m[8:10]}/{_hasta_m[5:7]}, por quien armó la venta: "
                                    "sin lo anulado y con lo devuelto descontado.")
                         if _por_vend:
-                            _con_comision = comision_por_ciento() > 0
+                            _con_comision = any(x["%"] for x in _por_vend)
                             st.dataframe([{"Vendedor": x["Vendedor"],
                                            "Ventas": miles(x["Ventas"]),
                                            "Vendido": f"${miles(x['Vendido'], 0)}",
-                                           **({"Comisión": f"${miles(x['Comisión'], 0)}"}
+                                           **({"%": f"{como_porcentaje(x['%'])}%",
+                                               "Comisión": f"${miles(x['Comisión'], 0)}"}
                                               if _con_comision else {}),
                                            "Devuelto": (f"${miles(x['Devuelto'], 0)}"
                                                         if x["Devuelto"] else ""),
@@ -285,6 +286,52 @@ if pagina == PAGINAS[11]:
                                           for x in _por_vend], width="stretch", hide_index=True)
                         else:
                             st.caption("Ese mes no hubo ventas.")
+                        # LA COMISIÓN PROPIA de un vendedor (el que no tiene, la general). Ver
+                        # comisiones_propias().
+                        _nombres_v = sorted({x["Nombre"] for x in listar_usuarios()
+                                             if x["Activo"] == "Sí"}
+                                            | {x["Vendedor"] for x in _por_vend}
+                                            | set(comisiones_propias()))
+                        if _nombres_v:
+                            st.markdown("**💰 Comisión propia de un vendedor**",
+                                        help="Para el que no cobra la general (el encargado, el "
+                                             "que recién empieza). Sin propia, cobra la general.")
+                            _c_v1, _c_v2 = cols([3, 2], abajo=True)
+                            _vend_c = _c_v1.selectbox("Vendedor:", _nombres_v,
+                                                      key="comision_vendedor")  # rótulo fijo
+                            _clave_c = ("comision_propia_" + hashlib.md5(
+                                f"{_vend_c}|{comision_de(_vend_c)}".encode()).hexdigest()[:8])
+                            _c_v2.number_input("%:", min_value=0.0,
+                                               max_value=float(COMISION_MAXIMA), step=0.5,
+                                               value=float(comision_de(_vend_c)), key=_clave_c)
+                            _c_b1, _c_b2 = st.columns(2)
+                            _c_b1.button("💾 Guardar", key="comision_propia_guardar",
+                                         width="stretch", on_click=guardar_comision_y_avisar,
+                                         args=(_vend_c, _clave_c))
+                            if _vend_c in comisiones_propias():
+                                _c_b2.button("Usar la general", key="comision_propia_sacar",
+                                             width="stretch",
+                                             on_click=guardar_comision_y_avisar,
+                                             args=(_vend_c, _clave_c, True))
+                        # LA LIQUIDACIÓN de uno, con cada venta (ver liquidacion_del_vendedor()).
+                        if _por_vend:
+                            st.markdown("**🧾 Liquidación de un vendedor**")
+                            _vend_l = st.selectbox("De:", [x["Vendedor"] for x in _por_vend],
+                                                   key="liquidacion_vendedor")  # rótulo fijo
+                            _liq = liquidacion_del_vendedor(_mes_v, _vend_l)
+                            _clave_liq = ("liquidacion_"
+                                          + hashlib.md5(_liq.encode()).hexdigest()[:8])
+                            _liq_final = st.text_area("Liquidación:", value=_liq, height=150,
+                                                      key=_clave_liq) or _liq
+                            _l1, _l2 = st.columns(2)
+                            _l1.link_button("📲 Mandársela por WhatsApp",
+                                            link_de_whatsapp("", _liq_final), width="stretch",
+                                            key=f"walink__{_clave_liq}")
+                            _l2.download_button(
+                                "⬇️ PDF con cada venta",
+                                data=liquidacion_para_descargar(_mes_v, _vend_l),
+                                file_name=f"liquidacion_{_mes_v}_{_vend_l}.pdf",
+                                mime="application/pdf", key="liquidacion_pdf", width="stretch")
             if not _del_dia and not _devs_dia:
                 st.caption("Ese día no hubo ventas.")
             else:
@@ -557,12 +604,48 @@ if pagina == PAGINAS[11]:
                        + (f" y los \\${miles(_salio, 0)} que salieron" if _salio else "")
                        + f"), tendría que haber **\\${miles(efectivo_esperado(_dia_txt), 0)}**, sin "
                          "contar el cambio con el que se abrió.")
+            # EL CAMBIO DE APERTURA Y LOS BILLETES (ver esa sección en logica/ventas.py): el
+            # cambio queda anotado, y contando los billetes la app suma y lo resta.
+            _cambio_dia = cambio_de_apertura(_dia_txt)
+            _ap1, _ap2 = cols([2, 1], abajo=True)
+            _clave_ap = f"apertura_{_dia_txt}_{_cambio_dia}"
+            _ap1.number_input("🪙 Cambio con el que se abrió la caja:", min_value=0.0,
+                              step=100.0, value=_cambio_dia, placeholder="Ej: 20000",
+                              key=_clave_ap, help="Se anota una vez por día; el arqueo es sin "
+                                                  "él, y al contar los billetes se resta solo.")
+            _ap2.button("💾 Anotar el cambio", key="apertura_anotar", width="stretch",
+                        on_click=anotar_cambio_de_apertura_y_avisar, args=(_clave_ap, _dia_txt))
+            with st.popover("💵 Contar los billetes", key="pop_contar_billetes",
+                            width="stretch"):
+                st.caption("Cuántos hay de cada uno en el cajón (con el cambio): la app suma, "
+                           "resta el cambio de apertura y lo pasa al arqueo.")
+                _filas_b = [DENOMINACIONES_DE_BILLETES[i:i + 2]
+                            for i in range(0, len(DENOMINACIONES_DE_BILLETES), 2)]
+                for _par in _filas_b:
+                    _cb = st.columns(2)
+                    for _col_b, _den in zip(_cb, _par):
+                        _col_b.number_input(f"${miles(_den)}", min_value=0, step=1,
+                                            key=f"billete_{_den}")
+                st.number_input("Monedas ($):", min_value=0.0, step=10.0, key="billete_monedas")
+                _total_b = total_de_billetes(
+                    {d: st.session_state.get(f"billete_{d}") or 0
+                     for d in DENOMINACIONES_DE_BILLETES},
+                    st.session_state.get("billete_monedas") or 0)
+                st.markdown(f"**Total: \\${miles(_total_b, 0)}**"
+                            + (f" · sin el cambio (\\${miles(_cambio_dia, 0)}): "
+                               f"**\\${miles(max(0.0, _total_b - _cambio_dia), 0)}**"
+                               if _cambio_dia else ""))
+                st.button("➡️ Pasar al arqueo", key="billetes_al_arqueo", width="stretch",
+                          on_click=pasar_los_billetes_al_arqueo, args=(_dia_txt,),
+                          disabled=not _total_b)
             with st.form("form_arqueo"):
                 _q1, _q2 = cols([1, 2])
                 _contado = _q1.number_input("Efectivo contado:", min_value=0.0, step=100.0,
                                             value=None, placeholder="Ej: 45000",
+                                            key="arqueo_contado",
                                             help="Sin el cambio con el que abriste la caja.")
-                _nota_arq = _q2.text_input("Nota (opcional):", placeholder="Ej: faltan $500 de un vuelto")
+                _nota_arq = _q2.text_input("Nota (opcional):", key="arqueo_nota",
+                                           placeholder="Ej: faltan $500 de un vuelto")
                 _arquear = st.form_submit_button("🧮 Guardar el arqueo")
             if _arquear:
                 if _contado is None:

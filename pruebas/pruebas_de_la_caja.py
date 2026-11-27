@@ -598,6 +598,42 @@ def probar(L):
                                 dia="2020-01-01")
     esperar("la de otro día, aparte",
             (ns["total_de_salidas"](), ns["total_de_salidas"]("2020-01-01")), (0.0, 700.0))
+
+    # EL CAMBIO DE APERTURA Y LOS BILLETES: uno por día (otra vez lo corrige), y contando los
+    # billetes la app suma, resta el cambio y lo pasa al arqueo con el detalle.
+    esperar("sin anotar, no hay", ns["cambio_de_apertura"](_hoy), None)
+    esperar("negativo, sin número o disparatado, no",
+            [ns["anotar_cambio_de_apertura"](x, _hoy)[0] for x in (-5, None, "mucho", 1e12)],
+            [False] * 4)
+    esperar("anotado", ns["anotar_cambio_de_apertura"](20000, _hoy),
+            (True, "🪙 Cambio de apertura: $20.000."))
+    ns["anotar_cambio_de_apertura"](15000, _hoy)
+    esperar("otra vez lo corrige (uno por día), y queda en el registro",
+            (ns["cambio_de_apertura"](_hoy), ns["cambio_de_apertura"]("2020-01-01"),
+             cs.execute("SELECT COUNT(*) FROM aperturas_de_caja").fetchone()[0],
+             cs.execute("SELECT COUNT(*) FROM registro_de_cambios WHERE accion = "
+                        "'cambio de apertura'").fetchone()[0]), (15000.0, None, 1, 2))
+    _conteo = {20000: 1, 1000: 2, 100: "3", 50: None, 10: -4}
+    esperar("los billetes suman (los vacíos y los negativos no)",
+            (ns["total_de_billetes"](_conteo, 350), ns["total_de_billetes"]({}, None)),
+            (22650.0, 0.0))
+    esperar("el detalle, del más grande al más chico",
+            ns["detalle_de_billetes"]({100: 3, 20000: 1, 1000: 2, 500: 0}, 350),
+            "1 × $20.000 · 2 × $1.000 · 3 × $100 · monedas $350")
+    for _d in ns["DENOMINACIONES_DE_BILLETES"]:
+        st.session_state.pop(f"billete_{_d}", None)
+    st.session_state.update({"billete_20000": 1, "billete_1000": 2, "billete_monedas": 350})
+    ns["pasar_los_billetes_al_arqueo"](_hoy)
+    esperar("al arqueo: el total menos el cambio, y el detalle en la nota",
+            (st.session_state["arqueo_contado"], st.session_state["arqueo_nota"]),
+            (7350.0, "1 × $20.000 · 2 × $1.000 · monedas $350 (menos $15.000 de cambio)"))
+    st.session_state.update({"billete_20000": 0, "billete_1000": 3, "billete_monedas": 0})
+    ns["pasar_los_billetes_al_arqueo"]("2020-01-01")
+    esperar("sin cambio anotado ese día, el total entero; y nunca negativo",
+            (st.session_state["arqueo_contado"], st.session_state["arqueo_nota"]),
+            (3000.0, "3 × $1.000"))
+    ns["pasar_los_billetes_al_arqueo"](_hoy)
+    esperar("menos que el cambio: cero", st.session_state["arqueo_contado"], 0.0)
     ns["anotar_salida_de_caja"]("🧾 Gasto", "artículos de limpieza", 120)
     esperar("y en el resumen de la semana, por tipo (lo anulado y lo de 2020, no)",
             [r for r in ns["resumen_de_la_semana"]().split("\n") if r.startswith("💸")],
@@ -647,6 +683,29 @@ def probar(L):
         fallas.append("se pudo anotar una comisión de 80%")
     except ValueError:
         pass
+    # La comisión propia de un vendedor; el que no tiene, la general. Y su liquidación, con
+    # cada venta.
+    ns["guardar_comision_de"]("rosa", 10)
+    esperar("rosa con la suya, tito con la general",
+            [(x["Vendedor"], x["%"], x["Comisión"])
+             for x in ns["comisiones_del_mes"]("2020-03", hoy=_d(2026, 1, 1))],
+            [("rosa", 10.0, 380.0), ("tito", 5.0, 25.0)])
+    esperar("las ventas de rosa en marzo, con lo devuelto",
+            [(x["dia"], x["total"], x["devuelto"])
+             for x in ns["ventas_del_vendedor"]("2020-03-01", "2020-03-31", "rosa")],
+            [("2020-03-10", 1000.0, 200.0), ("2020-03-20", 3000.0, 0)])
+    _liq = ns["liquidacion_del_vendedor"]("2020-03", "rosa", hoy=_d(2026, 1, 1))
+    esperar("la liquidación de rosa", _liq.split("\n"),
+            ["🏆 Liquidación de marzo 2020 — rosa", "🧾 Ventas: 2 por $4.000",
+             "↩️ Devuelto: $200", "💵 Vendido: $3.800", "💰 Comisión (10%): $380"])
+    _pdf_liq = ns["liquidacion_para_descargar"]("2020-03", "rosa", hoy=_d(2026, 1, 1))()
+    esperar("y su PDF", _pdf_liq[:4], b"%PDF")
+    esperar("del que no vendió, nada",
+            (ns["liquidacion_del_vendedor"]("2020-03", "nadie", hoy=_d(2026, 1, 1)),
+             ns["liquidacion_para_descargar"]("2020-03", "nadie", hoy=_d(2026, 1, 1))()),
+            ("", b""))
+    ns["guardar_comision_de"]("rosa", None)
+    esperar("sin la propia, vuelve a la general", ns["comision_de"]("rosa"), 5.0)
     _claves_antes = g["hay_claves_configuradas"]
     try:
         g["hay_claves_configuradas"] = lambda: True
@@ -654,8 +713,12 @@ def probar(L):
             g["_nivel_de_quien_esta_adentro"] = lambda n=_nivel: n
             for _que, _hacer in (("cambiar la comisión", lambda: ns["guardar_comision_por_ciento"](
                                     3)),
+                                 ("cambiar la comisión de uno",
+                                  lambda: ns["guardar_comision_de"]("rosa", 3)),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
+                                 ("anotar el cambio de apertura en",
+                                  lambda: ns["anotar_cambio_de_apertura"](1)),
                                  ("anular", lambda: ns["anular_salida_de_caja"](1))):
                 try:
                     _hacer()

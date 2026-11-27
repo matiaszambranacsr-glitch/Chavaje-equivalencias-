@@ -1300,6 +1300,23 @@ def probar():
     if _anular:
         _anular[0].click().run()
     esperar("y el «🚫» la anula", (len(_anular), ns["total_de_salidas"]()), (1, 0.0))
+    # EL CAMBIO DE APERTURA Y LOS BILLETES en la pantalla: se anota el cambio, se cuentan los
+    # billetes y «➡️ Pasar al arqueo» deja el número (sin el cambio) en «Efectivo contado».
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.run()
+    [x for x in vta.number_input if (x.key or "").startswith("apertura_")][0].set_value(3000.0)
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.button(key="apertura_anotar").click().run()
+    esperar("el cambio de apertura, anotado", ns["cambio_de_apertura"](), 3000.0)
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.number_input(key="billete_1000").set_value(5)
+    vta.number_input(key="billete_100").set_value(4).run()
+    vta.session_state["exp_ventas_cierre_caja_hoy"] = True
+    vta.button(key="billetes_al_arqueo").click().run()
+    esperar("los billetes, al arqueo sin el cambio y con el detalle",
+            (vta.number_input(key="arqueo_contado").value,
+             vta.text_input(key="arqueo_nota").value, [e.value for e in vta.exception]),
+            (2400.0, "5 × $1.000 · 4 × $100 (menos $3.000 de cambio)", []))
     # EL MES POR VENDEDOR: el empleado no lo ve; el administrador sí, con la tabla.
     def _mes_por_vendedor(sesion):
         return [p for p in sesion.get("popover")
@@ -1328,6 +1345,29 @@ def probar():
     _adm_mes.selectbox(key="mes_por_vendedor_mes").set_value(
         ns["meses_para_elegir"]()[1]).run()
     esperar("el mes anterior se elige", [e.value for e in _adm_mes.exception], [])
+    # La comisión propia y la liquidación, en el mismo panel (este mes vendió rita).
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.session_state["mes_por_vendedor_mes"] = ns["meses_para_elegir"]()[0]
+    _adm_mes.run()
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.selectbox(key="comision_vendedor").set_value("rita").run()
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.run()
+    [x for x in _adm_mes.number_input if (x.key or "").startswith("comision_propia_")][0] \
+        .set_value(7.5)
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.button(key="comision_propia_guardar").click().run()
+    esperar("la comisión propia de rita, guardada", ns["comision_de"]("rita"), 7.5)
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = True
+    _adm_mes.run()
+    esperar("y su liquidación, con la comisión",
+            [t.value.split("\n")[-1].startswith("💰 Comisión (7,5%): $")
+             for t in _adm_mes.text_area if str(t.key).startswith("liquidacion_")], [True])
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

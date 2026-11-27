@@ -7946,6 +7946,20 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🪙 El cambio de apertura y el arqueo contando billetes
+
+El arqueo pide el efectivo «sin el cambio con el que abriste la caja»: la cajera contaba todo el
+cajón, restaba de memoria, y el cambio no quedaba anotado en ningún lado. Ahora, en 💵 Caja →
+«📋 Ventas y cierre de caja», arriba del arqueo: **«🪙 Cambio con el que se abrió la caja»** se
+anota una vez por día (anotarlo otra vez lo corrige; queda en el registro de cambios), y
+**«💵 Contar los billetes»** pide cuántos hay de cada uno (de $20.000 a $10, y las monedas en
+pesos): la app suma, resta el cambio y **«➡️ Pasar al arqueo»** deja el número en «Efectivo
+contado», con el detalle («5 × $1.000 · 4 × $100 (menos $3.000 de cambio)») en la nota. Si lo
+contado es menos que el cambio, pasa cero. El arqueo sigue igual: se puede escribir el número a
+mano como antes (`anotar_cambio_de_apertura()`, `total_de_billetes()` y
+`pasar_los_billetes_al_arqueo()`, en `logica/ventas.py`; lo controlan `pruebas_de_la_caja.py` y
+`pruebas_de_la_sesion.py`).
+
 ## 📱 La primera pantalla del celular, para lo que se viene a hacer
 
 Mirando el barrido con capturas en un teléfono: en el 🔍 Buscador la caja de búsqueda no
@@ -7966,7 +7980,11 @@ cualquiera de los últimos `MESES_PARA_COMISIONES` (12), entero— y por quien a
 quien la cobró) sale cuántas ventas, lo vendido sin lo anulado y con lo devuelto descontado a
 quien la había vendido, el ticket promedio y lo que vendió el mes anterior. Con **«Comisión
 (%)»** anotado una vez (hasta `COMISION_MAXIMA`, 50%; queda en el registro de cambios) sale
-cuánto le toca a cada uno. Los días son los de acá: una venta del 31 a las
+cuánto le toca a cada uno. El que cobra otro porcentaje (el encargado, el que recién empieza)
+tiene el suyo en **«💰 Comisión propia de un vendedor»**; sin propia, cobra la general. Y
+**«🧾 Liquidación de un vendedor»** arma su detalle del mes —ventas, devuelto, vendido y
+comisión— para mandárselo por WhatsApp, o en PDF con cada venta (día, número, cliente, total y
+lo devuelto) para que pueda controlar de dónde sale el número. Los días son los de acá: una venta del 31 a las
 20 (hora de acá) es de ese mes (`ventas_por_vendedor()` y `comisiones_del_mes()`, en
 `logica/ventas.py`; lo controlan
 `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).

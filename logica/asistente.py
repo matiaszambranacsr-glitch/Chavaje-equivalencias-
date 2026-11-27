@@ -426,11 +426,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "💵 Caja", ""),
     ("cierre", "Cerrar la caja (el arqueo del día)",
      "cierre cerrar caja arqueo arquear contar plata dinero efectivo dia total vendido "
+     "billetes billete monedas cambio apertura abrir "
      "vendi hoy ayer anteriores historial quien vendio recaudacion planilla zeta",
      "Abajo de la caja, abrí «📋 Ventas y cierre de caja»: están las ventas del día con quién "
      "vendió, cómo se pagó cada una y los totales (con «Día:» se mira otro día). Contá el "
-     "efectivo, escribilo y tocá «🧮 Guardar el arqueo»: queda anotado con la diferencia. Lo "
-     "que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
+     "efectivo, escribilo y tocá «🧮 Guardar el arqueo»: queda anotado con la diferencia. Con "
+     "«🪙 Cambio con el que se abrió la caja» anotado, «💵 Contar los billetes» suma lo que hay "
+     "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
     ("mes_por_vendedor", "Ver cuánto vendió cada vendedor en el mes",
@@ -439,7 +441,9 @@ COMO_HAGO_DEL_ASISTENTE = (
      "En la caja, abrí «📋 Ventas y cierre de caja» y tocá «🏆 Ventas y comisiones por "
      "vendedor»: elegís el mes (este o los anteriores) y sale cuántas ventas armó cada uno, lo "
      "vendido (sin lo anulado y con lo devuelto descontado), el ticket promedio y lo del mes "
-     "anterior. Con el porcentaje de comisión anotado, cuánto le toca a cada uno. Solo el "
+     "anterior. Con el porcentaje de comisión anotado, cuánto le toca a cada uno (y en «💰 "
+     "Comisión propia de un vendedor», el que cobra otro porcentaje). En «🧾 Liquidación de un "
+     "vendedor», su detalle para mandárselo por WhatsApp o en PDF con cada venta. Solo el "
      "administrador.",
      "💵 Caja", "admin"),
     ("salida_de_caja", "Anotar un gasto, un pago o un retiro de la caja",

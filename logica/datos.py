@@ -3139,6 +3139,14 @@ def _esquema_ventas(c):
         usuario TEXT,
         fecha TEXT DEFAULT (datetime('now', 'localtime'))
     )""")
+    # EL CAMBIO CON QUE SE ABRIÓ LA CAJA, uno por día de acá. Ver «EL CAMBIO DE APERTURA Y LOS
+    # BILLETES» en logica/ventas.py.
+    c.execute("""CREATE TABLE IF NOT EXISTS aperturas_de_caja (
+        dia TEXT PRIMARY KEY,
+        importe REAL NOT NULL,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
     # LO QUE SALE DEL CAJÓN: gastos, pagos a proveedores, retiros. Ver «LAS SALIDAS DE CAJA» en
     # logica/ventas.py. `dia` es el de acá (el de la caja), no el UTC.
     c.execute("""CREATE TABLE IF NOT EXISTS salidas_de_caja (

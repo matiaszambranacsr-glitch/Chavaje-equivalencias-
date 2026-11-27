@@ -605,10 +605,12 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-25"
+VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("🪙 Cambio de apertura y 💵 contar los billetes: anotás con cuánto cambio abriste, cargás cuántos billetes hay de cada uno y la app suma, resta el cambio y lo pasa al arqueo con el detalle en la nota.", "💵 Caja → 📋 Ventas y cierre de caja"),
+    ("💰 Comisión propia de cada vendedor (el que no tiene, cobra la general) y 🧾 la liquidación del mes de cada uno, para mandársela por WhatsApp o en PDF con cada venta.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🏆 Ventas y comisiones por vendedor: elegís el mes (este o los anteriores) y sale cuántas ventas armó cada uno, lo vendido (sin lo anulado y con lo devuelto descontado), el ticket promedio, lo del mes anterior y, con el porcentaje anotado, la comisión. Solo lo ves vos.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("↩️ Devolución de un cliente: sin escribir nada, las últimas ventas de hoy a un toque (lo que vuelve suele ser del mismo día).", "↩️ Devoluciones → 🧾 De un cliente"),
     ("💸 Salidas de caja: el flete, el proveedor que cobra contra entrega o tu retiro se anotan con qué fue y quién, y lo que tiene que haber en el cajón y el arqueo los descuentan (antes el arqueo decía «Faltan»). Salen en el resumen del día.", "💵 Caja → 📋 Ventas y cierre de caja"),
