@@ -7972,8 +7972,14 @@ vence primero arriba —«🔴 venció», «vence el 12/12» o, el diferido, «s
 con **«✅»** para marcar el que ya se depositó (queda en el registro de cambios). La campanita
 avisa los que ya se pueden depositar, y fuerte si a alguno le faltan
 `DIAS_PARA_AVISAR_UN_CHEQUE` días o menos (5, se cambia en «⏱️ Los tiempos de la página») o
-ya venció (`cheques_sin_depositar()` y `marcar_cheque_depositado()`, en `logica/mecanico.py`; lo
-controlan `pruebas_de_las_cuentas.py` y `pruebas_de_la_sesion.py`).
+ya venció. Abajo, **los depositados en los últimos 30 días**: «↩️» si se marcó por error (vuelve
+a los que esperan) y **«❌» si el banco lo rechazó**: con lo que cobró el banco, el importe vuelve
+a la cuenta del taller como cargo vencido desde ayer («Cheque rechazado del 12/11», y el gasto
+aparte), sin mirar el límite de crédito —es plata que ya debía—, el cheque sale de las dos
+listas y queda **«📲 Avisarle a … por WhatsApp»** con el mensaje escrito
+(`cheques_sin_depositar()`, `marcar_cheque_depositado()`, `cheques_depositados()`,
+`deshacer_cheque_depositado()` y `rechazar_cheque()`, en `logica/mecanico.py`; lo controlan
+`pruebas_de_las_cuentas.py` y `pruebas_de_la_sesion.py`).
 
 ## 📅 El cierre del mes, los arqueos por cajero y cuándo se vende
 

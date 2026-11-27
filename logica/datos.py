@@ -1792,6 +1792,10 @@ def _esquema_gestion(c):
     # logica/mecanico.py). Sin dato, todavía está en el cajón.
     if "cheque_depositado" not in [f[1] for f in c.execute("PRAGMA table_info(movimientos_de_cuenta)")]:
         c.execute("ALTER TABLE movimientos_de_cuenta ADD COLUMN cheque_depositado TEXT")
+    # Cuándo lo rechazó el banco: el importe volvió a la cuenta como un cargo (ver «EL CHEQUE
+    # RECHAZADO» en logica/mecanico.py).
+    if "cheque_rechazado" not in [f[1] for f in c.execute("PRAGMA table_info(movimientos_de_cuenta)")]:
+        c.execute("ALTER TABLE movimientos_de_cuenta ADD COLUMN cheque_rechazado TEXT")
     # LOS PERMISOS PARA PASAR EL LÍMITE DE CRÉDITO: el que atiende lo pide, con un motivo, y solo
     # un administrador lo da (ver «PASAR EL LÍMITE CON PERMISO» en logica/mecanico.py). Lo que se
     # vendió gracias a uno queda con su número en el cargo o en el pedido.

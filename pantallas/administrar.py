@@ -1667,6 +1667,42 @@ if pagina == PAGINAS[3]:
                             _chq2.button("✅", key=f"cheque_depositado_{_ch['id']}",
                                          help="Ya lo depositaste.", width="stretch",
                                          on_click=marcar_cheque_y_avisar, args=(_ch["id"],))
+                        # EL CHEQUE RECHAZADO (ver esa sección en logica/mecanico.py): el aviso
+                        # al taller, recién anotado; y los depositados hace poco, con «❌» si el
+                        # banco lo rechazó y «↩️» si se marcó por error.
+                        _rech = st.session_state.get("cheque_rechazado_recien")
+                        if _rech:
+                            _rq1, _rq2 = cols([3, 1], abajo=True)
+                            _rq1.link_button(f"📲 Avisarle a {_rech['cuenta']} por WhatsApp",
+                                             link_de_whatsapp(_rech["telefono"], _rech["texto"]),
+                                             width="stretch")
+                            if _rq2.button("Listo", key="cheque_rechazado_listo",
+                                           width="stretch"):
+                                st.session_state.pop("cheque_rechazado_recien", None)
+                                st.rerun()
+                        _depositados = cheques_depositados()
+                        if _depositados:
+                            st.markdown("**Depositados en los últimos "
+                                        f"{DIAS_PARA_DEPOSITAR_UN_CHEQUE} días**")
+                        for _dp in _depositados:
+                            _dp1, _dp2, _dp3 = cols([3, 1, 1], abajo=True,
+                                                    apilar_en_celular=False)
+                            _dp1.caption(f"**{texto_para_markdown(_dp['cuenta'])}** · "
+                                         f"\\${miles(_dp['importe'], 0)} · depositado el "
+                                         f"{dia_y_mes_de_aca(_dp['depositado'])}")
+                            with _dp2.popover("❌", key=f"pop_cheque_rechazado_{_dp['id']}",
+                                              help="El banco lo rechazó.", width="stretch"):
+                                _clave_gasto = f"cheque_gasto_{_dp['id']}"
+                                st.number_input("Lo que cobró el banco ($):", min_value=0.0,
+                                                step=100.0, key=_clave_gasto)
+                                st.button("❌ Lo rechazaron", key=f"cheque_rechazar_{_dp['id']}",
+                                          width="stretch", on_click=rechazar_cheque_y_avisar,
+                                          args=(_dp["id"], _clave_gasto),
+                                          help="Vuelve a la cuenta, como cargo ya vencido.")
+                            _dp3.button("↩️", key=f"cheque_deshacer_{_dp['id']}",
+                                        help="No lo depositaste: vuelve a los que esperan.",
+                                        width="stretch", on_click=deshacer_cheque_y_avisar,
+                                        args=(_dp["id"],))
 
                 # COBRAR LO VENCIDO (ver cuentas_para_recordar()): cada una con su WhatsApp ya
                 # escrito. Perezoso: arma los mensajes recién al abrirlo.

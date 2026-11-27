@@ -1863,6 +1863,7 @@ def cheques_sin_depositar(hoy=None):
                           FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
                           WHERE m.medio = 'Cheque' AND m.anulado = 0 AND m.importe < 0
                             AND m.cheque_fecha IS NOT NULL AND m.cheque_depositado IS NULL
+                            AND m.cheque_rechazado IS NULL
                           ORDER BY m.cheque_fecha, m.id"""):
         try:
             fecha = date.fromisoformat(str(f["cheque_fecha"])[:10])
@@ -1888,6 +1889,107 @@ def marcar_cheque_depositado(movimiento_id):
         anotar_cambio("depositó un cheque", "movimiento", movimiento_id)
         conn.commit()
     return True, "🏦 Cheque marcado como depositado."
+
+
+def cheques_depositados(dias=DIAS_PARA_DEPOSITAR_UN_CHEQUE):
+    """[dict] los depositados en los últimos `dias` días (el banco avisa un rechazo en días), el
+    último primero: id, cuenta, mecanico_id, importe, fecha (la del cheque), depositado."""
+    return [dict(f) for f in c.execute(
+        """SELECT m.id, m.mecanico_id, k.nombre AS cuenta, -m.importe AS importe,
+                  m.cheque_fecha AS fecha, m.cheque_depositado AS depositado
+           FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
+           WHERE m.medio = 'Cheque' AND m.anulado = 0 AND m.importe < 0
+             AND m.cheque_depositado >= datetime('now', ?) AND m.cheque_rechazado IS NULL
+           ORDER BY m.cheque_depositado DESC, m.id DESC""", (f"-{int(dias)} days",))]
+
+
+def deshacer_cheque_depositado(movimiento_id):
+    """Se marcó «depositado» por error: vuelve a los que esperan. (ok, texto)."""
+    exigir_nivel("empleado", "deshacer un cheque depositado")
+    with db_lock:
+        c.execute("""UPDATE movimientos_de_cuenta SET cheque_depositado = NULL
+                     WHERE id = ? AND cheque_depositado IS NOT NULL
+                       AND cheque_rechazado IS NULL""", (int(movimiento_id),))
+        if c.rowcount != 1:
+            return False, "Ese cheque no estaba marcado como depositado."
+        anotar_cambio("deshizo un cheque depositado", "movimiento", movimiento_id)
+        conn.commit()
+    return True, "↩️ El cheque volvió a los que hay que depositar."
+
+
+# EL CHEQUE RECHAZADO: el banco lo rechaza (sin fondos, una firma mal) y el taller vuelve a deber
+# esa plata, más lo que cobra el banco por el rechazo. Se anotaba a mano como un cargo cualquiera,
+# sin decir de qué cheque era, y el gasto del banco casi nunca. Ahora, con un toque: el importe
+# vuelve a la cuenta como cargo ya vencido, el gasto aparte si lo hubo, el cheque queda marcado
+# (sale de los que hay que depositar) y el WhatsApp para avisarle sale escrito.
+def rechazar_cheque(movimiento_id, gasto=0):
+    """(ok, texto). El cargo no mira el límite de crédito: es plata que ya debía."""
+    exigir_nivel("empleado", "anotar un cheque rechazado")
+    try:
+        gasto = round(float(gasto or 0), 2)
+    except (TypeError, ValueError):
+        return False, "El gasto del banco tiene que ser un número."
+    if gasto < 0:
+        return False, "El gasto del banco no puede ser negativo."
+    usuario = obtener_usuario_actual()
+    with db_lock, transaccion():
+        f = c.execute("""SELECT mecanico_id, -importe AS importe, cheque_fecha
+                         FROM movimientos_de_cuenta
+                         WHERE id = ? AND medio = 'Cheque' AND anulado = 0 AND importe < 0
+                           AND cheque_rechazado IS NULL""", (int(movimiento_id),)).fetchone()
+        if not f:
+            return False, "Ese cheque no existe o ya estaba anotado como rechazado."
+        fecha = str(f["cheque_fecha"] or "")
+        cual = f"del {fecha[8:10]}/{fecha[5:7]}" if len(fecha) >= 10 else ""
+        c.execute("UPDATE movimientos_de_cuenta SET cheque_rechazado = datetime('now') "
+                  "WHERE id = ?", (int(movimiento_id),))
+        for concepto, importe in ((f"Cheque rechazado {cual}".strip(), f["importe"]),
+                                  (f"Gasto del banco por el cheque rechazado {cual}".strip(),
+                                   gasto)):
+            if importe:
+                c.execute("""INSERT INTO movimientos_de_cuenta
+                                (mecanico_id, concepto, importe, vence, usuario)
+                             VALUES (?, ?, ?, date('now', '-3 hours', '-1 day'), ?)""",
+                          (f["mecanico_id"], concepto, importe, usuario))
+        anotar_cambio("anotó un cheque rechazado", "movimiento", movimiento_id,
+                      despues={"importe": f["importe"], "gasto": gasto})
+    return True, (f"❌ Cheque rechazado: ${miles(f['importe'] + gasto, 0)} de nuevo en la cuenta"
+                  + (f" (con ${miles(gasto, 0)} del banco)" if gasto else "") + ".")
+
+
+def mensaje_de_cheque_rechazado(nombre, importe, gasto=0):
+    """El aviso al taller, amable y con la plata."""
+    nombre = str(nombre or "").strip()
+    return (f"Hola{(' ' + nombre) if nombre else ''}! Te escribimos de El Chavo: el banco nos "
+            f"rechazó el cheque de ${miles(importe, 0)}"
+            + (f" (y nos cobró ${miles(gasto, 0)} por el rechazo)" if gasto else "")
+            + ". Quedó de nuevo en tu cuenta corriente. ¿Cómo lo querés pagar? ¡Gracias!")
+
+
+def rechazar_cheque_y_avisar(movimiento_id, clave_del_gasto):
+    """«❌ Lo rechazaron» (va como on_click): lo anota y deja el WhatsApp para avisarle."""
+    gasto = st.session_state.get(clave_del_gasto) or 0
+    f = c.execute("""SELECT m.mecanico_id, -m.importe AS importe, k.nombre
+                     FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
+                     WHERE m.id = ?""", (int(movimiento_id),)).fetchone()
+    try:
+        ok, texto = rechazar_cheque(movimiento_id, gasto)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    if ok and f:
+        st.session_state["cheque_rechazado_recien"] = {
+            "cuenta": f["nombre"], "telefono": telefono_de_la_cuenta(f["mecanico_id"]),
+            "texto": mensaje_de_cheque_rechazado(f["nombre"], f["importe"], gasto)}
+    avisar("success" if ok else "warning", texto)
+
+
+def deshacer_cheque_y_avisar(movimiento_id):
+    """«↩️ No lo deposité» (va como on_click)."""
+    try:
+        ok, texto = deshacer_cheque_depositado(movimiento_id)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
 
 
 def marcar_cheque_y_avisar(movimiento_id):

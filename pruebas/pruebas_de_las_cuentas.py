@@ -306,6 +306,40 @@ def probar(L):
             (ns["marcar_cheque_depositado"](_id_b)[0], ns["marcar_cheque_depositado"](_id_b)[0],
              [x["importe"] for x in ns["cheques_sin_depositar"]()]),
             (True, False, [3000.0, 1000.0, 100000.0]))
+    # EL CHEQUE RECHAZADO: los depositados hace poco, con «deshacer» y «lo rechazaron».
+    esperar("los depositados hace poco",
+            [(x["id"], x["importe"]) for x in ns["cheques_depositados"]()], [(_id_b, 2000.0)])
+    esperar("deshacer lo vuelve a los que esperan; dos veces, no",
+            (ns["deshacer_cheque_depositado"](_id_b)[0], ns["deshacer_cheque_depositado"](_id_b)[0],
+             _id_b in [x["id"] for x in ns["cheques_sin_depositar"]()]), (True, False, True))
+    ns["marcar_cheque_depositado"](_id_b)
+    _antes_r = ns["estado_de_cuenta"](tp)
+    esperar("el gasto del banco, ni negativo ni letras",
+            (ns["rechazar_cheque"](_id_b, -1)[0], ns["rechazar_cheque"](_id_b, "mucho")[0]),
+            (False, False))
+    esperar("rechazado: vuelve a la cuenta, con el gasto del banco, ya vencido",
+            ns["rechazar_cheque"](_id_b, 350),
+            (True, "❌ Cheque rechazado: $2.350 de nuevo en la cuenta (con $350 del banco)."))
+    _despues_r = ns["estado_de_cuenta"](tp)
+    # (Esta cuenta tiene saldo a favor por el cheque de 2030: lo vencido no se ve acá; el cargo
+    # vence ayer, así que en una cuenta que debe ya cuenta como vencido.)
+    esperar("el saldo sube, vencido desde ayer; sale de los depositados y de los que esperan",
+            (round(_despues_r["saldo"] - _antes_r["saldo"], 2),
+             c.execute("SELECT MAX(vence) FROM movimientos_de_cuenta WHERE mecanico_id = ? AND "
+                       "concepto LIKE 'Cheque rechazado%'", (tp,)).fetchone()[0],
+             ns["cheques_depositados"](),
+             _id_b in [x["id"] for x in ns["cheques_sin_depositar"]()],
+             ns["rechazar_cheque"](_id_b)[0]),
+            (2350.0, (_hoy - _td(days=1)).isoformat(), [], False, False))
+    esperar("los dos cargos dicen de qué cheque son",
+            [r[0].startswith(("Cheque rechazado del ", "Gasto del banco por el cheque rechazado "))
+             for r in c.execute("SELECT concepto FROM movimientos_de_cuenta WHERE mecanico_id = ? "
+                                "ORDER BY id DESC LIMIT 2", (tp,))], [True, True])
+    esperar("el aviso al taller",
+            ns["mensaje_de_cheque_rechazado"]("Taller Permiso", 2000, 350),
+            "Hola Taller Permiso! Te escribimos de El Chavo: el banco nos rechazó el cheque de "
+            "$2.000 (y nos cobró $350 por el rechazo). Quedó de nuevo en tu cuenta corriente. "
+            "¿Cómo lo querés pagar? ¡Gracias!")
     return fallas
 
 

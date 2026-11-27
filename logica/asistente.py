@@ -437,10 +437,12 @@ COMO_HAGO_DEL_ASISTENTE = (
      "💵 Caja", ""),
     ("cheques", "Ver los cheques para depositar",
      "cheque cheques depositar deposito banco cartera diferido vence vencimiento rechazado "
-     "30 dias",
+     "rechazaron rebotado reboto sin fondos 30 dias",
      "En 🗂️ Administrar → 💳 Cuentas corrientes, «🏦 Cheques para depositar»: los de todas las "
      "cuentas, el que vence primero arriba (se depositan dentro de los 30 días de su fecha). Al "
-     "depositarlo, tocá «✅». La campanita avisa los que ya se pueden depositar.",
+     "depositarlo, tocá «✅». Si el banco lo rechaza, en los depositados tocá «❌»: vuelve a la "
+     "cuenta con el gasto del banco y sale el WhatsApp para avisarle. La campanita avisa los "
+     "que ya se pueden depositar.",
      "🗂️ Administrar", "empleado"),
     ("cierre_mes", "Ver el cierre del mes (y a qué hora se vende más)",
      "cierre mes mensual resumen del mes contador excel arqueos faltante sobrante cajero "

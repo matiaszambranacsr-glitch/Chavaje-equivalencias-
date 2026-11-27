@@ -100,6 +100,7 @@ ENTIENDE = (
     ("le quiero dar un recibo al taller que me pago", "como:recibo"),
     ("quiero ver el cierre del mes para el contador", "como:cierre_mes"),
     ("que cheques tengo que depositar", "como:cheques"),
+    ("me rechazaron un cheque", "como:cheques"),
     ("a que hora se vende mas", "como:cierre_mes"),
     ("como descuento la sena cuando retira", "como:senas"),
     ("donde cambio el objetivo de ventas", "como:objetivo_del_mes"),

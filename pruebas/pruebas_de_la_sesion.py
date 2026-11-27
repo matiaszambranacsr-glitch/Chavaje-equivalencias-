@@ -1508,6 +1508,20 @@ def probar():
     _adm_mes.button(key=f"cheque_depositado_{_ch_id}").click().run()
     esperar("el cheque, depositado desde la pantalla",
             (ns["cheques_sin_depositar"](), [e.value for e in _adm_mes.exception]), ([], []))
+    # Y si el banco lo rechaza: con el gasto, vuelve a la cuenta y sale el aviso al taller.
+    _adm_mes.session_state["exp_cheques_depositar"] = True
+    _adm_mes.run()
+    _adm_mes.number_input(key=f"cheque_gasto_{_ch_id}").set_value(200.0)
+    _adm_mes.session_state["exp_cheques_depositar"] = True
+    _adm_mes.button(key=f"cheque_rechazar_{_ch_id}").click().run()
+    esperar("rechazado desde la pantalla: el cargo y el aviso por WhatsApp",
+            (c.execute("SELECT COUNT(*) FROM movimientos_de_cuenta WHERE mecanico_id = ? AND "
+                       "concepto LIKE '%cheque rechazado%' COLLATE NOCASE", (_cta_rec,)
+                       ).fetchone()[0],
+             [b.label for b in _adm_mes.get("link_button")
+              if b.label.startswith("📲 Avisarle a Taller Sesión")],
+             [e.value for e in _adm_mes.exception]),
+            (2, ["📲 Avisarle a Taller Sesión por WhatsApp"], []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()
