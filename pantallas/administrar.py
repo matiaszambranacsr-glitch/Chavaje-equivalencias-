@@ -1795,6 +1795,48 @@ if pagina == PAGINAS[3]:
                     _mid, cuanto_pasa_del_limite(_mid, st.session_state[f"_limite_cc_{_mid}"]),
                     f"cc_{_mid}")
 
+            # LA LISTA DE PRECIOS PARA EL TALLER (ver esa sección en logica/deposito.py): lo que
+            # compró, o una marca, con su descuento. Perezoso: arma la lista solo abierto.
+            _pop_lista = st.popover("📄 Lista de precios para mandarle", key=f"pop_lista_{_mid}",
+                                    on_change="rerun")
+            if _pop_lista.open:
+                with _pop_lista:
+                    _de_lista = st.radio("De:", ["Lo que compró", "Una marca (lo que hay en stock)"],
+                                         horizontal=True, key=f"lista_de_{_mid}")
+                    _marca_lista = None
+                    if _de_lista != "Lo que compró":
+                        _marcas_lista = dict(marcas_con_stock())
+                        if _marcas_lista:
+                            _marca_lista = st.selectbox(
+                                "Marca:", list(_marcas_lista), key=f"lista_marca_{_mid}",
+                                format_func=lambda i: _marcas_lista[i])  # rótulo fijo
+                    _filas_lista = ([] if _de_lista != "Lo que compró" and not _marca_lista
+                                    else lista_de_precios_para(_mid, _marca_lista))
+                    _desc_lista = configuracion_de_cuenta(_mid)["descuento"]
+                    if not _filas_lista:
+                        st.caption("No hay nada para la lista: " + (
+                            f"no compró nada en los últimos {DIAS_DE_LO_QUE_SUELE_LLEVAR} días."
+                            if _de_lista == "Lo que compró" else "esa marca no tiene stock."))
+                    else:
+                        st.caption(f"{miles(len(_filas_lista))} producto(s)"
+                                   + (f", con su {como_porcentaje(_desc_lista)}% de descuento"
+                                      if _desc_lista else ", sin descuento") + ".")
+                        st.dataframe([{**f_, "Precio de lista": f"${miles(f_['Precio de lista'], 0)}",
+                                       "Su precio": f"${miles(f_['Su precio'], 0)}"}
+                                      for f_ in _filas_lista[:15]],
+                                     hide_index=True, width="stretch")
+                        _ls1, _ls2 = cols([1, 1])
+                        _ls1.link_button("📲 Mandársela por WhatsApp",
+                                         link_de_whatsapp(telefono_de_la_cuenta(_mid),
+                                                          texto_de_la_lista_de_precios(
+                                                              _taller, _filas_lista, _desc_lista)),
+                                         width="stretch")
+                        _ls2.download_button("📄 La lista en PDF",
+                                             data=lista_de_precios_para_descargar(
+                                                 _taller, _filas_lista, _desc_lista),
+                                             file_name=f"lista_{_mid}.pdf", mime="application/pdf",
+                                             key=f"lista_pdf_{_mid}", width="stretch")
+
             # EL RECIBO DEL PAGO (ver esa sección en logica/mecanico.py): el del recién
             # registrado, para mandarlo o imprimirlo; los de antes, en «🧾 Recibos anteriores».
             _recibo_id = st.session_state.get(f"cc_recibo_{_mid}")

@@ -7946,6 +7946,19 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 📄 La lista de precios para un taller
+
+El taller pedía «pasame los precios de lo que te compro» y se le mandaba la lista entera del
+proveedor, sin su descuento, o se copiaba a mano. En 🗂️ Administrar → 💳 Cuentas corrientes,
+con la cuenta elegida, **«📄 Lista de precios para mandarle»** la arma de **lo que compró** en los
+últimos `DIAS_DE_LO_QUE_SUELE_LLEVAR` días (lo de más veces primero) o de **una marca** (lo que
+hay en stock), hasta `TOPE_DE_LA_LISTA_DE_PRECIOS` (300) renglones, con el precio de lista y **el
+suyo, con su descuento**. **«📲 Mandársela por WhatsApp»** lleva los primeros 40 a su número (el
+resto dice que va en el PDF) y **«📄 La lista en PDF»** la trae entera, con la fecha. No salen los
+de una lista en otra escala ni los que no tienen precio (`lista_de_precios_para()`,
+`texto_de_la_lista_de_precios()` y `pdf_de_la_lista_de_precios()`, en `logica/deposito.py`; lo
+controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
+
 ## 🔄 Los turnos de caja
 
 Cuando la cajera de la mañana le deja la caja a la de la tarde, el arqueo de la noche daba la

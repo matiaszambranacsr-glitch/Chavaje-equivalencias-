@@ -1004,6 +1004,32 @@ def probar(L):
     st.session_state["nivel_usuario"] = "admin"
     ns["guardar_trato_de_la_cuenta"](taller, None, False)
     st.session_state["nivel_usuario"] = "operador"
+    # LA LISTA DE PRECIOS PARA UN TALLER: lo que compró (lo de más veces primero) o una marca con
+    # stock, con su descuento; sin lo de una lista en otra escala.
+    _lista = ns["lista_de_precios_para"](taller)
+    esperar("lo que compró (lo de más veces primero), con su descuento",
+            (_lista[0]["Código"], _lista[0]["Su precio"],
+             all(f_["Su precio"] == round(f_["Precio de lista"] * 0.9, 2) for f_ in _lista)),
+            ("A1", 900.0, True))
+    _de_marca = ns["lista_de_precios_para"](taller, marca)
+    esperar("de una marca, solo lo que hay en stock",
+            (bool(_de_marca), all((uno("SELECT stock FROM productos WHERE codigo_raw = ?",
+                                       f_["Código"]) or 0) > 0 for f_ in _de_marca),
+             "C1" in [f_["Código"] for f_ in _de_marca]), (True, True, False))
+    _texto_l = ns["texto_de_la_lista_de_precios"]("Taller Norte", _lista, 10)
+    esperar("para WhatsApp", (_texto_l.startswith("Hola Taller Norte! Te paso los precios de El "
+                                                  "Chavo con tu 10% de descuento:"),
+                              "• PRUEBA A1 — FILTRO: $900" in _texto_l), (True, True))
+    esperar("en PDF; sin renglones, nada",
+            (ns["pdf_de_la_lista_de_precios"]("Taller Norte", _lista, 10, "27/11/2026")[:4],
+             ns["lista_de_precios_para_descargar"]("x", [], 0)()), (b"%PDF", b""))
+    _g_l = ns["lista_de_precios_para"].__globals__
+    _escala_l = _g_l["marcas_con_precios_fuera_de_escala"]
+    try:
+        _g_l["marcas_con_precios_fuera_de_escala"] = lambda: {"PRUEBA"}
+        esperar("lo de una lista en otra escala no sale", ns["lista_de_precios_para"](taller), [])
+    finally:
+        _g_l["marcas_con_precios_fuera_de_escala"] = _escala_l
     esperar("sin el trato, de nuevo lo general",
             (ns["recargo_por_cuotas"]("Tarjeta de crédito", 3, mecanico_id=taller),
              ns["descuento_al_cobrarle"](taller)), (10.0, 0.0))

@@ -1140,6 +1140,120 @@ def lo_que_suele_llevar(mecanico_id, limite=8):
     return salida
 
 
+# LA LISTA DE PRECIOS PARA UN TALLER: el taller pedía «pasame los precios de lo que te compro» y
+# se le mandaba la lista entera del proveedor, sin su descuento, o se copiaba a mano. Sale de lo
+# que compró en los últimos DIAS_DE_LO_QUE_SUELE_LLEVAR días (lo de más veces primero) o de una
+# marca (lo que hay en stock), con el precio de lista y el suyo (con su descuento), para mandar
+# por WhatsApp o en PDF. Sin los de una lista en otra escala ni los que no tienen precio.
+RENGLONES_DE_LA_LISTA_POR_WHATSAPP = 40
+TOPE_DE_LA_LISTA_DE_PRECIOS = 300
+
+
+def marcas_con_stock():
+    """[(id, nombre)] de las marcas que tienen algo en stock, para elegir la lista."""
+    return [(f["id"], f["nombre"]) for f in c.execute(
+        """SELECT m.id, m.nombre FROM marcas m
+           WHERE EXISTS (SELECT 1 FROM productos p WHERE p.marca_id = m.id AND p.stock > 0)
+           ORDER BY m.nombre""")]
+
+
+def lista_de_precios_para(mecanico_id, marca_id=None, tope=TOPE_DE_LA_LISTA_DE_PRECIOS):
+    """[{Marca, Código, Descripción, «Precio de lista», «Su precio»}]: lo que compró (sin
+    `marca_id`) o lo que hay en stock de una marca."""
+    if marca_id:
+        ids = [f["id"] for f in c.execute(
+            "SELECT id FROM productos WHERE marca_id = ? AND stock > 0 ORDER BY codigo_clean "
+            "LIMIT ?", (int(marca_id), int(tope)))]
+    else:
+        hace = f"-{DIAS_DE_LO_QUE_SUELE_LLEVAR} days"
+        ids = [f["id"] for f in c.execute(
+            """SELECT s.producto_id AS id FROM
+                 (SELECT vi.producto_id, v.fecha AS cuando FROM ventas_items vi
+                  JOIN ventas v ON v.id = vi.venta_id
+                  WHERE v.anulada = 0 AND v.mecanico_id = ? AND v.fecha >= datetime('now', ?)
+                  UNION ALL
+                  SELECT d.producto_id, COALESCE(d.resuelto_en, d.pedido_en)
+                  FROM pedidos_deposito d
+                  WHERE d.estado = 'entregado' AND d.mecanico_id = ?
+                    AND COALESCE(d.resuelto_en, d.pedido_en) >= datetime('now', ?)) s
+               WHERE s.producto_id IS NOT NULL
+               GROUP BY s.producto_id ORDER BY COUNT(*) DESC, MAX(s.cuando) DESC LIMIT ?""",
+            (int(mecanico_id), hace, int(mecanico_id), hace, int(tope)))]
+    descuento = configuracion_de_cuenta(mecanico_id)["descuento"]
+    fuera = marcas_con_precios_fuera_de_escala()
+    salida = []
+    for producto_id in ids:
+        f = c.execute("""SELECT p.codigo_raw, p.descripcion, p.precio, m.nombre AS marca
+                         FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                      (producto_id,)).fetchone()
+        if not f or not f["precio"] or float(f["precio"]) <= 0 or f["marca"] in fuera:
+            continue
+        salida.append({"Marca": f["marca"], "Código": f["codigo_raw"],
+                       "Descripción": (f["descripcion"] or "")[:60],
+                       "Precio de lista": round(float(f["precio"]), 2),
+                       "Su precio": precio_de_la_cuenta(f["precio"], descuento)})
+    return salida
+
+
+def texto_de_la_lista_de_precios(nombre, filas, descuento):
+    """El mensaje para WhatsApp: los primeros RENGLONES_DE_LA_LISTA_POR_WHATSAPP; el resto, en
+    el PDF."""
+    renglones = [f"Hola{(' ' + nombre) if nombre else ''}! Te paso los precios de El Chavo"
+                 + (f" con tu {como_porcentaje(descuento)}% de descuento" if descuento else "")
+                 + ":"]
+    renglones += [f"• {f['Marca']} {f['Código']} — {f['Descripción'][:40]}: "
+                  f"${miles(f['Su precio'], 0)}"
+                  for f in filas[:RENGLONES_DE_LA_LISTA_POR_WHATSAPP]]
+    if len(filas) > RENGLONES_DE_LA_LISTA_POR_WHATSAPP:
+        renglones.append(f"(y {len(filas) - RENGLONES_DE_LA_LISTA_POR_WHATSAPP} más: te mando "
+                         "la lista entera en PDF)")
+    renglones.append("Precios de hoy. ¡Cualquier cosa, escribinos!")
+    return "\n".join(renglones)
+
+
+def pdf_de_la_lista_de_precios(nombre, filas, descuento, dia):
+    """La lista en una hoja A4 (las que hagan falta). b"" si no hay renglones."""
+    if not filas:
+        return b""
+    from fpdf import FPDF
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 9, limpiar(f"El Chavo - Lista de precios para {nombre}"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 6, limpiar(f"Precios al {dia}" + (f" - con su {como_porcentaje(descuento)}% de "
+                                                  "descuento" if descuento else "")),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    anchos = (("Marca", 30), ("Código", 30), ("Descripción", 80), ("Lista", 24), ("Su precio", 26))
+    pdf.set_font("Helvetica", "B", 9)
+    for titulo, ancho in anchos:
+        pdf.cell(ancho, 6, limpiar(titulo), border="B",
+                 align="R" if titulo in ("Lista", "Su precio") else "L")
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 8)
+    for f in filas:
+        pdf.cell(30, 5.5, limpiar(f["Marca"])[:18])
+        pdf.cell(30, 5.5, limpiar(f["Código"])[:18])
+        pdf.cell(80, 5.5, limpiar(f["Descripción"])[:52])
+        pdf.cell(24, 5.5, limpiar(f"${miles(f['Precio de lista'], 0)}"), align="R")
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(26, 5.5, limpiar(f"${miles(f['Su precio'], 0)}"), align="R")
+        pdf.set_font("Helvetica", "", 8)
+        pdf.ln()
+    return bytes(pdf.output())
+
+
+def lista_de_precios_para_descargar(nombre, filas, descuento):
+    """Para el botón de descarga: los renglones ya leídos; el PDF, al tocarlo."""
+    filas, dia = list(filas), f"{hoy_aca():%d/%m/%Y}"
+    return lambda: pdf_de_la_lista_de_precios(nombre, filas, descuento, dia)
+
+
 def sumar_lo_que_suele_llevar(producto_id):
     """«➕» de «🔁 Lo que suele llevar» (va como on_click): a la venta, uno más."""
     sumado = sumar_a_la_venta({"ID": int(producto_id)})

@@ -104,6 +104,7 @@ ENTIENDE = (
     ("a un taller le quiero hacer un trato especial", "como:trato_especial"),
     ("donde anoto el alquiler y los sueldos", "como:gastos_fijos"),
     ("como hago el cambio de turno de la cajera", "como:turnos"),
+    ("quiero pasarle la lista de precios a un taller", "como:lista_taller"),
     ("a que hora se vende mas", "como:cierre_mes"),
     ("como descuento la sena cuando retira", "como:senas"),
     ("donde cambio el objetivo de ventas", "como:objetivo_del_mes"),

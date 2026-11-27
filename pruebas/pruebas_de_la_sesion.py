@@ -1553,6 +1553,16 @@ def probar():
     esperar("el trato de la cuenta, guardado desde la pantalla",
             (ns["trato_de_la_cuenta"](_cta_rec), [e.value for e in _adm_mes.exception]),
             ({"recargos": {6: 4.0}, "descuento_al_contado": True}, []))
+    # LA LISTA DE PRECIOS PARA MANDARLE: se abre, sin compras lo dice, y con una marca, la lista.
+    _adm_mes.session_state[f"pop_lista_{_cta_rec}"] = True
+    _adm_mes.run()
+    esperar("sin compras, lo dice",
+            (any("no compró nada" in x.value for x in _adm_mes.caption),
+             [e.value for e in _adm_mes.exception]), (True, []))
+    _adm_mes.session_state[f"pop_lista_{_cta_rec}"] = True
+    _adm_mes.radio(key=f"lista_de_{_cta_rec}").set_value("Una marca (lo que hay en stock)").run()
+    esperar("con una marca, sin errores", [e.value for e in _adm_mes.exception], [])
+    _adm_mes.session_state[f"pop_lista_{_cta_rec}"] = False
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

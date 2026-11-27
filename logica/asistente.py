@@ -435,6 +435,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("lista_taller", "Mandarle a un taller la lista de precios con su descuento",
+     "lista de precios lista precios taller mandarle pasarle descuento pdf whatsapp lo que "
+     "compra marca",
+     "En 🗂️ Administrar → 💳 Cuentas corrientes, elegí la cuenta y tocá «📄 Lista de precios "
+     "para mandarle»: de lo que compró o de una marca (lo que hay en stock), con su precio y su "
+     "descuento. «📲 Mandársela por WhatsApp» o «📄 La lista en PDF».",
+     "🗂️ Administrar", "empleado"),
     ("turnos", "Cambiar de turno en la caja (cada uno con su arqueo)",
      "turno turnos cambio de turno mañana tarde cajera entrega la caja relevo arqueo de cada "
      "uno faltante de quien",
