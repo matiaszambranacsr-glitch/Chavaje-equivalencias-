@@ -536,6 +536,72 @@ def probar(L):
     st.session_state.pop("venta_items", None)
     st.session_state.pop("_avisos", None)
 
+    # 17. LA AGENDA DE CLIENTES DE MOSTRADOR: el teléfono de la venta junta lo que compró con lo
+    # que espera, sus presupuestos, sus autos, su cuenta y su chat, aunque cada uno lo haya
+    # escrito distinto. Ver esa sección en logica/ventas.py.
+    esperar("el teléfono, como lo pide WhatsApp; corto, solo números; sin, nada",
+            [ns["clave_del_telefono"](t) for t in ("11 15 4567-8901", "+54 9 11 4567-8901",
+                                                   "4567-89", "123", None)],
+            ["5491145678901", "5491145678901", "456789", "", ""])
+    _v_ag, _ = ns["cerrar_venta"]([item(ids["J200"])], "Juan Pérez", "Efectivo",
+                                  telefono=" 11 15 4567-8901 ")
+    ns["cerrar_venta"]([item(ids["J200"], cantidad=2)], "", "Efectivo",
+                       telefono="+54 9 11 4567-8901")
+    _anulada_ag, _ = ns["cerrar_venta"]([item(ids["J200"])], "Juan", "Efectivo",
+                                        telefono="1145678901")
+    ns["anular_venta"](_anulada_ag)
+    ns["cerrar_venta"]([item(ids["J200"])], "Otro", "Efectivo", telefono="351 456-7890")
+    ns["anotar_consulta_cliente"]("Juancito", "(011) 4567-8901", ids["F100"], "F100",
+                                  "FILTRO ACEITE", 1)
+    c.execute("INSERT INTO presupuestos_para_seguir (cliente, telefono, items, total, estado) "
+              "VALUES ('Juan', '11-4567-8901', '[]', 52000, 'abierto')")
+    c.execute("INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono, marca_auto, "
+              "modelo_auto, anio) VALUES ('AG123CD', 'Juan P', '1145678901', 'Fiat', 'Palio', "
+              "'2010')")
+    c.execute("INSERT INTO mecanicos (nombre, telefono, password_hash, salt) VALUES ('Taller de Juan', "
+              "'11 4567 8901', 'x', 'x')")
+    c.execute("INSERT INTO chats (canal, externo, nombre) VALUES ('whatsapp', '5491145678901', "
+              "'Juan')")
+    _chat_ag = c.lastrowid
+    conn.commit()
+    _juan = ns["cliente_conocido"]("011 15 4567 8901")
+    esperar("ya vino: todo junto, sin la venta anulada, con el nombre más nuevo",
+            {k: _juan[k] for k in ("clave", "compras", "comprado", "espera", "presupuestos",
+                                   "autos")},
+            {"clave": "5491145678901", "compras": 2, "comprado": 7500.0, "espera": 1,
+             "presupuestos": 1, "autos": ["AG123CD"]})
+    esperar("el que nunca vino, nada; sin teléfono, nada",
+            (ns["cliente_conocido"]("11 9999-0000"), ns["cliente_conocido"]("")), (None, None))
+    _ficha_ag = ns["ficha_del_cliente"]("1145678901")
+    esperar("la ficha: compras con lo que se llevó, lo que espera, el auto, la cuenta y el chat",
+            ([(v["id"] == _v_ag, [(i["cantidad"], i["codigo"]) for i in v["items"]])
+              for v in _ficha_ag["compras"]][-1],
+             [(e["codigo_buscado"], e["estado"]) for e in _ficha_ag["espera"]],
+             [a["patente"] for a in _ficha_ag["autos"]], _ficha_ag["cuenta"]["nombre"],
+             _ficha_ag["chat"], _ficha_ag["whatsapp"]),
+            ((True, [(1, "J200")]), [("F100", "activa")], ["AG123CD"], "Taller de Juan",
+             _chat_ag, "https://wa.me/5491145678901"))
+    esperar("la agenda: se busca por un pedazo del teléfono, el nombre o la patente",
+            ([k["clave"] for k in ns["agenda_de_clientes"]("4567")],
+             [k["clave"] for k in ns["agenda_de_clientes"]("otro")],
+             [k["clave"] for k in ns["agenda_de_clientes"]("ag 123")],
+             {"5491145678901", "5493514567890"} <= {k["clave"] for k in ns["agenda_de_clientes"]()},
+             ns["agenda_de_clientes"]("zzz")),
+            (["5491145678901", "5493514567890"], ["5493514567890"], ["5491145678901"], True, []))
+    _orig_ag = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])
+    g["hay_claves_configuradas"] = lambda: True
+    try:
+        for _nivel_ag in ("", "mecanico"):
+            g["_nivel_de_quien_esta_adentro"] = lambda n=_nivel_ag: n
+            for _f_ag in ("agenda_de_clientes", "cliente_conocido", "ficha_del_cliente"):
+                try:
+                    ns[_f_ag]("1145678901")
+                    fallas.append(f"«{_nivel_ag or 'invitado'}» pudo ver la agenda ({_f_ag})")
+                except PermissionError:
+                    pass
+    finally:
+        g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = _orig_ag
+
     # 7. Quién puede: vender y anotar, empleado; anular, administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])
     g["hay_claves_configuradas"] = lambda: True

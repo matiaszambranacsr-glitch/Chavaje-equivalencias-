@@ -3211,6 +3211,10 @@ def _esquema_ventas(c):
         c.execute("ALTER TABLE ventas ADD COLUMN cuotas INTEGER")
     if "descuento" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN descuento REAL DEFAULT 0")
+    # El teléfono del cliente de mostrador (opcional): con él se arma su ficha en la agenda (ver
+    # «LA AGENDA DE CLIENTES DE MOSTRADOR» en logica/ventas.py).
+    if "cliente_telefono" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN cliente_telefono TEXT")
     if "total_de_lista" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN total_de_lista REAL")
     if "cobrada_por" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:

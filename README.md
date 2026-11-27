@@ -7946,6 +7946,26 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 📇 La agenda de clientes de mostrador
+
+El que no tiene cuenta —paga en el momento— no quedaba en ningún lado como cliente: lo que
+esperaba estaba en «📞 Clientes que esperan», sus presupuestos en «Presupuestos para seguir», su
+auto en 🚗 Vehículos y sus compras sin nombre ni teléfono. Cuando volvía, nadie sabía que ya
+había venido ni qué se le había dicho. Ahora en 🧾 Ventas, al lado de «Cliente», va **«📱
+Teléfono (opcional)»**: se graba con la venta, y si ese teléfono ya vino sale enseguida «📇 Ya
+vino: Juan · 3 compras ($45.000) · ⏳ espera 1 · 🚗 AG123CD», con **«📇 Su ficha»** y, si no se
+escribió el nombre, «✍️ Usar «Juan»». La ficha junta, por teléfono, lo que compró (con lo que se
+llevó), lo que espera, sus presupuestos, sus autos, si es el teléfono de una cuenta y su chat de
+WhatsApp (con «💬 Su chat»), y el link para escribirle. Abajo en Ventas, **«📇 Agenda de
+clientes»** los lista —el que vino último primero— y los busca por un pedazo del teléfono, el
+nombre o la patente. El teléfono se compara como lo pide WhatsApp: «11 15 4567-8901», «(011)
+4567-8901» y «+54 9 11 4567 8901» son el mismo. Las ventas anuladas no cuentan. Terminada la
+venta, el cliente y el teléfono ya no pasan a la que sigue (antes el nombre se quedaba escrito
+para el próximo). El comprobante por WhatsApp va directo a ese número, y la ficha del auto lo
+trae escrito. Es del personal: el invitado, el taller y el asistente no lo ven
+(`agenda_de_clientes()`, `cliente_conocido()` y `ficha_del_cliente()`, en `logica/ventas.py`;
+lo controlan `pruebas_de_las_ventas.py` y `pruebas_de_la_sesion.py`).
+
 ## 💲 Los carteles de precio
 
 El precio de la góndola y del mostrador se escribía a mano, y cuando entraba una lista nueva

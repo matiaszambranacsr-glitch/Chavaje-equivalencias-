@@ -1241,8 +1241,17 @@ def probar():
             (_de_rita() - _ventas_antes,
              [(x["producto_id"], x["cantidad"], x["precio"]) for x in vta.session_state["venta_items"]],
              vta.session_state["venta_cliente"]), (0, [(pid, 2, 900.0)], "Juan"))
+    # EL TELÉFONO DEL CLIENTE (ver «LA AGENDA DE CLIENTES DE MOSTRADOR»): se graba con la venta
+    # y, terminada, el cliente y el teléfono no pasan a la que sigue.
+    vta.text_input(key="venta_telefono").set_value("11 15 4321-0000").run()
     _boton("venta_terminar")[0].click().run()
     _boton("venta_confirmar_cierre")[0].click().run()
+    esperar("el teléfono, con la venta; y no pasa a la que sigue",
+            (c.execute("SELECT cliente, cliente_telefono FROM ventas WHERE usuario = 'rita' "
+                       "ORDER BY id DESC LIMIT 1").fetchone()[:],
+             vta.session_state["venta_telefono"] if "venta_telefono" in vta.session_state
+             else "", vta.session_state["venta_cliente"] if "venta_cliente" in vta.session_state
+             else ""), (("Juan", "11 15 4321-0000"), "", ""))
     # La misma venta otra vez, enseguida (un doble toque, la página recargada): pide decir que
     # es otra.
     vta.session_state["venta_recien_cerrada"] = None
@@ -1255,6 +1264,26 @@ def probar():
             (["🔁 Sí, es otra venta igual"], True))
     _boton("venta_volver_al_armado")[0].click().run()
     esperar("«Volver» no graba", (_de_rita() - _ventas_antes, len(_boton("venta_terminar"))), (1, 1))
+    # Con el mismo teléfono escrito de otra forma: «ya vino», con su nombre para usar, y en la
+    # agenda.
+    vta.text_input(key="venta_telefono").set_value("+54 9 11 4321-0000").run()
+    esperar("ya vino: lo dice y ofrece su nombre",
+            (any("Ya vino" in x.value and "Juan" in x.value for x in vta.caption),
+             [b.label for b in _boton("venta_usar_nombre")]), (True, ["✍️ Usar «Juan»"]))
+    _boton("venta_usar_nombre")[0].click().run()
+    esperar("«Usar» pone el nombre", vta.text_input(key="venta_cliente").value, "Juan")
+    vta.session_state["exp_agenda_clientes"] = True
+    vta.text_input(key="agenda_buscar").set_value("4321").run() \
+        if [t for t in vta.text_input if t.key == "agenda_buscar"] else vta.run()
+    vta.session_state["exp_agenda_clientes"] = True
+    vta.run()
+    esperar("y en la agenda, con su ficha",
+            ([o for o in vta.selectbox(key="agenda_cliente").options][:1],
+             any("Lo que compró" in m.value for m in vta.markdown),
+             [e.value for e in vta.exception]), (["Juan — 11 15 4321-0000"], True, []))
+    vta.session_state["exp_agenda_clientes"] = False
+    vta.session_state["venta_telefono"] = ""
+    vta.session_state["venta_cliente"] = ""
     vta.session_state["venta_items"] = []
     vta.run()
     # CORREGIR UN COBRO desde la caja (ver esa sección en logica/ventas.py): la cajera marcó

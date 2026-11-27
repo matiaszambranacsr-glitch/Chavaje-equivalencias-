@@ -609,6 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("📇 Agenda de clientes de mostrador: la venta anota el teléfono (opcional) y, con él, se junta lo que compró, lo que espera, sus presupuestos, sus autos y su chat. Si el que llega ya vino, la venta lo dice al escribir el teléfono. Abajo en Ventas, «📇 Agenda de clientes» los busca por teléfono, nombre o patente.", "🧾 Ventas"),
     ("💲 Carteles de precio para la góndola y el mostrador: marca y código, el precio grande, la fecha y el código de barras para cobrarlo escaneando. De los que elegís, o de los que cambiaron de precio con la última lista de una marca (solo lo que hay en stock). Al cargar una lista, te avisa cuántos cambiaron.", "↩️ Devoluciones → 🏷️ Etiquetas"),
     ("🎯 Objetivo del mes: ponés cuánto querés vender y la caja muestra la barra con lo vendido, cuánto hay que vender por día abierto para llegar y si van adelantados o atrasados (los empleados ven el porcentaje, no la plata). Sale también en el resumen del día.", "💵 Caja"),
     ("🪙 Cambio de apertura y 💵 contar los billetes: anotás con cuánto cambio abriste, cargás cuántos billetes hay de cada uno y la app suma, resta el cambio y lo pasa al arqueo con el detalle en la nota.", "💵 Caja → 📋 Ventas y cierre de caja"),

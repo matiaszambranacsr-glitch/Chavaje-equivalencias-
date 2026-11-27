@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("agenda", "Ver la ficha de un cliente de mostrador (la agenda)",
+     "agenda cliente clientes mostrador ficha telefono celular historial que compro compras "
+     "anteriores ya vino conocido particular contacto contactos",
+     "Al vender, escribí su «📱 Teléfono» al lado de «Cliente»: si ya vino, sale «📇 Ya vino» con "
+     "lo que compró, lo que espera, sus presupuestos y sus autos, y «📇 Su ficha». Abajo en "
+     "🧾 Ventas, «📇 Agenda de clientes» los busca por teléfono, nombre o patente, con el link "
+     "para escribirle por WhatsApp y su chat.",
+     "🧾 Ventas", "empleado"),
     ("carteles", "Imprimir carteles de precio para la góndola",
      "cartel carteles precio precios gondola mostrador exhibidor imprimir etiqueta etiquetas "
      "estante cambio cambiaron lista nueva",

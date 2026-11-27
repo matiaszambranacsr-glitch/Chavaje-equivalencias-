@@ -371,7 +371,7 @@ def resumen_de_la_semana(hasta=None, con_ganancia=False):
 
 
 def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=None,
-                 a_la_caja=False):
+                 a_la_caja=False, telefono=""):
     """Cierra la venta. Devuelve (venta_id, avisos). Ver «VENTAS DEL MOSTRADOR».
 
     `a_la_caja`: la venta queda esperando en la caja, sin forma de pago, hasta que el cajero
@@ -419,10 +419,11 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=
     with db_lock, transaccion():
         total = round(sum(x[1] * x[2] for x in limpios), 2)
         c.execute("""INSERT INTO ventas (usuario, cliente, forma_de_pago, total, cobrada,
-                                         mecanico_id, total_de_lista)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                         mecanico_id, total_de_lista, cliente_telefono)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                   (usuario, (cliente or "").strip(), "" if a_la_caja else (forma_de_pago or ""),
-                   total, 0 if a_la_caja else 1, mecanico_id or None, total))
+                   total, 0 if a_la_caja else 1, mecanico_id or None, total,
+                   str(telefono or "").strip()[:40] or None))
         venta_id = c.lastrowid
         for producto_id, cantidad, precio, pedido, veredicto, evidencia in limpios:
             c.execute("""SELECT p.stock, p.codigo_raw, p.descripcion, p.precio_costo,
@@ -2876,3 +2877,213 @@ def cobros_corregidos(dia=None):
         salida.append({"hora": r["hora"], "venta": r["venta"], "que": que,
                        "quien": r["usuario"] or ""})
     return salida
+
+
+# LA AGENDA DE CLIENTES DE MOSTRADOR: el que no tiene cuenta (paga en el momento) no quedaba en
+# ningún lado como cliente: lo que esperaba estaba en «📞 Clientes que esperan», sus presupuestos
+# en «Presupuestos para seguir», su auto en 🚗 Vehículos y sus compras, sin nombre ni teléfono.
+# Cuando volvía, nadie sabía que ya había venido ni qué se le había dicho. Ahora la venta anota
+# su teléfono (opcional), y con el teléfono se junta todo: lo que compró, lo que espera, sus
+# presupuestos, sus autos, si es una cuenta y su chat de WhatsApp. El teléfono se compara como lo
+# pide WhatsApp (ver numero_para_whatsapp()): «11 15 4567-8901» y «+54 9 11 4567 8901» son el
+# mismo. Es del personal: el teléfono de un cliente no lo ve nadie más (ni el asistente lo dice).
+COMPRAS_EN_LA_FICHA = 10
+CLIENTES_EN_LA_AGENDA = 50
+_SOLO_NUMEROS_SQL = ("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({col}, ' ', ''), '-', ''), "
+                     "'(', ''), ')', ''), '+', ''), '.', '')")
+
+
+def clave_del_telefono(telefono):
+    """El teléfono para comparar: como lo pide WhatsApp (549…) si se entiende; si no, solo los
+    números, si son 6 o más. '' si no hay teléfono."""
+    numero = numero_para_whatsapp(telefono)
+    if numero:
+        return numero
+    digitos = re.sub(r"\D", "", str(telefono or ""))
+    return digitos if len(digitos) >= 6 else ""
+
+
+def _lo_de_los_telefonos(clave=None):
+    """[dict] lo que tiene un teléfono de cliente, con su «tipo» (compra, espera, presupuesto,
+    auto) y su «clave». Con `clave`, solo lo de ese teléfono: la base filtra por los últimos 8
+    números (así no se lee todo) y acá se confirma con la clave entera."""
+    fin = clave[-8:] if clave else None
+    filas = []
+    for tipo, sql, columna in (
+            ("compra", """SELECT id, fecha, cliente AS nombre, cliente_telefono AS telefono,
+                                 total, mecanico_id
+                          FROM ventas WHERE anulada = 0 AND COALESCE(cliente_telefono, '') != ''
+                          {filtro}""", "cliente_telefono"),
+            ("espera", """SELECT id, fecha, cliente AS nombre, telefono, codigo_buscado,
+                                 descripcion, cantidad, estado
+                          FROM consultas_cliente WHERE COALESCE(telefono, '') != '' {filtro}""",
+             "telefono"),
+            ("presupuesto", """SELECT id, creado_en AS fecha, cliente AS nombre, telefono, total,
+                                      estado
+                               FROM presupuestos_para_seguir WHERE COALESCE(telefono, '') != ''
+                               {filtro}""", "telefono"),
+            ("auto", """SELECT id, '' AS fecha, patente, cliente_nombre AS nombre,
+                               cliente_telefono AS telefono, marca_auto, modelo_auto, anio
+                        FROM vehiculos WHERE COALESCE(cliente_telefono, '') != '' {filtro}""",
+             "cliente_telefono")):
+        filtro = f"AND {_SOLO_NUMEROS_SQL.format(col=columna)} LIKE ?" if fin else ""
+        c.execute(sql.format(filtro=filtro), (f"%{fin}",) if fin else ())
+        filas += [{**dict(f), "tipo": tipo} for f in c.fetchall()]
+    salida = []
+    for f in filas:
+        f["clave"] = clave_del_telefono(f["telefono"])
+        if f["clave"] and (clave is None or f["clave"] == clave):
+            salida.append(f)
+    return salida
+
+
+def _juntar_por_telefono(filas):
+    """{clave: resumen}: el nombre y el teléfono más nuevos, cuántas compras y por cuánto, lo que
+    espera, los presupuestos abiertos, las patentes y la última vez que se lo vio."""
+    clientes = {}
+    for f in sorted(filas, key=lambda x: x["fecha"] or ""):
+        k = clientes.setdefault(f["clave"], {
+            "clave": f["clave"], "nombre": "", "telefono": "", "compras": 0, "comprado": 0.0,
+            "espera": 0, "presupuestos": 0, "autos": [], "ultima": ""})
+        k["nombre"] = (f["nombre"] or "").strip() or k["nombre"]
+        k["telefono"] = (f["telefono"] or "").strip() or k["telefono"]
+        k["ultima"] = max(k["ultima"], f["fecha"] or "")
+        if f["tipo"] == "compra":
+            k["compras"] += 1
+            k["comprado"] = round(k["comprado"] + float(f["total"] or 0), 2)
+        elif f["tipo"] == "espera":
+            k["espera"] += f["estado"] == "activa"
+        elif f["tipo"] == "presupuesto":
+            k["presupuestos"] += f["estado"] == "abierto"
+        elif f["patente"] not in k["autos"]:
+            k["autos"].append(f["patente"])
+    return clientes
+
+
+def agenda_de_clientes(texto="", tope=CLIENTES_EN_LA_AGENDA):
+    """[resumen] de los clientes con teléfono, el que vino último primero. `texto`: un pedazo
+    del teléfono, del nombre o de la patente."""
+    exigir_nivel("empleado", "ver la agenda de clientes")
+    clientes = list(_juntar_por_telefono(_lo_de_los_telefonos()).values())
+    texto = str(texto or "").strip()
+    if texto:
+        digitos = re.sub(r"\D", "", texto)
+        llano = normalizar_texto(texto).upper()
+        patente = re.sub(r"[^A-Z0-9]", "", llano)
+        clientes = [k for k in clientes
+                    if (len(digitos) >= 4 and digitos in k["clave"])
+                    or (llano and llano in normalizar_texto(k["nombre"]).upper())
+                    or (len(patente) >= 3 and any(patente in re.sub(r"[^A-Z0-9]", "", a or "")
+                                                  for a in k["autos"]))]
+    clientes.sort(key=lambda k: k["ultima"], reverse=True)
+    return clientes[:int(tope)]
+
+
+def cliente_conocido(telefono):
+    """El resumen de ese teléfono si ya vino (compró, espera algo, tiene presupuesto o auto);
+    si no, None. Para avisar en la venta «ya vino»."""
+    exigir_nivel("empleado", "ver la agenda de clientes")
+    clave = clave_del_telefono(telefono)
+    if not clave:
+        return None
+    return _juntar_por_telefono(_lo_de_los_telefonos(clave)).get(clave)
+
+
+def ficha_del_cliente(telefono):
+    """Todo lo de ese teléfono: {resumen, compras (las últimas, con lo que se llevó), espera,
+    presupuestos, autos, cuenta (si es el teléfono de una cuenta), chat (su chat de WhatsApp,
+    si hay), whatsapp (el link)}. None si no hay nada."""
+    exigir_nivel("empleado", "ver la ficha de un cliente")
+    clave = clave_del_telefono(telefono)
+    if not clave:
+        return None
+    filas = _lo_de_los_telefonos(clave)
+    if not filas:
+        return None
+    resumen = _juntar_por_telefono(filas)[clave]
+    compras = sorted((f for f in filas if f["tipo"] == "compra"),
+                     key=lambda f: (f["fecha"] or "", f["id"]), reverse=True)[:COMPRAS_EN_LA_FICHA]
+    for compra in compras:
+        c.execute("""SELECT cantidad, marca, codigo, descripcion FROM ventas_items
+                     WHERE venta_id = ? ORDER BY id""", (compra["id"],))
+        compra["items"] = [dict(i) for i in c.fetchall()]
+    cuenta = next((m for m in c.execute(
+        "SELECT id, nombre, telefono FROM mecanicos WHERE COALESCE(telefono, '') != ''")
+                   if clave_del_telefono(m["telefono"]) == clave), None)
+    chat = c.execute("SELECT id FROM chats WHERE canal = 'whatsapp' AND externo = ?",
+                     (clave,)).fetchone()
+    return {"resumen": resumen, "compras": compras,
+            "espera": [f for f in filas if f["tipo"] == "espera" and f["estado"] == "activa"],
+            "presupuestos": sorted((f for f in filas if f["tipo"] == "presupuesto"),
+                                   key=lambda f: f["fecha"] or "", reverse=True)[:5],
+            "autos": [f for f in filas if f["tipo"] == "auto"],
+            "cuenta": dict(cuenta) if cuenta else None, "chat": chat["id"] if chat else None,
+            "whatsapp": link_de_whatsapp(resumen["telefono"])}
+
+
+def usar_el_nombre_del_cliente(nombre):
+    """«Usar ese nombre» en la venta (va como on_click)."""
+    st.session_state["venta_cliente"] = nombre
+
+
+def renglon_del_cliente(resumen):
+    """«📇 Ya vino: Juan · 3 compras (\\$45.000) · espera 1 · AB123CD», para la pantalla (con el
+    «$» escapado)."""
+    partes = [f"📇 **Ya vino**: {texto_para_markdown(resumen['nombre'] or 'sin nombre')}"]
+    if resumen["compras"]:
+        partes.append(f"{miles(resumen['compras'])} compra(s) (\\${miles(resumen['comprado'], 0)})")
+    if resumen["espera"]:
+        partes.append(f"⏳ espera {miles(resumen['espera'])}")
+    if resumen["presupuestos"]:
+        partes.append(f"🧾 {miles(resumen['presupuestos'])} presupuesto(s) abierto(s)")
+    if resumen["autos"]:
+        partes.append("🚗 " + ", ".join(resumen["autos"][:3]))
+    return " · ".join(partes)
+
+
+def mostrar_la_ficha_del_cliente(telefono, donde):
+    """La ficha de un cliente de mostrador (ver ficha_del_cliente()), en la agenda y en la venta.
+    `donde` va en las claves de los botones: la misma ficha puede estar en los dos lados."""
+    ficha = ficha_del_cliente(telefono)
+    if not ficha:
+        st.caption("Con ese teléfono no hay nada anotado todavía.")
+        return
+    r = ficha["resumen"]
+    st.markdown(f"**📇 {texto_para_markdown(r['nombre'] or 'Sin nombre')}** · "
+                f"{texto_para_markdown(r['telefono'])}"
+                + (f" · la última vez, el {dia_y_mes_de_aca(r['ultima'])}" if r["ultima"]
+                   else ""))
+    _b1, _b2 = cols([1, 1], apilar_en_celular=False)
+    _b1.link_button("📲 Escribirle por WhatsApp", ficha["whatsapp"], width="stretch")
+    if ficha["chat"]:
+        _b2.button("💬 Su chat", key=f"agenda_chat_{donde}_{r['clave']}", width="stretch",
+                   on_click=abrir_el_chat, args=(ficha["chat"],))
+    if ficha["cuenta"]:
+        st.info(f"Es el teléfono de la cuenta **{texto_para_markdown(ficha['cuenta']['nombre'])}**"
+                " (🗂️ Administrar → 💳 Cuentas corrientes).")
+    if ficha["espera"]:
+        st.markdown("**⏳ Lo que espera**")
+        for e in ficha["espera"]:
+            st.markdown(f"- {miles(e['cantidad'] or 1)}× "
+                        f"{texto_para_markdown(e['codigo_buscado'] or '')} "
+                        f"{texto_para_markdown((e['descripcion'] or '')[:50])}"
+                        f" (desde el {dia_y_mes_de_aca(e['fecha'])})")
+    if ficha["presupuestos"]:
+        st.markdown("**🧾 Presupuestos**")
+        for p in ficha["presupuestos"]:
+            st.markdown(f"- {dia_y_mes_de_aca(p['fecha'])} · \\${miles(p['total'] or 0, 0)} · "
+                        f"{ESTADOS_DEL_PRESUPUESTO.get(p['estado'], p['estado'])}")
+    if ficha["autos"]:
+        st.markdown("**🚗 Sus autos**")
+        for a in ficha["autos"]:
+            st.markdown(f"- **{texto_para_markdown(a['patente'])}** "
+                        + texto_para_markdown(" ".join(str(x) for x in (
+                            a["marca_auto"], a["modelo_auto"], a["anio"]) if x)))
+    if ficha["compras"]:
+        st.markdown(f"**🛒 Lo que compró** ({miles(r['compras'])} compra(s), "
+                    f"\\${miles(r['comprado'], 0)} en total)")
+        st.dataframe([{"Cuándo": dia_y_mes_de_aca(v["fecha"]), "#": v["id"],
+                       "Qué": ", ".join(f"{i['cantidad']}× {i['marca'] or ''} {i['codigo'] or ''}"
+                                        .strip() for i in v["items"]),
+                       "Total": f"${miles(v['total'] or 0, 0)}"} for v in ficha["compras"]],
+                     hide_index=True, width="stretch")

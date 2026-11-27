@@ -66,6 +66,7 @@ if pagina == PAGINAS[9]:
                     st.session_state.pop("venta_recien_cerrada", None)
                     st.session_state["venta_items"] = _items_d
                     st.session_state["venta_cliente"] = recien.get("cliente") or ""
+                    st.session_state["venta_telefono"] = recien.get("telefono") or ""
                     avisar("success", f"↩️ {_texto_d} Quedó armada de nuevo: corregila y "
                                       "terminala.")
                 else:
@@ -74,8 +75,9 @@ if pagina == PAGINAS[9]:
         # EL COMPROBANTE para el cliente: por WhatsApp (a su número, si ya se anotó en la
         # ficha) o en PDF para imprimir. No es una factura y lo dice.
         # El número, como lo pide WhatsApp (54 9 …): ver numero_para_whatsapp().
-        _tel_comp = ((buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"]) or {})
-                     .get("cliente_telefono") or "") if recien.get("anotada") else ""
+        _tel_comp = recien.get("telefono") or (
+            ((buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"]) or {})
+             .get("cliente_telefono") or "") if recien.get("anotada") else "")
         _cp1, _cp2 = cols([1, 1])
         _cp1.link_button("📲 Mandarle el comprobante por WhatsApp",
                          link_de_whatsapp(_tel_comp, texto_del_comprobante(recien["id"])),
@@ -105,6 +107,7 @@ if pagina == PAGINAS[9]:
                 _cli_v = _v3.text_input("Nombre del cliente (opcional):",
                                         value=recien.get("cliente") or "")
                 _tel_v = _v4.text_input("Teléfono (opcional):",
+                                        value=recien.get("telefono") or "",
                                         help="Para mandarle el link de su auto y avisarle "
                                              "cuando le toque.")
                 st.caption("Cómo se va a llamar cada pieza en la ficha (corregilo si hace falta: "
@@ -367,8 +370,31 @@ if pagina == PAGINAS[9]:
             for _que, _faltan in lo_que_suele_ir_con_la_venta(venta_items):
                 st.info(f"💡 {_que} suele cambiarse junto con **{', '.join(_faltan)}**. "
                         "Preguntale al cliente si ya lo tiene.")
-            _p1, _p2 = cols([1, 1])
+            _p1, _p3, _p2 = cols([1, 1, 1])
             _cliente_vta = _p1.text_input("Cliente (opcional):", key="venta_cliente")
+            # EL TELÉFONO DEL CLIENTE (ver «LA AGENDA DE CLIENTES DE MOSTRADOR»): con él queda en
+            # la agenda, y si ya vino se ve enseguida qué compró, qué espera y sus presupuestos.
+            _tel_vta = _p3.text_input("📱 Teléfono (opcional):", key="venta_telefono",
+                                      placeholder="Ej: 11 4567-8901",
+                                      help="Queda en la agenda de clientes: la próxima vez se ve "
+                                           "qué compró, qué espera y sus presupuestos.")
+            try:
+                _conocido_vta = (cliente_conocido(_tel_vta) if clave_del_telefono(_tel_vta)
+                                 else None)
+            except PermissionError:
+                _conocido_vta = None
+            if _conocido_vta:
+                _cv1, _cv2 = cols([3, 1], abajo=True)
+                _cv1.caption(renglon_del_cliente(_conocido_vta))
+                _pop_ficha_vta = _cv2.popover("📇 Su ficha", key="pop_ficha_cliente_venta",
+                                              on_change="rerun", width="stretch")
+                if _pop_ficha_vta.open:
+                    with _pop_ficha_vta:
+                        mostrar_la_ficha_del_cliente(_tel_vta, "venta")
+                if not _cliente_vta.strip() and _conocido_vta["nombre"]:
+                    st.button(f"✍️ Usar «{_conocido_vta['nombre'][:30]}»", key="venta_usar_nombre",
+                              on_click=usar_el_nombre_del_cliente,
+                              args=(_conocido_vta["nombre"],))
             # CON LA CAJA APARTE el vendedor no cobra: manda la venta a 💵 Caja, con la cuenta
             # de «🧾 Atendiendo a». Sin la caja aparte cobra él, como antes; con una cuenta
             # elegida, también puede ponerla a cuenta. Ver «LA CAJA APARTE».
@@ -428,7 +454,7 @@ if pagina == PAGINAS[9]:
                 try:
                     _id_vta, _avisos_vta = cerrar_venta(
                         venta_items, _cliente_vta, _forma_vta, mecanico_id=_mecanico_vta,
-                        a_la_caja=_con_caja or _forma_vta == A_CUENTA)
+                        a_la_caja=_con_caja or _forma_vta == A_CUENTA, telefono=_tel_vta)
                 except (ValueError, PermissionError) as _err:
                     st.error(el_error_en_castellano(_err))
                 else:
@@ -443,7 +469,8 @@ if pagina == PAGINAS[9]:
                                  WHERE venta_id = ? ORDER BY id""", (_id_vta,))
                     st.session_state["venta_recien_cerrada"] = {
                         "id": _id_vta, "total": _total_vta, "avisos": _avisos_vta,
-                        "cliente": _cliente_vta, "items": [dict(f) for f in c.fetchall()],
+                        "cliente": _cliente_vta, "telefono": _tel_vta.strip(),
+                        "items": [dict(f) for f in c.fetchall()],
                         "terminados": lo_que_se_termino(_id_vta), "a_la_caja": _sin_cobrar,
                         "cuenta": _cuenta_vta["nombre"] if _cuenta_vta else ""}
                     for _it in venta_items:
@@ -451,6 +478,10 @@ if pagina == PAGINAS[9]:
                         st.session_state.pop(f"venta_precio_{_it['producto_id']}", None)
                     st.session_state["venta_items"] = []
                     st.session_state.pop("venta_resultados", None)
+                    # El cliente y su teléfono son de esta venta: en la que sigue, el que llega
+                    # es otro (con el teléfono de antes, la compra iba a la agenda del anterior).
+                    st.session_state.pop("venta_cliente", None)
+                    st.session_state.pop("venta_telefono", None)
                     st.rerun()
 
     # DEVOLVER ALGO DE UNA VENTA: en su propia pantalla, «↩️ Devoluciones». Acá solo el botón.
@@ -602,3 +633,33 @@ if pagina == PAGINAS[9]:
                               for r in _cta["afuera"]], width="stretch", hide_index=True)
             elif not _falta_elegir and not (_cta.get("ventas") or _cta.get("entregas")):
                 st.caption("En ese período no tiene movimientos, y no tiene nada del depósito afuera.")
+
+    # LA AGENDA DE CLIENTES DE MOSTRADOR: ver esa sección en logica/ventas.py. Perezosa: junta
+    # las compras, lo que esperan, los presupuestos y los autos solo abierta.
+    _exp_agenda = st.expander("📇 Agenda de clientes", key="exp_agenda_clientes",
+                              on_change="rerun")
+    if _exp_agenda.open:
+        with _exp_agenda:
+            _q_ag = st.text_input("Buscar por teléfono, nombre o patente:", key="agenda_buscar",
+                                  placeholder="Ej: 4567, Juan, AB123CD")
+            try:
+                _agenda = agenda_de_clientes(_q_ag)
+            except PermissionError as _err:
+                st.warning(el_error_en_castellano(_err))
+                _agenda = []
+            if not _agenda:
+                st.caption("Nadie con ese teléfono, nombre o patente." if _q_ag.strip() else
+                           "Todavía no hay clientes con teléfono: se anotan al vender (📱 "
+                           "Teléfono), al anotar lo que esperan, en un presupuesto o en la "
+                           "ficha del auto.")
+            else:
+                _por_clave_ag = {k["clave"]: k for k in _agenda}
+                _elegido_ag = st.selectbox(
+                    "Cliente:", list(_por_clave_ag), key="agenda_cliente",
+                    format_func=lambda k: (  # rótulo fijo: el nombre y el teléfono
+                        f"{_por_clave_ag[k]['nombre'] or 'Sin nombre'} — "
+                        f"{_por_clave_ag[k]['telefono']}"))
+                st.caption(f"{miles(len(_agenda))} cliente(s)"
+                           + (f" (los {CLIENTES_EN_LA_AGENDA} que vinieron último: buscá para "
+                              "ver otros)" if len(_agenda) >= CLIENTES_EN_LA_AGENDA else ""))
+                mostrar_la_ficha_del_cliente(_por_clave_ag[_elegido_ag]["telefono"], "agenda")
