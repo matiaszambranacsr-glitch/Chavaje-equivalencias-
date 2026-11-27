@@ -1459,6 +1459,22 @@ def probar():
     esperar("el recargo de 3 cuotas, puesto desde Administrar",
             (ns["recargos_por_cuotas"](), [e.value for e in _adm_mes.exception]), ({3: 12.5}, []))
     ns["guardar_config"]("recargos_por_cuotas", "")
+    # EL RECIBO DEL PAGO, en 💳 Cuentas corrientes: registrado el pago, sale el recibo.
+    _cta_rec = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Sesión'").fetchone()[0]
+    _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][6]
+    _adm_mes.session_state["_cc_ultima"] = _cta_rec
+    _adm_mes.run()
+    _adm_mes.number_input(key=f"cc_importe_pago_{_cta_rec}").set_value(2500.0)
+    [b for b in _adm_mes.button if b.label == "💵 Registrar pago"][0].click().run()
+    esperar("pagado: el recibo, con su WhatsApp y su PDF",
+            (any(m.value.startswith("**🧾 Recibo N°") and "2.500" in m.value
+                 for m in _adm_mes.markdown),
+             len([x for x in _adm_mes.get("download_button")
+                  if x.proto.label == "📄 Recibo (PDF)"]), [e.value for e in _adm_mes.exception]),
+            (True, 1, []))
+    _adm_mes.button(key=f"cc_recibo_listo_{_cta_rec}").click().run()
+    esperar("«Listo» lo saca", any(m.value.startswith("**🧾 Recibo N°") for m in _adm_mes.markdown),
+            False)
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

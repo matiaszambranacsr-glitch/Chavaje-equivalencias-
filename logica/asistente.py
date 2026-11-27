@@ -435,6 +435,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("recibo", "Darle el recibo a un taller que pagó",
+     "recibo recibos comprobante de pago pago pagó pagaron constancia taller cuenta corriente "
+     "entrego",
+     "En 🗂️ Administrar → 💳 Cuentas corrientes, elegí la cuenta y «💵 Registrar pago»: sale el "
+     "recibo con lo que pagó y el saldo, con «📲 Mandárselo por WhatsApp» y «📄 Recibo (PDF)». "
+     "Los de antes, en «🧾 Recibos anteriores».",
+     "🗂️ Administrar", "empleado"),
     ("recargo_cuotas", "Cobrar con recargo en cuotas con tarjeta",
      "recargo cuotas interes tarjeta credito financiacion 3 6 12 cuotas sin interes porcentaje "
      "coeficiente",

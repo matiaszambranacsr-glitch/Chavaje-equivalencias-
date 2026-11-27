@@ -1708,6 +1708,52 @@ if pagina == PAGINAS[3]:
                     _mid, cuanto_pasa_del_limite(_mid, st.session_state[f"_limite_cc_{_mid}"]),
                     f"cc_{_mid}")
 
+            # EL RECIBO DEL PAGO (ver esa sección en logica/mecanico.py): el del recién
+            # registrado, para mandarlo o imprimirlo; los de antes, en «🧾 Recibos anteriores».
+            _recibo_id = st.session_state.get(f"cc_recibo_{_mid}")
+            if _recibo_id:
+                _recibo = recibo_de_pago(_recibo_id)
+                if _recibo:
+                    with st.container(border=True, key=f"cc_recibo_caja_{_mid}"):
+                        st.markdown(f"**🧾 Recibo N° {_recibo['numero']}**: "
+                                    f"\\${miles(_recibo['importe'], 0)} ({_recibo['medio']})")
+                        _rc1, _rc2, _rc3 = cols([2, 2, 1])
+                        _rc1.link_button("📲 Mandárselo por WhatsApp",
+                                         link_de_whatsapp(_recibo["telefono"],
+                                                          texto_del_recibo(_recibo)),
+                                         width="stretch")
+                        _rc2.download_button("📄 Recibo (PDF)",
+                                             data=recibo_para_descargar(_recibo_id),
+                                             file_name=f"recibo_{_recibo_id}.pdf",
+                                             mime="application/pdf", key=f"cc_recibo_pdf_{_mid}",
+                                             width="stretch")
+                        if _rc3.button("Listo", key=f"cc_recibo_listo_{_mid}", width="stretch"):
+                            st.session_state.pop(f"cc_recibo_{_mid}", None)
+                            st.rerun()
+            _pagos_ant = pagos_de_la_cuenta(_mid)
+            if _pagos_ant:
+                _pop_rec = st.popover("🧾 Recibos anteriores", key=f"pop_recibos_{_mid}",
+                                      on_change="rerun")
+                if _pop_rec.open:
+                    with _pop_rec:
+                        _por_id_rec = {p_["id"]: p_ for p_ in _pagos_ant}
+                        _rec_elegido = st.selectbox(
+                            "Pago:", list(_por_id_rec), key=f"cc_recibo_elegido_{_mid}",
+                            format_func=lambda i: (  # rótulo fijo: un pago no cambia
+                                f"{fecha_legible(str(_por_id_rec[i]['fecha'])[:16])} — "
+                                f"${miles(_por_id_rec[i]['importe'], 0)} "
+                                f"({_por_id_rec[i]['medio']})"))
+                        _rec_ant = recibo_de_pago(_rec_elegido)
+                        st.link_button("📲 Mandárselo por WhatsApp",
+                                       link_de_whatsapp((_rec_ant or {}).get("telefono"),
+                                                        texto_del_recibo(_rec_ant)),
+                                       width="stretch")
+                        st.download_button("📄 Recibo (PDF)",
+                                           data=recibo_para_descargar(_rec_elegido),
+                                           file_name=f"recibo_{_rec_elegido}.pdf",
+                                           mime="application/pdf",
+                                           key=f"cc_recibo_ant_pdf_{_mid}", width="stretch")
+
             with st.form(f"cc_pago_{_mid}", clear_on_submit=True):
                 st.markdown("**💵 Registrar un pago**")
                 _importe_p = st.number_input("Importe ($):", min_value=0.0, step=100.0,
@@ -1722,7 +1768,9 @@ if pagina == PAGINAS[3]:
                                                            _fecha_cheque,
                                                            usuario=obtener_usuario_actual())
                     if _ok:
-                        avisar("success", _aviso)
+                        st.session_state[f"cc_recibo_{_mid}"] = (
+                            pagos_de_la_cuenta(_mid, 1) or [{}])[0].get("id")
+                        avisar("success", _aviso + " El recibo está listo para mandárselo.")
                         st.rerun()
                     else:
                         st.error(_aviso)

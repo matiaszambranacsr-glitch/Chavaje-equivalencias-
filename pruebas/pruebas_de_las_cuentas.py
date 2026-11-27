@@ -250,6 +250,39 @@ def probar(L):
     esperar("lo que falta pedir descuenta el permiso", ns["cuanto_pasa_del_limite"](tp, 4000), 2000.0)
     esperar("entra lo que cabe", (ns["cargar_a_la_cuenta"](tp, "x", 4000)[0],
                                   ns["cargar_a_la_cuenta"](tp, "x", 2000)[0]), (False, True))
+
+    # EL RECIBO DEL PAGO (ver esa sección en logica/mecanico.py): número, cuánto, cómo, y el
+    # saldo de antes y el de después, en texto y en PDF (hoja o ticket).
+    ns["guardar_telefono_de_la_cuenta"](tp, "11 4567-8901")
+    _saldo_antes = ns["estado_de_cuenta"](tp)["saldo"]
+    ns["registrar_pago_de_cuenta"](tp, 1500, "Transferencia", "a cuenta de la semana")
+    _pago = ns["pagos_de_la_cuenta"](tp, 1)[0]
+    _recibo = ns["recibo_de_pago"](_pago["id"])
+    esperar("el recibo: cuánto, cómo y los saldos",
+            {k: _recibo[k] for k in ("numero", "importe", "medio", "saldo_antes",
+                                     "saldo_despues", "telefono")},
+            {"numero": _pago["id"], "importe": 1500.0, "medio": "Transferencia",
+             "saldo_antes": round(_saldo_antes, 2), "saldo_despues": round(_saldo_antes - 1500, 2),
+             "telefono": "11 4567-8901"})
+    _texto_rec = ns["texto_del_recibo"](_recibo)
+    esperar("en texto, con la nota y el saldo",
+            (_texto_rec.startswith(f"Recibo N° {_pago['id']} — El Chavo — "),
+             "Recibimos de Taller Permiso: $1.500" in _texto_rec,
+             "Nota: a cuenta de la semana" in _texto_rec,
+             f"Saldo actual: ${ns['miles'](_saldo_antes - 1500, 0)}" in _texto_rec),
+            (True, True, True, True))
+    esperar("en PDF, hoja y ticket; un cargo no tiene recibo",
+            (ns["pdf_del_recibo"](_recibo)[:4], ns["pdf_del_recibo"](_recibo, True)[:4],
+             ns["recibo_de_pago"](c.execute("SELECT MAX(id) FROM movimientos_de_cuenta WHERE "
+                                            "importe > 0").fetchone()[0]),
+             ns["texto_del_recibo"](None)), (b"%PDF", b"%PDF", None, ""))
+    ns["registrar_pago_de_cuenta"](tp, 100000, "Cheque", cheque_fecha="2030-01-15")
+    _rec_ch = ns["recibo_de_pago"](ns["pagos_de_la_cuenta"](tp, 1)[0]["id"])
+    esperar("con cheque, la fecha; si queda a favor, lo dice",
+            ("Cómo pagó: Cheque (fecha 15/01/2030)" in ns["texto_del_recibo"](_rec_ch),
+             "a favor" in ns["texto_del_recibo"](_rec_ch)), (True, _rec_ch["saldo_despues"] < 0))
+    esperar("los últimos pagos, el más nuevo primero",
+            [p_["importe"] for p_ in ns["pagos_de_la_cuenta"](tp, 2)], [100000.0, 1500.0])
     return fallas
 
 

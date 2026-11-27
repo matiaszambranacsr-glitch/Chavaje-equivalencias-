@@ -1734,6 +1734,114 @@ def registrar_pago_de_cuenta(mecanico_id, importe, medio, concepto="", cheque_fe
     return True, f"Pago registrado: ${miles(importe, 0)}."
 
 
+# EL RECIBO DEL PAGO: el taller que pagaba se iba sin papel, y a fin de mes se discutía «yo te
+# pagué 50 mil el 12». Registrado el pago, sale el recibo —número, fecha, cuánto, cómo (con la
+# fecha del cheque), el saldo de antes y el de después— para mandárselo por WhatsApp a su número
+# o imprimirlo, en el mismo papel que el comprobante (ver papel_del_comprobante()). Los de antes
+# se vuelven a sacar desde la cuenta.
+PAGOS_PARA_VOLVER_A_SACAR_EL_RECIBO = 10
+
+
+def pagos_de_la_cuenta(mecanico_id, cuantos=PAGOS_PARA_VOLVER_A_SACAR_EL_RECIBO):
+    """Los últimos pagos sin anular, el más nuevo primero: [dict] id, fecha, importe, medio."""
+    c.execute("""SELECT id, fecha, -importe AS importe, medio FROM movimientos_de_cuenta
+                 WHERE mecanico_id = ? AND importe < 0 AND anulado = 0
+                 ORDER BY id DESC LIMIT ?""", (int(mecanico_id), int(cuantos)))
+    return [dict(f) for f in c.fetchall()]
+
+
+def recibo_de_pago(movimiento_id):
+    """{numero, fecha, cuenta, importe, medio, cheque_fecha, concepto, usuario, saldo_antes,
+    saldo_despues, telefono}, o None si no es un pago o está anulado. Los saldos, por el orden
+    en que se anotaron los movimientos."""
+    exigir_nivel("empleado", "sacar el recibo de un pago")
+    f = c.execute("""SELECT m.id, m.mecanico_id, m.fecha, m.importe, m.medio, m.cheque_fecha,
+                            m.concepto, m.usuario, k.nombre, k.telefono
+                     FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
+                     WHERE m.id = ? AND m.importe < 0 AND m.anulado = 0""",
+                  (int(movimiento_id),)).fetchone()
+    if not f:
+        return None
+    despues = float(c.execute("""SELECT COALESCE(SUM(importe), 0) FROM movimientos_de_cuenta
+                                 WHERE mecanico_id = ? AND anulado = 0 AND id <= ?""",
+                              (f["mecanico_id"], f["id"])).fetchone()[0])
+    importe = round(-float(f["importe"]), 2)
+    return {"numero": f["id"], "fecha": f["fecha"], "cuenta": f["nombre"], "importe": importe,
+            "medio": f["medio"] or "", "cheque_fecha": f["cheque_fecha"],
+            "concepto": f["concepto"] or "", "usuario": f["usuario"] or "",
+            "saldo_despues": round(despues, 2), "saldo_antes": round(despues + importe, 2),
+            "telefono": f["telefono"] or ""}
+
+
+def _renglones_del_recibo(recibo):
+    """[(izquierda, derecha)] del cuerpo del recibo: lo mismo en el texto y en el PDF."""
+    def saldo(x):
+        return f"${miles(x, 0)}" if x >= 0 else f"${miles(-x, 0)} a favor"
+    renglones = [(f"Recibimos de {recibo['cuenta']}", f"${miles(recibo['importe'], 0)}"),
+                 ("Cómo pagó", recibo["medio"]
+                  + (f" (fecha {recibo['cheque_fecha'][8:10]}/{recibo['cheque_fecha'][5:7]}/"
+                     f"{recibo['cheque_fecha'][:4]})" if recibo["cheque_fecha"] else ""))]
+    concepto = recibo["concepto"]
+    if concepto and not concepto.lower().startswith("pago ("):
+        renglones.append(("Nota", concepto))
+    renglones += [("Saldo anterior", saldo(recibo["saldo_antes"])),
+                  ("Saldo actual", saldo(recibo["saldo_despues"]))]
+    return renglones
+
+
+def texto_del_recibo(recibo):
+    """El recibo para WhatsApp. "" si no hay."""
+    if not recibo:
+        return ""
+    return "\n".join([f"Recibo N° {recibo['numero']} — El Chavo — "
+                      f"{fecha_legible(str(recibo['fecha'])[:16])}"]
+                     + [f"{a}: {b}" for a, b in _renglones_del_recibo(recibo)]
+                     + ["", "¡Gracias!"])
+
+
+def pdf_del_recibo(recibo, en_ticket=False):
+    """El recibo en PDF, en hoja A4 o en ticket de 80 mm. b"" si no hay."""
+    if not recibo:
+        return b""
+    titulo = f"Recibo N° {recibo['numero']}"
+    fecha = fecha_legible(str(recibo["fecha"])[:16])
+    renglones = _renglones_del_recibo(recibo)
+    if en_ticket:
+        return pdf_de_ticket([("centro", "El Chavo", 12, True), ("centro", titulo, 10, True),
+                              ("centro", fecha, 9, False), ("linea",)]
+                             + [("par", a, b, 9, a.startswith("Recibimos")
+                                 or a == "Saldo actual") for a, b in renglones]
+                             + [("espacio", 2), ("centro", "¡Gracias!", 9, False)])
+    from fpdf import FPDF
+
+    def limpiar(texto):
+        return str(texto).replace("°", "o").encode("latin-1", "replace").decode("latin-1")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, limpiar(f"El Chavo - {titulo}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, limpiar(f"Fecha: {fecha}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    for a, b in renglones:
+        negrita = a.startswith("Recibimos") or a == "Saldo actual"
+        pdf.set_font("Helvetica", "B" if negrita else "", 12 if negrita else 10)
+        pdf.cell(120, 8, limpiar(a))
+        pdf.cell(60, 8, limpiar(b), align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(10)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(80, 6, "______________________________", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(80, 6, limpiar(f"Recibió: {recibo['usuario']}" if recibo["usuario"] else "Firma"))
+    return bytes(pdf.output())
+
+
+def recibo_para_descargar(movimiento_id):
+    """Para el botón de descarga: el recibo y el papel se leen ahora; el PDF, al tocarlo."""
+    recibo = recibo_de_pago(movimiento_id)
+    en_ticket = papel_del_comprobante() == PAPELES_DEL_COMPROBANTE[1]
+    return lambda: pdf_del_recibo(recibo, en_ticket)
+
+
 def anular_movimiento_de_cuenta(movimiento_id):
     """No se borra: queda tachado («ANULADO») para que se vea qué pasó. (ok, texto).
 

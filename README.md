@@ -7946,6 +7946,19 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🧾 El recibo del pago de una cuenta
+
+El taller que pagaba su cuenta se iba sin papel, y a fin de mes se discutía «yo te pagué 50 mil
+el 12». En 🗂️ Administrar → 💳 Cuentas corrientes, después de «💵 Registrar pago» sale el
+**recibo**: número (el del movimiento), fecha, de quién, cuánto, cómo pagó (con la fecha del
+cheque), la nota si se escribió, y el saldo de antes y el de después («a favor» si quedó
+negativo). **«📲 Mandárselo por WhatsApp»** lo abre escrito al número de la cuenta, y **«📄
+Recibo (PDF)»** sale en el mismo papel que el comprobante (hoja A4 con lugar para la firma, o
+ticket de 80 mm). Los de antes —los últimos `PAGOS_PARA_VOLVER_A_SACAR_EL_RECIBO` (10)— se
+vuelven a sacar en «🧾 Recibos anteriores». Un cargo o un pago anulado no tiene recibo
+(`recibo_de_pago()`, `texto_del_recibo()` y `pdf_del_recibo()`, en `logica/mecanico.py`; lo
+controlan `pruebas_de_las_cuentas.py` y `pruebas_de_la_sesion.py`).
+
 ## 💳 El recargo por cuotas
 
 Con tarjeta de crédito en cuotas el negocio cobra un recargo, y la cajera lo calculaba aparte
