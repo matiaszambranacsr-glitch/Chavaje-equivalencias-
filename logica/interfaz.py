@@ -609,6 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("🔄 Turnos de caja: cada arqueo cierra el turno de quien lo hace, y la tabla dice lo que faltó o sobró en cada turno (no en el día entero): si a la mañana faltaron $100, no le caen a la de la tarde. También en el resumen del día y en los arqueos por cajero del mes.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("💸 Gastos fijos y lo que quedó: anotás alquiler, luz, sueldos (valen todos los meses hasta que los saques) y el cierre del mes muestra la ganancia estimada menos los gastos de la caja y los fijos.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🤝 Trato especial por taller: en la configuración de cada cuenta, su propio recargo por cuotas (pisa la tabla general) y «su descuento también cuando paga en el momento» (la caja ya lo trae puesto al cobrarle).", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("❌ Cheque rechazado: en «🏦 Cheques para depositar», los depositados hace poco tienen «❌» (vuelve a la cuenta del taller, con lo que cobró el banco, y sale el WhatsApp para avisarle) y «↩️» por si se marcó depositado por error.", "🗂️ Administrar → 💳 Cuentas corrientes"),

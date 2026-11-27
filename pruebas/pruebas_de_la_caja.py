@@ -825,11 +825,22 @@ def probar(L):
              "anuladas": 1, "por_forma": [("Efectivo", 1300000.0)], "dias": 2,
              "mejor_dia": ("2025-02-05", 1000000.0), "salidas": [("🧾 Gasto", 1, 250.0)],
              "anterior": 0.0})
-    esperar("los arqueos por cajero: el último de cada día",
-            _cm["arqueos"], [{"Cajero": "ana", "Arqueos": 1, "Con diferencia": 1, "Faltó": 500.0,
+    # LOS TURNOS: cada arqueo cierra el turno de quien lo hace. El 5, ana contó $100 de menos y
+    # beto, después, justo: a ana le faltaron $100 y a beto le sobraron (los encontró).
+    esperar("los turnos del día, en orden, con lo de cada turno",
+            [(t["usuario"], t["diferencia"], t["del_turno"]) for t in ns["turnos_del_dia"]("2025-02-05")],
+            [("ana", -100.0, -100.0), ("beto", 0.0, 100.0)])
+    esperar("por quien contó",
+            (ns["renglon_de_los_turnos"]("2025-02-05"), ns["renglon_de_los_turnos"]("2025-02-10")),
+            ("ana: faltaron $100 · beto: sobraron $100", ""))
+    esperar("y en el resumen del día",
+            "🔄 Turnos (arqueos): ana: faltaron $100 · beto: sobraron $100" in
+            ns["resumen_del_dia"]("2025-02-05"), True)
+    esperar("los arqueos por cajero del mes: lo de sus turnos, día por día",
+            _cm["arqueos"], [{"Cajero": "ana", "Arqueos": 2, "Con diferencia": 2, "Faltó": 600.0,
                               "Sobró": 0.0},
-                             {"Cajero": "beto", "Arqueos": 2, "Con diferencia": 1, "Faltó": 0.0,
-                              "Sobró": 100.0}])
+                             {"Cajero": "beto", "Arqueos": 2, "Con diferencia": 2, "Faltó": 0.0,
+                              "Sobró": 200.0}])
     esperar("cuándo se vende: por la hora y el día de acá, sin lo anulado",
             _cm["cuando"], {"por_hora": [("12", 1, 1000000.0), ("23", 1, 300000.0)],
                             "por_dia": [("miércoles", 1, 1000000.0), ("viernes", 1, 300000.0)]})
@@ -838,7 +849,7 @@ def probar(L):
             (_texto_cm.startswith("📅 Cierre de febrero 2025 — El Chavo\n💵 Entró: $1.300.000 "
                                   "en 2 venta(s), 2 día(s) con ventas"),
              "🏅 Mejor día: 05/02 con $1.000.000" in _texto_cm,
-             "🧮 Arqueos: ana: faltó $500 · beto: sobró $100" in _texto_cm,
+             "🧮 Arqueos: ana: faltó $600 · beto: sobró $200" in _texto_cm,
              "Ganancia" in _texto_cm), (True, True, True, False))
     _hojas = ns["excel_del_cierre_del_mes"]("2025-02", hoy=_fecha(2025, 3, 15))
     esperar("el Excel: una hoja por cosa, con la anulada marcada",

@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("turnos", "Cambiar de turno en la caja (cada uno con su arqueo)",
+     "turno turnos cambio de turno mañana tarde cajera entrega la caja relevo arqueo de cada "
+     "uno faltante de quien",
+     "Al terminar tu turno, contá el cajón y tocá «🧮 Guardar el arqueo» (en «📋 Ventas y "
+     "cierre de caja»): cierra tu turno. Si después cuenta otra persona, la tabla dice en "
+     "«Del turno» lo que faltó o sobró en cada uno, no en el día entero. La plata que se saca "
+     "entre turnos se anota como salida de caja.",
+     "💵 Caja", ""),
     ("gastos_fijos", "Anotar los gastos fijos y ver lo que quedó en el mes",
      "gastos fijos gasto alquiler luz gas sueldos sueldo contador impuestos lo que quedo "
      "ganancia neta resultado",

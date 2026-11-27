@@ -370,7 +370,7 @@ if pagina == PAGINAS[11]:
                             st.caption("💸 Salidas: " + " · ".join(
                                 f"{t}: \\${miles(x, 0)}" for t, _n, x in _cm["salidas"]))
                         if _cm["arqueos"]:
-                            st.markdown("**🧮 Arqueos por cajero** (el último de cada día)")
+                            st.markdown("**🧮 Arqueos por cajero** (lo de sus turnos)")
                             st.dataframe([{**a, "Faltó": f"${miles(a['Faltó'], 0)}",
                                            "Sobró": f"${miles(a['Sobró'], 0)}"}
                                           for a in _cm["arqueos"]],
@@ -843,7 +843,10 @@ if pagina == PAGINAS[11]:
                                             help="Sin el cambio con el que abriste la caja.")
                 _nota_arq = _q2.text_input("Nota (opcional):", key="arqueo_nota",
                                            placeholder="Ej: faltan $500 de un vuelto")
-                _arquear = st.form_submit_button("🧮 Guardar el arqueo")
+                _arquear = st.form_submit_button(
+                    "🧮 Guardar el arqueo",
+                    help="Cierra tu turno: si después cuenta otro, a cada uno le queda lo que "
+                         "pasó en el suyo.")
             if _arquear:
                 if _contado is None:
                     st.warning("Escribí cuánto efectivo contaste.")
@@ -851,12 +854,20 @@ if pagina == PAGINAS[11]:
                     _ok_arq, _texto_arq = arquear_la_caja(_dia_txt, _contado, _nota_arq)
                     avisar("success" if _ok_arq else "warning", f"🧮 {_texto_arq}")
                     st.rerun()
-            _arqueos = arqueos_del_dia(_dia_txt)
-            if _arqueos:
+            # LOS TURNOS (ver «LOS TURNOS DE CAJA»): cada arqueo cierra el turno de quien lo
+            # hace; «Del turno» es lo que cambió desde el arqueo anterior.
+            _turnos = list(reversed(turnos_del_dia(_dia_txt)))
+
+            def _con_signo(x):
+                return f"{'+' if x > 0 else '-' if x < 0 else ''}${miles(abs(x), 0)}"
+            if _turnos:
                 st.dataframe([{"Hora": a["hora"], "Esperado": f"${miles(a['efectivo_esperado'], 0)}",
                                "Contado": f"${miles(a['efectivo_contado'], 0)}",
-                               "Diferencia": (f"{'+' if a['diferencia'] > 0 else '-' if a['diferencia'] < 0 else ''}"
-                                              f"${miles(abs(a['diferencia']), 0)}"),
+                               "Diferencia": _con_signo(a["diferencia"]),
+                               "Del turno": _con_signo(a["del_turno"]),
                                "Nota": a["nota"] or "", "Contó": a["usuario"] or ""}
-                              for a in _arqueos], width="stretch", hide_index=True)
+                              for a in _turnos], width="stretch", hide_index=True)
+                _renglon_t = renglon_de_los_turnos(_dia_txt)
+                if _renglon_t:
+                    st.caption(f"🔄 Por turno: {_renglon_t.replace('$', chr(92) + '$')}")
 

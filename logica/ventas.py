@@ -295,6 +295,9 @@ def resumen_del_dia(dia=None, con_ganancia=False):
         anotar_error("resumen_del_dia: objetivo", _err)
     if len(caja["por_usuario"]) > 1:
         renglones.append("👤 " + " · ".join(f"{u}: {plata(t)}" for u, _n, t in caja["por_usuario"]))
+    _turnos = renglon_de_los_turnos(dia)
+    if _turnos:
+        renglones.append(f"🔄 Turnos (arqueos): {_turnos}")
     # Lo que está esperando, no solo de hoy: es lo que el dueño tiene que saber al cerrar.
     try:
         vencidas = cuentas_para_recordar()
@@ -1781,6 +1784,38 @@ def resumen_de_la_caja(dia=None):
             "salidas": salidas, "en_el_cajon": round(efectivo - salidas, 2),
             "a_cuenta": round(a_cuenta, 2), "ventas": caja["ventas"],
             "esperando": caja["a_cobrar"], "total_esperando": caja["total_a_cobrar"]}
+
+
+# LOS TURNOS DE CAJA: cuando la cajera de la mañana le deja la caja a la de la tarde, el arqueo
+# de la noche daba la diferencia de todo el día, y un faltante de la mañana caía en la de la
+# tarde. Ahora cada arqueo cierra el turno de quien lo hace: la diferencia de SU turno es lo que
+# cambió desde el arqueo anterior del día (si la de la mañana dejó $100 de menos y a la noche
+# faltan $100, la de la tarde no perdió nada). Si la misma persona vuelve a contar, los suyos se
+# compensan. La plata que se saca entre turnos va como salida de caja (un retiro): así no cuenta
+# como faltante.
+def turnos_del_dia(dia=None):
+    """Los arqueos del día en orden, cada uno con «del_turno»: su diferencia menos la del arqueo
+    anterior (lo que pasó en ese turno). [dict]."""
+    turnos, anterior = [], 0.0
+    for a in reversed(arqueos_del_dia(dia)):
+        dif = round(float(a["diferencia"] or 0), 2)
+        turnos.append({**a, "del_turno": round(dif - anterior, 2)})
+        anterior = dif
+    return turnos
+
+
+def renglon_de_los_turnos(dia=None):
+    """«ana: faltaron $100 · beto: sobraron $100», por quien contó (sumando sus turnos), si
+    contaron dos o más. "" si no."""
+    por_quien = {}
+    for t in turnos_del_dia(dia):
+        quien = t["usuario"] or "Sin decir"
+        por_quien[quien] = round(por_quien.get(quien, 0.0) + t["del_turno"], 2)
+    if len(por_quien) < 2:
+        return ""
+    return " · ".join(f"{q}: " + ("justo" if not d else
+                                  f"{'sobraron' if d > 0 else 'faltaron'} ${miles(abs(d), 0)}")
+                      for q, d in por_quien.items())
 
 
 def arqueos_del_dia(dia=None):
@@ -3527,8 +3562,8 @@ def devolver_sena_y_avisar(sena_id):
 # EL CIERRE DEL MES: el cierre de caja es de un día, y para el mes —lo que se le pasa al contador,
 # lo que mira el dueño para decidir— había que sumar treinta cierres a mano, más las salidas y
 # los arqueos. Junta los cierres de cada día del mes (los mismos números: devoluciones y señas
-# incluidas), las salidas por tipo, los arqueos con sus diferencias por cajero (el último de cada
-# día, que es el que cierra), lo anulado, el mes anterior al lado, y cuándo se vende: por hora y
+# incluidas), las salidas por tipo, los arqueos con sus diferencias por cajero (lo de los turnos de cada
+# uno: ver «LOS TURNOS DE CAJA»), lo anulado, el mes anterior al lado, y cuándo se vende: por hora y
 # por día de la semana, para decidir horarios y quién atiende. Para WhatsApp y en Excel, con una
 # hoja por cosa. Solo el administrador.
 NOMBRES_DE_LOS_DIAS_DE_LA_SEMANA = ("domingo", "lunes", "martes", "miércoles", "jueves",
@@ -3566,19 +3601,23 @@ def cuando_se_vende(desde, hasta):
 
 
 def arqueos_por_cajero(desde, hasta):
-    """[{Cajero, Arqueos, «Con diferencia», Faltó, Sobró}] con el último arqueo de cada día (el
-    que cierra), el que más faltó primero."""
-    filas = c.execute("""SELECT a.dia, a.usuario, a.efectivo_contado - a.efectivo_esperado AS dif
-                         FROM arqueos_de_caja a
-                         WHERE a.dia BETWEEN ? AND ?
-                           AND a.id = (SELECT MAX(b.id) FROM arqueos_de_caja b
-                                       WHERE b.dia = a.dia)""", (desde, hasta)).fetchall()
-    cajeros = {}
+    """[{Cajero, Arqueos, «Con diferencia», Faltó, Sobró}] por turnos (ver «LOS TURNOS DE CAJA»):
+    a cada uno, lo que pasó en sus turnos de cada día; «Arqueos» son los días que contó. El que
+    más faltó primero."""
+    filas = c.execute("""SELECT dia, usuario, efectivo_contado - efectivo_esperado AS dif
+                         FROM arqueos_de_caja WHERE dia BETWEEN ? AND ? ORDER BY dia, id""",
+                      (desde, hasta)).fetchall()
+    por_dia, anterior = {}, {}
     for f in filas:
-        k = cajeros.setdefault(f["usuario"] or "Sin decir", {
-            "Cajero": f["usuario"] or "Sin decir", "Arqueos": 0, "Con diferencia": 0,
-            "Faltó": 0.0, "Sobró": 0.0})
         dif = round(float(f["dif"] or 0), 2)
+        quien = f["usuario"] or "Sin decir"
+        clave = (f["dia"], quien)
+        por_dia[clave] = round(por_dia.get(clave, 0.0) + dif - anterior.get(f["dia"], 0.0), 2)
+        anterior[f["dia"]] = dif
+    cajeros = {}
+    for (_dia, quien), dif in por_dia.items():
+        k = cajeros.setdefault(quien, {"Cajero": quien, "Arqueos": 0, "Con diferencia": 0,
+                                       "Faltó": 0.0, "Sobró": 0.0})
         k["Arqueos"] += 1
         k["Con diferencia"] += bool(dif)
         k["Faltó" if dif < 0 else "Sobró"] = round(k["Faltó" if dif < 0 else "Sobró"]

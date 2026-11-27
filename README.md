@@ -7946,6 +7946,19 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🔄 Los turnos de caja
+
+Cuando la cajera de la mañana le deja la caja a la de la tarde, el arqueo de la noche daba la
+diferencia de todo el día, y un faltante de la mañana caía en la de la tarde. Ahora **cada arqueo
+cierra el turno de quien lo hace**: en la tabla de arqueos, «Del turno» es lo que cambió desde el
+arqueo anterior del día (si a la mañana faltaron $100 y a la noche siguen faltando $100, en el
+turno de la tarde no faltó nada), y abajo, «🔄 Por turno: ana: faltaron $100 · beto: justo». Si
+la misma persona vuelve a contar, sus turnos se compensan. La plata que se saca entre turnos va
+como salida de caja (un retiro), así no cuenta como faltante. Lo mismo en el resumen del día
+(«🔄 Turnos (arqueos): …») y en los arqueos por cajero del cierre del mes, que suman los turnos
+de cada uno, día por día (`turnos_del_dia()`, `renglon_de_los_turnos()` y
+`arqueos_por_cajero()`, en `logica/ventas.py`; lo controla `pruebas_de_la_caja.py`).
+
 ## 💸 Los gastos fijos y lo que quedó en el mes
 
 El cierre del mes decía lo que entró y la ganancia de lo vendido, pero no lo que quedó de verdad:
@@ -8018,7 +8031,7 @@ para decidir— había que sumar treinta cierres a mano, más las salidas y los 
 el de ahora llega a hoy) junta los cierres de cada día —los mismos números: lo cobrado por día
 de cobro, sin lo anulado, menos lo devuelto y con las señas—, por forma de pago, cuántas ventas
 y en cuántos días, el mejor día, lo vendido el mes anterior, las salidas por tipo y **los
-arqueos por cajero**: con el último arqueo de cada día (el que cierra), cuántos tuvieron
+arqueos por cajero**: por turnos (ver «🔄 Los turnos de caja»), cuántos días tuvieron
 diferencia y cuánto faltó o sobró a cada uno, el que más faltó primero. Y **🕐 cuándo se vende**:
 las ventas por hora y por día de la semana (en hora de acá), para decidir horarios y quién
 atiende. «📲 Mandarlo por WhatsApp» va al WhatsApp del dueño, y **«⬇️ El mes en Excel»** trae

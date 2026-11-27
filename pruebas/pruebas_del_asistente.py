@@ -103,6 +103,7 @@ ENTIENDE = (
     ("me rechazaron un cheque", "como:cheques"),
     ("a un taller le quiero hacer un trato especial", "como:trato_especial"),
     ("donde anoto el alquiler y los sueldos", "como:gastos_fijos"),
+    ("como hago el cambio de turno de la cajera", "como:turnos"),
     ("a que hora se vende mas", "como:cierre_mes"),
     ("como descuento la sena cuando retira", "como:senas"),
     ("donde cambio el objetivo de ventas", "como:objetivo_del_mes"),
