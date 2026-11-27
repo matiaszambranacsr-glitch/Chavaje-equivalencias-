@@ -899,6 +899,32 @@ def probar(L):
                                          ns["cobrar_venta"](v_r, "Efectivo", 3)[0],
                                          uno("SELECT total FROM ventas WHERE id = ?", v_r)),
             (True, True, 2000.0))
+    # Las cuentas corrientes, con su recargo: sin tildar «otro recargo», el del mostrador; con
+    # el tilde, la venta a una cuenta usa su tabla (y la de mostrador sigue igual).
+    esperar("sin tabla aparte, la cuenta paga el del mostrador",
+            (ns["cuentas_con_otro_recargo"](),
+             ns["recargo_por_cuotas"]("Tarjeta de crédito", 3, de_cuenta=True)), (False, 10.0))
+    st.session_state["nivel_usuario"] = "admin"
+    esperar("la tabla de las cuentas, guardada y prendida",
+            ns["guardar_recargos_por_cuotas"]({3: 5, 12: 0}, de_cuenta=True, aparte=True),
+            {3: 5.0})
+    st.session_state["nivel_usuario"] = "operador"
+    esperar("cada uno con la suya",
+            [ns["recargo_por_cuotas"]("Tarjeta de crédito", n, de_cuenta=d)
+             for n, d in ((3, True), (12, True), (3, False), (12, False))],
+            [5.0, 0.0, 10.0, 25.0])
+    v_cta, _ = ns["cerrar_venta"]([item("A1", 2)], mecanico_id=taller, a_la_caja=True)
+    esperar("la venta a una cuenta, cobrada en 3 cuotas: con el de las cuentas",
+            (ns["cobrar_venta"](v_cta, "Tarjeta de crédito", 3)[0],
+             uno("SELECT total FROM ventas WHERE id = ?", v_cta),
+             ns["texto_de_las_cuotas"](2000, de_cuenta=True)),
+            (True, 2100.0, "💳 Con crédito: 3 cuotas de \\$700 (total \\$2.100)"))
+    st.session_state["nivel_usuario"] = "admin"
+    ns["guardar_recargos_por_cuotas"](ns["recargos_por_cuotas"](), aparte=False)
+    st.session_state["nivel_usuario"] = "operador"
+    esperar("destildado, otra vez el del mostrador (y la de las cuentas queda guardada)",
+            (ns["recargo_por_cuotas"]("Tarjeta de crédito", 3, de_cuenta=True),
+             ns["recargos_por_cuotas"](True, la_suya=True)), (10.0, {3: 5.0}))
     c.execute("UPDATE senas SET fecha = datetime('now', '-40 days') WHERE id = ?", (s2,))
     esperar("la que nadie retira hace más de los días elegidos, a la campanita",
             ([x["id"] for x in ns["senas_sin_retirar"]()], ns["senas_sin_retirar"](60)),

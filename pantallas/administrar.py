@@ -906,22 +906,40 @@ if pagina == PAGINAS[3]:
     if sub_admin == SUB_ADMIN[2]:
         # EL RECARGO POR CUOTAS (ver esa sección en logica/ventas.py): el porcentaje de cada
         # cantidad de cuotas. La clave lleva lo guardado: si otro lo cambia, el campo lo trae.
-        _rec = recargos_por_cuotas()
         _exp_rec = st.expander("💳 Recargo por cuotas con tarjeta de crédito",
                                key="exp_recargo_cuotas")
         with _exp_rec:
             st.caption("Lo que se le suma al cobrar con crédito en esa cantidad de cuotas (en 0, "
                        "sin interés). La caja lo muestra antes de cobrar y el comprobante lo dice.")
-            _claves_rec = {}
             _cuotas_rec = [n for n in CUOTAS_POSIBLES if n > 1]
-            for _i in range(0, len(_cuotas_rec), 4):
-                for _col_r, _n in zip(st.columns(4), _cuotas_rec[_i:_i + 4]):
-                    _claves_rec[_n] = f"recargo_cuotas_{_n}_{_rec.get(_n, 0)}"
-                    _col_r.number_input(f"{_n} cuotas (%)", min_value=0.0,
-                                        max_value=RECARGO_MAXIMO, step=1.0,
-                                        value=float(_rec.get(_n, 0.0)), key=_claves_rec[_n])
+
+            def _campos_de_recargo(prefijo, recargos):
+                """Un campo por cantidad de cuotas, de a cuatro. La clave lleva lo guardado:
+                si otro lo cambia, el campo lo trae."""
+                claves = {}
+                for _i in range(0, len(_cuotas_rec), 4):
+                    for _col_r, _n in zip(st.columns(4), _cuotas_rec[_i:_i + 4]):
+                        claves[_n] = f"{prefijo}_{_n}_{recargos.get(_n, 0)}"
+                        _col_r.number_input(f"{_n} cuotas (%)", min_value=0.0,
+                                            max_value=RECARGO_MAXIMO, step=1.0,
+                                            value=float(recargos.get(_n, 0.0)), key=claves[_n])
+                return claves
+            st.markdown("**🧾 Mostrador**")
+            _claves_rec = _campos_de_recargo("recargo_cuotas", recargos_por_cuotas())
+            _aparte_rec = cuentas_con_otro_recargo()
+            _clave_aparte = f"recargo_cuentas_aparte_{_aparte_rec}"
+            st.checkbox("💳 Las cuentas corrientes tienen otro recargo", value=_aparte_rec,
+                        key=_clave_aparte,
+                        help="Para la venta a una cuenta (la de «🧾 Atendiendo a») cobrada con "
+                             "crédito en cuotas. Sin tildar, el mismo que el mostrador.")
+            _claves_cta = None
+            if st.session_state.get(_clave_aparte):
+                st.markdown("**💳 Cuentas corrientes**")
+                _claves_cta = _campos_de_recargo(
+                    "recargo_cuotas_cuentas", recargos_por_cuotas(True, la_suya=True))
             st.button("💾 Guardar los recargos", key="recargo_cuotas_guardar",
-                      on_click=guardar_recargos_y_avisar, args=(_claves_rec,))
+                      on_click=guardar_recargos_y_avisar,
+                      args=(_claves_rec, _claves_cta, _clave_aparte))
         # EN QUÉ PAPEL SALEN EL COMPROBANTE Y LA FACTURA: hoja A4 o ticket de 80 mm (ver «EL
         # TICKET DE 80 MM» en logica/ventas.py). Se elige una vez; los botones son los mismos.
         # El selector muestra SIEMPRE lo guardado (se le pone antes de dibujarlo), y guarda

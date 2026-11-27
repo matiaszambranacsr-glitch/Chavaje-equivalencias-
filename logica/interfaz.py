@@ -609,6 +609,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("💳 Recargo por cuotas para las cuentas corrientes: con «Las cuentas corrientes tienen otro recargo», la venta a una cuenta cobrada con crédito en cuotas usa su propia tabla; sin tildar, la misma que el mostrador.", "🗂️ Administrar → 💬 Mensajería y cobros"),
     ("📅 Cierre del mes: lo que entró por forma de pago, el mes anterior, el mejor día, las salidas, los arqueos con lo que faltó o sobró a cada cajero, y a qué hora y qué día se vende más. Para mandarlo por WhatsApp o bajarlo en Excel (una hoja por cosa, para el contador).", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("🧾 Recibo de pago para las cuentas corrientes: registrado el pago, sale el recibo con el número, cuánto, cómo pagó y el saldo de antes y el de después, para mandárselo por WhatsApp o imprimirlo. Los de antes, en «🧾 Recibos anteriores».", "🗂️ Administrar → 💳 Cuentas corrientes"),
     ("💳 Recargo por cuotas: anotás el porcentaje para cada cantidad de cuotas con tarjeta de crédito y la caja lo suma solo al cobrar, a la vista antes de cobrar y en el comprobante (en 0, sin interés). En Ventas, al lado del total, cuánto queda cada cuota, para decírselo al cliente.", "🗂️ Administrar → 💬 Mensajería y cobros"),

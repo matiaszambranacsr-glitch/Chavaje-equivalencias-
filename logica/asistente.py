@@ -454,7 +454,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "recargo cuotas interes tarjeta credito financiacion 3 6 12 cuotas sin interes porcentaje "
      "coeficiente",
      "El porcentaje de cada cantidad de cuotas se pone en 🗂️ Administrar → 💬 Mensajería y "
-     "cobros, «💳 Recargo por cuotas con tarjeta de crédito» (en 0, sin interés). Al cobrar con "
+     "cobros, «💳 Recargo por cuotas con tarjeta de crédito» (en 0, sin interés). Con «Las "
+     "cuentas corrientes tienen otro recargo», las cuentas tienen su tabla. Al cobrar con "
      "crédito en esas cuotas, la caja lo suma sola y lo muestra antes de cobrar; el comprobante "
      "lo dice. Si se cobró mal, «volver a la caja» lo saca.",
      "🗂️ Administrar", "admin"),

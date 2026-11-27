@@ -7991,7 +7991,11 @@ cuentas aparte. «Volver a la caja» lo saca al centavo, y «cambiar cómo pagó
 cobró con recargo (el cliente que pagó en efectivo quedaba con el recargo cobrado). Lo vendido
 de las comisiones y del objetivo es lo que pagó el cliente, con el recargo. En 🧾 Ventas, abajo del
 total, sale «💳 Con crédito: 3 cuotas de $733 (total $2.200) · …», para contestar «¿y en
-cuotas?» sin calculadora
+cuotas?» sin calculadora. **Las cuentas corrientes pueden tener el suyo** (lo preguntó el dueño:
+«los recargos cambian si es en una cuenta corriente o mostrador común»): con «💳 Las cuentas
+corrientes tienen otro recargo» tildado, la venta a una cuenta —la de «🧾 Atendiendo a»— cobrada
+con crédito en cuotas usa su tabla, y las cuotas de Ventas y la caja lo dicen; sin tildar, la
+misma que el mostrador (la de las cuentas queda guardada para cuando se vuelva a tildar)
 (`recargo_por_cuotas()`, `cobrar_venta()` y `_aplicar_el_descuento()`, en `logica/ventas.py`;
 lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
 

@@ -1470,7 +1470,18 @@ def probar():
     _adm_mes.button(key="recargo_cuotas_guardar").click().run()
     esperar("el recargo de 3 cuotas, puesto desde Administrar",
             (ns["recargos_por_cuotas"](), [e.value for e in _adm_mes.exception]), ({3: 12.5}, []))
-    ns["guardar_config"]("recargos_por_cuotas", "")
+    # Con el tilde, las cuentas corrientes con el suyo.
+    [x for x in _adm_mes.checkbox if (x.key or "").startswith("recargo_cuentas_aparte_")][0] \
+        .check().run()
+    [x for x in _adm_mes.number_input
+     if (x.key or "").startswith("recargo_cuotas_cuentas_3_")][0].set_value(7.0)
+    _adm_mes.button(key="recargo_cuotas_guardar").click().run()
+    esperar("y el de las cuentas corrientes, aparte",
+            (ns["cuentas_con_otro_recargo"](), ns["recargos_por_cuotas"](True),
+             ns["recargos_por_cuotas"]()), (True, {3: 7.0}, {3: 12.5}))
+    for _clave_r in ("recargos_por_cuotas", "recargos_por_cuotas_cuentas",
+                     "recargos_cuentas_aparte"):
+        ns["guardar_config"](_clave_r, "")
     # EL RECIBO DEL PAGO, en 💳 Cuentas corrientes: registrado el pago, sale el recibo.
     _cta_rec = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Sesión'").fetchone()[0]
     _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][6]

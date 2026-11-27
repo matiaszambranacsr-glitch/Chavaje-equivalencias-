@@ -2082,13 +2082,27 @@ def total_con_descuento(venta_id, descuento, recargo=0):
 # ve antes de cobrar. Va como el descuento, sobre el precio de cada cosa: así la factura, la
 # devolución (vuelve lo que pagó) y el comprobante cierran sin cuentas aparte. «Volver a la
 # caja» lo saca, como al descuento. Las cuotas sin interés de una promoción: en 0.
+# Y LAS CUENTAS CORRIENTES, CON EL SUYO: lo preguntó el dueño («los recargos cambian si es en una
+# cuenta corriente o mostrador común»). Con «Las cuentas corrientes tienen otro recargo»
+# prendido, la venta a una cuenta (la de «🧾 Atendiendo a») usa su tabla; apagado, la misma que
+# el mostrador.
 RECARGO_MAXIMO = 100.0
+CLAVE_DE_LOS_RECARGOS = {False: "recargos_por_cuotas", True: "recargos_por_cuotas_cuentas"}
+CLAVE_DE_OTRO_RECARGO_PARA_CUENTAS = "recargos_cuentas_aparte"
 
 
-def recargos_por_cuotas():
-    """{cuotas: porcentaje} de las que tienen recargo (un pago, nunca)."""
+def cuentas_con_otro_recargo():
+    """¿Las cuentas corrientes tienen su propia tabla de recargos?"""
+    return obtener_config(CLAVE_DE_OTRO_RECARGO_PARA_CUENTAS, "") == "1"
+
+
+def recargos_por_cuotas(de_cuenta=False, la_suya=False):
+    """{cuotas: porcentaje} de las que tienen recargo (un pago, nunca): las del mostrador, o las
+    de las cuentas corrientes si tienen la suya. `la_suya`: la tabla de las cuentas aunque esté
+    apagada (para mostrarla en Administrar)."""
+    de_cuenta = bool(de_cuenta) and (la_suya or cuentas_con_otro_recargo())
     try:
-        datos = json.loads(obtener_config("recargos_por_cuotas", "") or "{}")
+        datos = json.loads(obtener_config(CLAVE_DE_LOS_RECARGOS[de_cuenta], "") or "{}")
     except ValueError:
         return {}
     salida = {}
@@ -2102,17 +2116,19 @@ def recargos_por_cuotas():
     return salida
 
 
-def recargo_por_cuotas(forma_de_pago, cuotas):
-    """El porcentaje que se le suma a un cobro: solo con crédito y en cuotas que lo tengan."""
+def recargo_por_cuotas(forma_de_pago, cuotas, de_cuenta=False):
+    """El porcentaje que se le suma a un cobro: solo con crédito y en cuotas que lo tengan. A una
+    cuenta corriente, el de las cuentas (si lo tienen aparte)."""
     if forma_de_pago != "Tarjeta de crédito":
         return 0.0
-    return recargos_por_cuotas().get(int(cuotas or 1), 0.0)
+    return recargos_por_cuotas(de_cuenta).get(int(cuotas or 1), 0.0)
 
 
-def texto_de_las_cuotas(total):
+def texto_de_las_cuotas(total, de_cuenta=False):
     """«💳 3 cuotas de $733 (total $2.200) · 12 cuotas de $208 (…)»: lo que el vendedor le dice
-    al cliente que pregunta «¿y en cuotas?», con los recargos anotados. "" si no hay ninguno."""
-    recargos = recargos_por_cuotas()
+    al cliente que pregunta «¿y en cuotas?», con los recargos anotados (los de las cuentas, si
+    es a una cuenta y las tienen aparte). "" si no hay ninguno."""
+    recargos = recargos_por_cuotas(de_cuenta)
     if not recargos or not total:
         return ""
     partes = []
@@ -2123,9 +2139,15 @@ def texto_de_las_cuotas(total):
     return "💳 Con crédito: " + " · ".join(partes)
 
 
-def guardar_recargos_por_cuotas(recargos):
-    """{cuotas: porcentaje}; en 0 no tiene. Lo cambia el administrador; queda en el registro."""
+def guardar_recargos_por_cuotas(recargos, de_cuenta=False, aparte=None):
+    """{cuotas: porcentaje}; en 0 no tiene. `de_cuenta`: la tabla de las cuentas corrientes;
+    `aparte` (True/False): si las cuentas usan la suya. Lo cambia el administrador; queda en el
+    registro."""
     exigir_nivel("admin", "cambiar el recargo por cuotas")
+    if aparte is not None and bool(aparte) != cuentas_con_otro_recargo():
+        guardar_config(CLAVE_DE_OTRO_RECARGO_PARA_CUENTAS, "1" if aparte else "0")
+        anotar_cambio("cambió si las cuentas tienen otro recargo", "configuración",
+                      CLAVE_DE_OTRO_RECARGO_PARA_CUENTAS, antes=not aparte, despues=bool(aparte))
     nuevos = {}
     for k, v in (recargos or {}).items():
         cuotas, por_ciento = int(k), round(float(v or 0), 2)
@@ -2135,23 +2157,37 @@ def guardar_recargos_por_cuotas(recargos):
             raise ValueError(f"El recargo tiene que ser entre 0 y {miles(RECARGO_MAXIMO, 0)}%.")
         if por_ciento:
             nuevos[cuotas] = por_ciento
-    antes = recargos_por_cuotas()
+    antes = recargos_por_cuotas(de_cuenta, la_suya=True)
     if nuevos != antes:
-        guardar_config("recargos_por_cuotas",
+        guardar_config(CLAVE_DE_LOS_RECARGOS[bool(de_cuenta)],
                        json.dumps({str(k): v for k, v in sorted(nuevos.items())}))
-        anotar_cambio("cambió el recargo por cuotas", "configuración", "recargos_por_cuotas",
-                      antes=antes, despues=nuevos)
+        anotar_cambio("cambió el recargo por cuotas", "configuración",
+                      CLAVE_DE_LOS_RECARGOS[bool(de_cuenta)], antes=antes, despues=nuevos)
     return nuevos
 
 
-def guardar_recargos_y_avisar(claves):
-    """«💾 Guardar los recargos» (va como on_click): `claves` es {cuotas: clave del campo}."""
+def _texto_de_los_recargos(recargos):
+    return (", ".join(f"{n} cuotas {como_porcentaje(p)}%" for n, p in sorted(recargos.items()))
+            or "ninguno (todas sin interés)")
+
+
+def guardar_recargos_y_avisar(claves, claves_cuentas=None, clave_aparte=None):
+    """«💾 Guardar los recargos» (va como on_click): `claves` es {cuotas: clave del campo} del
+    mostrador; `claves_cuentas`, las de las cuentas corrientes, y `clave_aparte`, la del tilde
+    «Las cuentas corrientes tienen otro recargo»."""
     try:
+        aparte = bool(st.session_state.get(clave_aparte)) if clave_aparte else None
         nuevos = guardar_recargos_por_cuotas(
-            {n: st.session_state.get(k) or 0 for n, k in claves.items()})
-        aviso = ("success", "💳 Recargo por cuotas: " + (
-            ", ".join(f"{n} cuotas {como_porcentaje(p)}%" for n, p in sorted(nuevos.items()))
-            or "ninguno (todas sin interés)") + ".")
+            {n: st.session_state.get(k) or 0 for n, k in claves.items()}, aparte=aparte)
+        texto = "💳 Recargo por cuotas: " + _texto_de_los_recargos(nuevos) + "."
+        if aparte and claves_cuentas:
+            de_cuentas = guardar_recargos_por_cuotas(
+                {n: st.session_state.get(k) or 0 for n, k in claves_cuentas.items()},
+                de_cuenta=True)
+            texto += " Cuentas corrientes: " + _texto_de_los_recargos(de_cuentas) + "."
+        elif clave_aparte:
+            texto += " Las cuentas corrientes, el mismo."
+        aviso = ("success", texto)
     except (PermissionError, ValueError) as _err:
         aviso = ("warning", el_error_en_castellano(_err))
     avisar(*aviso)
@@ -2197,7 +2233,10 @@ def cobrar_venta(venta_id, forma_de_pago, cuotas=1, descuento=0):
         descuento = _descuento_valido(descuento, DESCUENTO_MAXIMO_EN_LA_CAJA)
     except ValueError as e:
         return False, str(e)
-    recargo = recargo_por_cuotas(forma_de_pago, cuotas)
+    # El de las cuentas corrientes si es a una cuenta (ver «EL RECARGO POR CUOTAS»).
+    _de_cuenta = c.execute("SELECT mecanico_id FROM ventas WHERE id = ?", (venta_id,)).fetchone()
+    recargo = recargo_por_cuotas(forma_de_pago, cuotas,
+                                 de_cuenta=bool(_de_cuenta and _de_cuenta["mecanico_id"]))
     with db_lock, transaccion():
         # Se marca cobrada SOLO si seguía esperando: dos cajeros con la misma venta en pantalla
         # no la cobran dos veces.

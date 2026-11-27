@@ -54,12 +54,14 @@ if pagina == PAGINAS[11]:
                                 max_value=DESCUENTO_MAXIMO_EN_LA_CAJA, value=0.0, step=1.0,
                                 key=f"cobro_descuento_{venta_id}")
         # EL RECARGO POR CUOTAS (ver esa sección en logica/ventas.py), a la vista antes de cobrar.
-        _recargo = recargo_por_cuotas(_forma, _cuotas)
+        _recargo = recargo_por_cuotas(_forma, _cuotas, de_cuenta=bool(_v.get("mecanico_id")))
         _total = total_con_descuento(venta_id, _desc, _recargo)
         # «\$»: dos «$» en un mismo texto se leen como una fórmula y se pierden los dos.
         st.markdown(f"### Total: \\${miles(_total, 0)}")
         if _recargo:
-            st.caption(f"💳 Con {como_porcentaje(_recargo)}% de recargo por {_cuotas} cuotas.")
+            st.caption(f"💳 Con {como_porcentaje(_recargo)}% de recargo por {_cuotas} cuotas"
+                       + (" (el de las cuentas corrientes)." if _v.get("mecanico_id")
+                          and cuentas_con_otro_recargo() else "."))
         # LA SEÑA que ya dejó (ver «LAS SEÑAS»): se cobra lo que falta; de ahí el vuelto.
         if _v.get("sena"):
             st.markdown(f"🔖 Ya dejó \\${miles(_v['sena'], 0)} de seña: **cobrar "
