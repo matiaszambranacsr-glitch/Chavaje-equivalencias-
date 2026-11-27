@@ -435,6 +435,14 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("cierre_mes", "Ver el cierre del mes (y a qué hora se vende más)",
+     "cierre mes mensual resumen del mes contador excel arqueos faltante sobrante cajero "
+     "cajera hora horario dia semana cuando se vende mas pico",
+     "En la caja, abrí «📋 Ventas y cierre de caja» y tocá «📅 Cierre del mes»: elegís el mes y "
+     "sale lo que entró por forma de pago, el mes anterior, el mejor día, las salidas, lo que "
+     "faltó o sobró a cada cajero en los arqueos, y a qué hora y qué día se vende más. Se manda "
+     "por WhatsApp o se baja en Excel para el contador. Solo el administrador.",
+     "💵 Caja", "admin"),
     ("recibo", "Darle el recibo a un taller que pagó",
      "recibo recibos comprobante de pago pago pagó pagaron constancia taller cuenta corriente "
      "entrego",

@@ -2936,6 +2936,32 @@ def quitar_id(filas):
             for f in filas_con_el_precio_para_el_cliente(filas)]
 
 
+def excel_de_varias_hojas(hojas):
+    """Un .xlsx en memoria con una hoja por cada {nombre: [dict]} (en ese orden). Lo que empieza
+    con «=» va como texto, como en to_excel_bytes()."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    for nombre, filas in hojas.items():
+        ws = wb.create_sheet(str(nombre)[:31])
+        if not filas:
+            ws.append(["(nada)"])
+            continue
+        columnas = list(filas[0].keys())
+        ws.append(columnas)
+        for renglon, fila in enumerate(filas, start=2):
+            valores = [fila.get(col, "") for col in columnas]
+            ws.append(valores)
+            for columna, valor in enumerate(valores, start=1):
+                if isinstance(valor, str) and valor.startswith("="):
+                    ws.cell(row=renglon, column=columna).data_type = "s"
+    if not wb.sheetnames:
+        wb.create_sheet("Resultados")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def to_excel_bytes(filas, columnas=None):
     """Genera un archivo .xlsx en memoria a partir de una lista de diccionarios."""
     from openpyxl import Workbook           # recién acá: ver el comentario en base.py

@@ -332,7 +332,58 @@ if pagina == PAGINAS[11]:
                                    key=f"walink__{_clave_sem}")
             # EL MES POR VENDEDOR, hasta el día elegido (ver ventas_por_vendedor()): para las
             # comisiones. Solo el administrador. Perezoso: es una consulta del mes.
+            # EL CIERRE DEL MES (ver esa sección en logica/ventas.py): lo de todos los días del
+            # mes junto, las salidas, los arqueos por cajero y cuándo se vende. Perezoso.
             if es_admin():
+                _pop_cm = st.popover("📅 Cierre del mes", key="pop_cierre_del_mes",
+                                     width="stretch", on_change="rerun")
+                if _pop_cm.open:
+                    with _pop_cm:
+                        _mes_cm = st.selectbox("Mes:", meses_para_elegir(), key="cierre_mes_mes",
+                                               format_func=nombre_del_mes)  # rótulo fijo
+                        _cm = cierre_del_mes(_mes_cm)
+                        _q_cm = fila_de_numeros(3)
+                        _q_cm[0].metric("💵 Entró", f"${miles(_cm['total'], 0)}",
+                                        help="Lo cobrado en el mes, por día de cobro: sin lo "
+                                             "anulado, menos lo devuelto, con las señas que "
+                                             "entraron.")
+                        _q_cm[1].metric("🧾 Ventas", miles(_cm["ventas"]),
+                                        help=f"En {miles(_cm['dias'])} día(s) con ventas.")
+                        _q_cm[2].metric("📈 Mes anterior", f"${miles(_cm['anterior'], 0)}",
+                                        help="Lo vendido el mes anterior, entero (sin lo "
+                                             "anulado y con lo devuelto descontado).")
+                        if _cm["por_forma"]:
+                            st.caption(" · ".join(f"{f}: \\${miles(t, 0)}"
+                                                  for f, t in _cm["por_forma"]))
+                        if _cm["salidas"]:
+                            st.caption("💸 Salidas: " + " · ".join(
+                                f"{t}: \\${miles(x, 0)}" for t, _n, x in _cm["salidas"]))
+                        if _cm["arqueos"]:
+                            st.markdown("**🧮 Arqueos por cajero** (el último de cada día)")
+                            st.dataframe([{**a, "Faltó": f"${miles(a['Faltó'], 0)}",
+                                           "Sobró": f"${miles(a['Sobró'], 0)}"}
+                                          for a in _cm["arqueos"]],
+                                         hide_index=True, width="stretch")
+                        if _cm["cuando"]["por_hora"]:
+                            st.markdown("**🕐 Cuándo se vende** (cantidad de ventas)")
+                            grafico_de_barras([f"{h} h" for h, _n, _t in _cm["cuando"]["por_hora"]],
+                                              [n for _h, n, _t in _cm["cuando"]["por_hora"]],
+                                              "Hora", "Ventas", alto=180)
+                            grafico_de_barras([d for d, _n, _t in _cm["cuando"]["por_dia"]],
+                                              [n for _d, n, _t in _cm["cuando"]["por_dia"]],
+                                              "Día", "Ventas", alto=180)
+                        _texto_cm = texto_del_cierre_del_mes(_cm, con_ganancia=True)
+                        _cm1, _cm2 = cols([1, 1])
+                        _cm1.link_button("📲 Mandarlo por WhatsApp",
+                                         link_de_whatsapp(whatsapp_del_duenio(), _texto_cm),
+                                         width="stretch")
+                        _cm2.download_button("⬇️ El mes en Excel",
+                                             data=cierre_del_mes_para_descargar(
+                                                 _mes_cm, con_ganancia=True),
+                                             file_name=f"cierre_{_mes_cm}.xlsx",
+                                             key="cierre_mes_excel", width="stretch",
+                                             mime="application/vnd.openxmlformats-"
+                                                  "officedocument.spreadsheetml.sheet")
                 _pop_mes = st.popover("🏆 Ventas y comisiones por vendedor",
                                       key="pop_mes_por_vendedor",
                                       width="stretch", on_change="rerun")

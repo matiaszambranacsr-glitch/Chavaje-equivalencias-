@@ -3439,3 +3439,200 @@ def devolver_sena_y_avisar(sena_id):
     except PermissionError as _err:
         ok, texto = False, el_error_en_castellano(_err)
     avisar("success" if ok else "warning", texto)
+
+
+# EL CIERRE DEL MES: el cierre de caja es de un día, y para el mes —lo que se le pasa al contador,
+# lo que mira el dueño para decidir— había que sumar treinta cierres a mano, más las salidas y
+# los arqueos. Junta los cierres de cada día del mes (los mismos números: devoluciones y señas
+# incluidas), las salidas por tipo, los arqueos con sus diferencias por cajero (el último de cada
+# día, que es el que cierra), lo anulado, el mes anterior al lado, y cuándo se vende: por hora y
+# por día de la semana, para decidir horarios y quién atiende. Para WhatsApp y en Excel, con una
+# hoja por cosa. Solo el administrador.
+NOMBRES_DE_LOS_DIAS_DE_LA_SEMANA = ("domingo", "lunes", "martes", "miércoles", "jueves",
+                                    "viernes", "sábado")
+
+
+def _dias_del_rango(desde, hasta):
+    d, fin = date.fromisoformat(desde), date.fromisoformat(hasta)
+    while d <= fin:
+        yield d.isoformat()
+        d += timedelta(days=1)
+
+
+def cuando_se_vende(desde, hasta):
+    """{por_hora: [(«09», ventas, total)], por_dia: [(«lunes», ventas, total)]} de las ventas sin
+    anular entre dos días de acá, por la hora de acá en que se armaron."""
+    filas = c.execute("""SELECT strftime('%H', fecha, '-3 hours') AS hora,
+                                CAST(strftime('%w', fecha, '-3 hours') AS INTEGER) AS dia,
+                                COUNT(*) AS ventas, COALESCE(SUM(total), 0) AS total
+                         FROM ventas WHERE anulada = 0
+                           AND date(fecha, '-3 hours') BETWEEN ? AND ?
+                         GROUP BY hora, dia""", (desde, hasta)).fetchall()
+    por_hora, por_dia = {}, {}
+    for f in filas:
+        h = por_hora.setdefault(f["hora"], [0, 0.0])
+        h[0] += f["ventas"]
+        h[1] += f["total"]
+        d = por_dia.setdefault(f["dia"], [0, 0.0])
+        d[0] += f["ventas"]
+        d[1] += f["total"]
+    # La semana desde el lunes, que es como se piensa en el mostrador.
+    return {"por_hora": [(h, n, round(t, 2)) for h, (n, t) in sorted(por_hora.items())],
+            "por_dia": [(NOMBRES_DE_LOS_DIAS_DE_LA_SEMANA[d], *(lambda x: (x[0], round(x[1], 2)))(
+                por_dia[d])) for d in (1, 2, 3, 4, 5, 6, 0) if d in por_dia]}
+
+
+def arqueos_por_cajero(desde, hasta):
+    """[{Cajero, Arqueos, «Con diferencia», Faltó, Sobró}] con el último arqueo de cada día (el
+    que cierra), el que más faltó primero."""
+    filas = c.execute("""SELECT a.dia, a.usuario, a.efectivo_contado - a.efectivo_esperado AS dif
+                         FROM arqueos_de_caja a
+                         WHERE a.dia BETWEEN ? AND ?
+                           AND a.id = (SELECT MAX(b.id) FROM arqueos_de_caja b
+                                       WHERE b.dia = a.dia)""", (desde, hasta)).fetchall()
+    cajeros = {}
+    for f in filas:
+        k = cajeros.setdefault(f["usuario"] or "Sin decir", {
+            "Cajero": f["usuario"] or "Sin decir", "Arqueos": 0, "Con diferencia": 0,
+            "Faltó": 0.0, "Sobró": 0.0})
+        dif = round(float(f["dif"] or 0), 2)
+        k["Arqueos"] += 1
+        k["Con diferencia"] += bool(dif)
+        k["Faltó" if dif < 0 else "Sobró"] = round(k["Faltó" if dif < 0 else "Sobró"]
+                                                   + abs(dif), 2)
+    return sorted(cajeros.values(), key=lambda k: (-k["Faltó"], k["Cajero"]))
+
+
+def cierre_del_mes(mes, hoy=None):
+    """Todo lo del mes (el de ahora, hasta hoy): dict con desde, hasta, total, ventas, por_forma
+    [(forma, total)], devuelto, señas (entraron, devueltas, descontadas), anuladas, ganancia e
+    items_con_costo, salidas [(tipo, n, total)], arqueos (ver arqueos_por_cajero()), dias (los
+    que vendieron), mejor_dia (día, total), anterior (el total del mes anterior) y cuando (ver
+    cuando_se_vende())."""
+    exigir_nivel("admin", "ver el cierre del mes")
+    desde, hasta = rango_del_mes(mes, hoy)
+    por_forma, por_dia = {}, {}
+    suma = {k: 0.0 for k in ("total", "total_devuelto", "total_senas", "total_senas_devueltas",
+                             "senas_descontadas", "total_anulado", "ganancia")}
+    cuentas = {k: 0 for k in ("ventas", "anuladas", "items", "items_con_costo")}
+    for dia in _dias_del_rango(desde, hasta):
+        caja = cierre_de_caja(dia)
+        for k in suma:
+            suma[k] += caja[k]
+        for k in cuentas:
+            cuentas[k] += caja[k]
+        for forma, _n, total in caja["por_forma"]:
+            por_forma[forma] = por_forma.get(forma, 0.0) + total
+        if caja["ventas"]:
+            por_dia[dia] = caja["total"]
+    salidas = [(f["tipo"] or "Sin decir", f["n"], round(float(f["total"]), 2)) for f in c.execute(
+        """SELECT tipo, COUNT(*) AS n, SUM(importe) AS total FROM salidas_de_caja
+           WHERE anulada = 0 AND dia BETWEEN ? AND ? GROUP BY tipo ORDER BY total DESC""",
+        (desde, hasta))]
+    anterior_hasta = date.fromisoformat(desde) - timedelta(days=1)
+    anterior = round(sum(x["Vendido"] for x in ventas_por_vendedor(
+        anterior_hasta.replace(day=1).isoformat(), anterior_hasta.isoformat())), 2)
+    mejor = max(por_dia.items(), key=lambda x: x[1]) if por_dia else None
+    return {"mes": mes, "desde": desde, "hasta": hasta,
+            **{k: round(v, 2) for k, v in suma.items()}, **cuentas,
+            "por_forma": sorted(((f, round(t, 2)) for f, t in por_forma.items() if round(t, 2)),
+                                key=lambda x: -x[1]),
+            "salidas": salidas, "total_salidas": round(sum(x[2] for x in salidas), 2),
+            "arqueos": arqueos_por_cajero(desde, hasta), "dias": len(por_dia),
+            "mejor_dia": mejor, "anterior": anterior,
+            "cuando": cuando_se_vende(desde, hasta)}
+
+
+def texto_del_cierre_del_mes(cierre, con_ganancia=False):
+    """El cierre del mes para mandar por WhatsApp."""
+    plata = lambda x: f"${miles(x, 0)}"
+    r = [f"📅 Cierre de {nombre_del_mes(cierre['mes'])} — El Chavo"
+         + (f" (hasta el {cierre['hasta'][8:10]}/{cierre['hasta'][5:7]})"
+            if cierre["hasta"] < rango_del_mes(cierre["mes"], date(2100, 1, 1))[1] else ""),
+         f"💵 Entró: {plata(cierre['total'])} en {miles(cierre['ventas'])} venta(s), "
+         f"{miles(cierre['dias'])} día(s) con ventas"]
+    r += [f"   · {forma}: {plata(total)}" for forma, total in cierre["por_forma"]]
+    if cierre["anterior"]:
+        r.append(f"📈 Mes anterior (vendido): {plata(cierre['anterior'])}")
+    if cierre["mejor_dia"]:
+        d, t = cierre["mejor_dia"]
+        r.append(f"🏅 Mejor día: {d[8:10]}/{d[5:7]} con {plata(t)}")
+    if con_ganancia and cierre["items_con_costo"]:
+        r.append(f"💰 Ganancia estimada: {plata(cierre['ganancia'])} (de lo que tiene costo)")
+    if cierre["total_devuelto"]:
+        r.append(f"↩️ Devuelto: {plata(cierre['total_devuelto'])}")
+    if cierre["total_senas"] or cierre["senas_descontadas"]:
+        r.append(f"🔖 Señas: entraron {plata(cierre['total_senas'])}, descontadas al retirar "
+                 f"{plata(cierre['senas_descontadas'])}")
+    if cierre["salidas"]:
+        r.append(f"💸 Salidas de caja: {plata(cierre['total_salidas'])} ("
+                 + ", ".join(f"{t}: {plata(x)}" for t, _n, x in cierre["salidas"]) + ")")
+    if cierre["anuladas"]:
+        r.append(f"🚫 Anuladas: {miles(cierre['anuladas'])} ({plata(cierre['total_anulado'])})")
+    faltas = [a for a in cierre["arqueos"] if a["Faltó"] or a["Sobró"]]
+    if faltas:
+        r.append("🧮 Arqueos: " + " · ".join(
+            f"{a['Cajero']}: " + ", ".join(x for x in (
+                f"faltó {plata(a['Faltó'])}" if a["Faltó"] else "",
+                f"sobró {plata(a['Sobró'])}" if a["Sobró"] else "") if x) for a in faltas))
+    return "\n".join(r)
+
+
+def excel_del_cierre_del_mes(mes, hoy=None, con_ganancia=False):
+    """Los datos del Excel del mes, leídos ahora: {hoja: [dict]} para excel_de_varias_hojas()
+    (Resumen, Ventas, Salidas, Señas, Arqueos y Devoluciones)."""
+    cierre = cierre_del_mes(mes, hoy)
+    desde, hasta = cierre["desde"], cierre["hasta"]
+    resumen = [{"Qué": a, "Cuánto": b} for a, b in (
+        [("Entró (total)", cierre["total"]), ("Ventas", cierre["ventas"])]
+        + [(f"Por {f}", t) for f, t in cierre["por_forma"]]
+        + [("Devuelto", cierre["total_devuelto"]), ("Señas que entraron", cierre["total_senas"]),
+           ("Señas descontadas al retirar", cierre["senas_descontadas"]),
+           ("Señas devueltas", cierre["total_senas_devueltas"]),
+           ("Salidas de caja", cierre["total_salidas"]), ("Anuladas", cierre["anuladas"]),
+           ("Mes anterior (vendido)", cierre["anterior"])]
+        + ([("Ganancia estimada (de lo que tiene costo)", cierre["ganancia"])]
+           if con_ganancia else []))]
+    ventas = [{"Día": dia_de_aca(f["cuando"]), "#": f["id"], "Vendió": f["usuario"] or "",
+               "Cliente": f["cliente"] or f["cuenta"] or "", "Pago": f["forma_de_pago"] or "",
+               "Cuotas": f["cuotas"] or 1, "Descuento %": f["descuento"] or 0,
+               "Recargo %": f["recargo"] or 0, "Seña": f["sena"] or 0, "Total": f["total"] or 0,
+               "Anulada": "sí" if f["anulada"] else ""}
+              for f in c.execute(
+                  """SELECT v.id, COALESCE(v.cobrada_en, v.fecha) AS cuando, v.usuario, v.cliente,
+                            k.nombre AS cuenta, v.forma_de_pago, v.cuotas, v.descuento,
+                            v.recargo, v.sena, v.total, v.anulada
+                     FROM ventas v LEFT JOIN mecanicos k ON k.id = v.mecanico_id
+                     WHERE COALESCE(v.cobrada, 1) = 1
+                       AND date(COALESCE(v.cobrada_en, v.fecha), '-3 hours') BETWEEN ? AND ?
+                     ORDER BY v.id""", (desde, hasta))]
+    salidas = [{"Día": f["dia"], "Tipo": f["tipo"] or "", "En qué": f["concepto"] or "",
+                "Importe": f["importe"], "Quién": f["usuario"] or "",
+                "Anulada": "sí" if f["anulada"] else ""} for f in c.execute(
+        "SELECT * FROM salidas_de_caja WHERE dia BETWEEN ? AND ? ORDER BY id", (desde, hasta))]
+    senas = [{"Día": dia_de_aca(f["fecha"]), "Cliente": f["cliente"] or f["telefono"] or "",
+              "Qué": f["que"], "Importe": f["importe"], "Pago": f["forma_de_pago"],
+              "Estado": ESTADOS_DE_LA_SENA.get(f["estado"], f["estado"]),
+              "Venta": f["venta_id"] or ""} for f in c.execute(
+        """SELECT * FROM senas WHERE date(fecha, '-3 hours') BETWEEN ? AND ?
+              OR date(resuelta_en, '-3 hours') BETWEEN ? AND ? ORDER BY id""",
+        (desde, hasta, desde, hasta))]
+    arqueos = [{"Día": f["dia"], "Esperado": f["efectivo_esperado"],
+                "Contado": f["efectivo_contado"],
+                "Diferencia": round((f["efectivo_contado"] or 0) - (f["efectivo_esperado"] or 0),
+                                    2), "Nota": f["nota"] or "", "Quién": f["usuario"] or ""}
+               for f in c.execute("SELECT * FROM arqueos_de_caja WHERE dia BETWEEN ? AND ? "
+                                  "ORDER BY id", (desde, hasta))]
+    devoluciones = [{"Día": dia, "De la venta": d["venta_id"],
+                     "Qué": f"{d['cantidad']}× {d['marca']} {d['codigo']}",
+                     "Importe": d["importe"], "Pago": d["forma_de_pago"] or "",
+                     "Quién": d["usuario"] or ""}
+                    for dia in _dias_del_rango(desde, hasta) for d in devoluciones_del_dia(dia)]
+    return {"Resumen": resumen, "Ventas": ventas, "Salidas": salidas, "Señas": senas,
+            "Arqueos": arqueos, "Devoluciones": devoluciones}
+
+
+def cierre_del_mes_para_descargar(mes, con_ganancia=False):
+    """Para el botón de descarga: los datos se leen ahora; el Excel se arma al tocarlo."""
+    hojas = excel_del_cierre_del_mes(mes, con_ganancia=con_ganancia)
+    return lambda: excel_de_varias_hojas(hojas)

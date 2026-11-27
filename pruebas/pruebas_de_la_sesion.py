@@ -1449,6 +1449,18 @@ def probar():
             ([t.startswith("🎯 Objetivo del mes: ") and "$" not in t for t in _barra(vta)],
              [x for x in vta.number_input if (x.key or "").startswith("objetivo_")]),
             ([True], []))
+    # EL CIERRE DEL MES, en el mismo lugar: los números, cuándo se vende y el Excel.
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_mes_por_vendedor"] = False
+    _adm_mes.session_state["pop_cierre_del_mes"] = True
+    _adm_mes.run()
+    esperar("el cierre del mes: lo que entró, cuándo se vende y el Excel",
+            ([m.label for m in _adm_mes.metric if m.label in ("💵 Entró", "📈 Mes anterior")],
+             any("Cuándo se vende" in m.value for m in _adm_mes.markdown),
+             [x.proto.label for x in _adm_mes.get("download_button")
+              if x.proto.label == "⬇️ El mes en Excel"], [e.value for e in _adm_mes.exception]),
+            (["💵 Entró", "📈 Mes anterior"], True, ["⬇️ El mes en Excel"], []))
+    _adm_mes.session_state["pop_cierre_del_mes"] = False
     # EL RECARGO POR CUOTAS se pone en Administrar → 💬 Mensajería y cobros.
     _adm_mes.session_state["pagina_actual"] = "🗂️ Administrar"
     _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][2]

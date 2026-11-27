@@ -7946,6 +7946,23 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 📅 El cierre del mes, los arqueos por cajero y cuándo se vende
+
+El cierre de caja es de un día; para el mes —lo que se le pasa al contador, lo que mira el dueño
+para decidir— había que sumar treinta cierres a mano, más las salidas y los arqueos. En 💵 Caja →
+«📋 Ventas y cierre de caja», **«📅 Cierre del mes»** (solo el administrador; el mes se elige,
+el de ahora llega a hoy) junta los cierres de cada día —los mismos números: lo cobrado por día
+de cobro, sin lo anulado, menos lo devuelto y con las señas—, por forma de pago, cuántas ventas
+y en cuántos días, el mejor día, lo vendido el mes anterior, las salidas por tipo y **los
+arqueos por cajero**: con el último arqueo de cada día (el que cierra), cuántos tuvieron
+diferencia y cuánto faltó o sobró a cada uno, el que más faltó primero. Y **🕐 cuándo se vende**:
+las ventas por hora y por día de la semana (en hora de acá), para decidir horarios y quién
+atiende. «📲 Mandarlo por WhatsApp» va al WhatsApp del dueño, y **«⬇️ El mes en Excel»** trae
+una hoja por cosa (Resumen, Ventas con cuotas, descuento, recargo y seña, Salidas, Señas,
+Arqueos y Devoluciones) para el contador (`cierre_del_mes()`, `arqueos_por_cajero()`,
+`cuando_se_vende()` y `excel_del_cierre_del_mes()`, en `logica/ventas.py`; lo controlan
+`pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`).
+
 ## 🧾 El recibo del pago de una cuenta
 
 El taller que pagaba su cuenta se iba sin papel, y a fin de mes se discutía «yo te pagué 50 mil

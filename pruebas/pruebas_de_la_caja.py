@@ -802,6 +802,52 @@ def probar(L):
     esperar("en el resumen del día",
             "🔖 Señas: entraron $" in ns["resumen_del_dia"](), True)
     esperar("las que esperan: la de la óptica", [x["id"] for x in ns["senas_activas"]()], [s2])
+    # EL CIERRE DEL MES: los cierres de cada día juntos, las salidas, los arqueos por cajero (el
+    # último de cada día) y cuándo se vende. Febrero de 2025 tiene las ventas de la prueba del
+    # objetivo: la del 5 (las 12 de acá), una anulada, y la del 28 a las 23 de acá.
+    st.session_state["nivel_usuario"] = "admin"
+    for _dia_a, _esp, _cont, _quien in (("2025-02-05", 1000, 900, "ana"),
+                                        ("2025-02-05", 1000, 1000, "beto"),
+                                        ("2025-02-10", 2000, 1500, "ana"),
+                                        ("2025-02-11", 500, 600, "beto")):
+        c.execute("INSERT INTO arqueos_de_caja (dia, efectivo_esperado, efectivo_contado, "
+                  "usuario) VALUES (?, ?, ?, ?)", (_dia_a, _esp, _cont, _quien))
+    c.execute("INSERT INTO salidas_de_caja (dia, tipo, concepto, importe, usuario) VALUES "
+              "('2025-02-07', '🧾 Gasto', 'flete', 250, 'ana')")
+    _cm = ns["cierre_del_mes"]("2025-02", hoy=_fecha(2025, 3, 15))
+    esperar("el mes: lo que entró, por forma, los días, el mejor y las salidas",
+            {k: _cm[k] for k in ("desde", "hasta", "total", "ventas", "anuladas", "por_forma",
+                                 "dias", "mejor_dia", "salidas", "anterior")},
+            {"desde": "2025-02-01", "hasta": "2025-02-28", "total": 1300000.0, "ventas": 2,
+             "anuladas": 1, "por_forma": [("Efectivo", 1300000.0)], "dias": 2,
+             "mejor_dia": ("2025-02-05", 1000000.0), "salidas": [("🧾 Gasto", 1, 250.0)],
+             "anterior": 0.0})
+    esperar("los arqueos por cajero: el último de cada día",
+            _cm["arqueos"], [{"Cajero": "ana", "Arqueos": 1, "Con diferencia": 1, "Faltó": 500.0,
+                              "Sobró": 0.0},
+                             {"Cajero": "beto", "Arqueos": 2, "Con diferencia": 1, "Faltó": 0.0,
+                              "Sobró": 100.0}])
+    esperar("cuándo se vende: por la hora y el día de acá, sin lo anulado",
+            _cm["cuando"], {"por_hora": [("12", 1, 1000000.0), ("23", 1, 300000.0)],
+                            "por_dia": [("miércoles", 1, 1000000.0), ("viernes", 1, 300000.0)]})
+    _texto_cm = ns["texto_del_cierre_del_mes"](_cm)
+    esperar("para WhatsApp",
+            (_texto_cm.startswith("📅 Cierre de febrero 2025 — El Chavo\n💵 Entró: $1.300.000 "
+                                  "en 2 venta(s), 2 día(s) con ventas"),
+             "🏅 Mejor día: 05/02 con $1.000.000" in _texto_cm,
+             "🧮 Arqueos: ana: faltó $500 · beto: sobró $100" in _texto_cm,
+             "Ganancia" in _texto_cm), (True, True, True, False))
+    _hojas = ns["excel_del_cierre_del_mes"]("2025-02", hoy=_fecha(2025, 3, 15))
+    esperar("el Excel: una hoja por cosa, con la anulada marcada",
+            (list(_hojas), [(v["Total"], v["Anulada"]) for v in _hojas["Ventas"]],
+             len(_hojas["Arqueos"]), ns["excel_de_varias_hojas"](_hojas)[:2]),
+            (["Resumen", "Ventas", "Salidas", "Señas", "Arqueos", "Devoluciones"],
+             [(1000000.0, ""), (500000.0, "sí"), (300000.0, "")], 4, b"PK"))
+    esperar("este mes, lo mismo que los cierres de cada día",
+            ns["cierre_del_mes"](ns["hoy_aca"]().strftime("%Y-%m"))["total"],
+            round(sum(ns["cierre_de_caja"](d)["total"] for d in ns["_dias_del_rango"](
+                *ns["rango_del_mes"](ns["hoy_aca"]().strftime("%Y-%m")))), 2))
+    st.session_state["nivel_usuario"] = "operador"
     # EL RECARGO POR CUOTAS: el administrador lo pone por cantidad de cuotas; la caja lo aplica
     # al cobrar con crédito en cuotas (sobre cada precio, como el descuento) y «volver a la caja»
     # lo saca.
@@ -945,6 +991,8 @@ def probar(L):
                                  ("devolver una seña en", lambda: ns["devolver_sena"](1)),
                                  ("cambiar el recargo por cuotas en",
                                   lambda: ns["guardar_recargos_por_cuotas"]({3: 1})),
+                                 ("ver el cierre del mes en",
+                                  lambda: ns["cierre_del_mes"]("2025-02")),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",
