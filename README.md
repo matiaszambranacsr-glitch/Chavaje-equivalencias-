@@ -7946,6 +7946,21 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 🪟 Los desplegables que se cerraban solos
+
+Streamlit 1.65 reconoce un desplegable perezoso (los que corren lo de adentro solo abiertos, con
+`on_change`) por su título, aunque tenga clave: si el título cambia, es otro y se cierra. Y
+varios llevaban una cuenta en el título: **«📋 Ventas y cierre de caja — hoy: 3 · $X»** se
+cerraba al cobrar cada venta, con la cajera mirándolo; «🧩 Armar el presupuesto con lo que pide
+(4)» cuando el cliente escribía otra cosa; «📲 Cobrar lo vencido: $X de N cuentas» al registrar
+un pago; «📋 Presupuestos para seguir (N)» al marcar uno; «😴 Las cuentas que dejaron de venir
+(N)»; y «🕯️ Bujías que calzan (N pares)» cuando la tarea de fondo relacionaba una (así falló una
+vez la prueba de la sesión en GitHub). Ahora el título es fijo y la cuenta va adentro. El
+control 8f' de `auditar.py` lo marca: un perezoso con una cuenta o un dato en el título es un
+error, salvo que el título cambie solo con lo que se mira (otro resultado, otra versión), con
+el comentario `# título que cambia a propósito`. Comprobado con una prueba mínima de Streamlit:
+con el mismo título queda abierto; con otro, se cierra aunque se le vuelva a poner abierto.
+
 ## 🏦 Los cheques para depositar
 
 El pago con cheque quedaba en la cuenta del taller y su fecha en «cheques en cartera», pero nadie
@@ -8102,7 +8117,9 @@ anota una vez por día (anotarlo otra vez lo corrige; queda en el registro de ca
 pesos): la app suma, resta el cambio y **«➡️ Pasar al arqueo»** deja el número en «Efectivo
 contado», con el detalle («5 × $1.000 · 4 × $100 (menos $3.000 de cambio)») en la nota. Si lo
 contado es menos que el cambio, pasa cero. El arqueo sigue igual: se puede escribir el número a
-mano como antes (`anotar_cambio_de_apertura()`, `total_de_billetes()` y
+mano como antes. Como el cambio suele ser siempre el mismo, mientras el del día no está anotado
+sale **«🪙 El mismo que el 26/11: $20.000»**, que lo anota con un toque
+(`ultimo_cambio_de_apertura()`, `anotar_cambio_de_apertura()`, `total_de_billetes()` y
 `pasar_los_billetes_al_arqueo()`, en `logica/ventas.py`; lo controlan `pruebas_de_la_caja.py` y
 `pruebas_de_la_sesion.py`).
 

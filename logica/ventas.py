@@ -1697,6 +1697,24 @@ def detalle_de_billetes(conteo, monedas=0):
     return " · ".join(partes)
 
 
+def ultimo_cambio_de_apertura(antes_de=None):
+    """(día, importe) del último cambio anotado antes de ese día (hoy, si no se dice), o None.
+    El cambio suele ser siempre el mismo: la caja lo ofrece con un toque."""
+    fila = c.execute("SELECT dia, importe FROM aperturas_de_caja WHERE dia < ? "
+                     "ORDER BY dia DESC LIMIT 1",
+                     (antes_de or hoy_aca().isoformat(),)).fetchone()
+    return (fila["dia"], float(fila["importe"])) if fila else None
+
+
+def anotar_el_mismo_cambio_y_avisar(importe, dia):
+    """«🪙 El mismo que el …» (va como on_click)."""
+    try:
+        ok, texto = anotar_cambio_de_apertura(importe, dia)
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
 def anotar_cambio_de_apertura_y_avisar(clave_del_campo, dia):
     """«💾 Anotar» del cambio de apertura (va como on_click)."""
     try:

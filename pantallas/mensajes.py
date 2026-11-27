@@ -316,11 +316,14 @@ if pagina == PAGINAS[12]:
                 _pedido_msj = lo_que_pidio_el_cliente(_abierto_msj)
                 _cuantos_pedidos = len(pedidos_del_mensaje(_pedido_msj))
                 if _cuantos_pedidos and es_operador_o_admin():
+                    # Título fijo: con la cuenta en el título se cerraba cuando el cliente
+                    # escribía otra cosa (ver el control 8f' de auditar.py).
                     _exp_presu_chat = st.expander(
-                        f"🧩 Armar el presupuesto con lo que pide ({_cuantos_pedidos})",
+                        "🧩 Armar el presupuesto con lo que pide",
                         key=f"exp_presu_chat_{_abierto_msj}", on_change="rerun")
                     if _exp_presu_chat.open:
                         with _exp_presu_chat:
+                            st.caption(f"{_cuantos_pedidos} cosa(s) en lo que escribió.")
                             mostrar_los_pedidos(_pedido_msj, f"pedido_chat_{_abierto_msj}",
                                                 _abierto_msj)
                 st.button("Marcar como no leído", key=f"msj_no_leido_{_abierto_msj}",

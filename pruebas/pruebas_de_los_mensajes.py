@@ -758,8 +758,8 @@ def probar():
         at.session_state["pagina_actual"] = ns["PAGINAS"][12]
         at.run()
         _exp_ped = [e for e in at.expander if "Armar el presupuesto con lo que pide" in e.label]
-        esperar("en el chat, «🧩 Armar el presupuesto con lo que pide (4)»",
-                [e.label for e in _exp_ped], ["🧩 Armar el presupuesto con lo que pide (4)"])
+        esperar("en el chat, «🧩 Armar el presupuesto con lo que pide» (título fijo)",
+                [e.label for e in _exp_ped], ["🧩 Armar el presupuesto con lo que pide"])
         at.session_state[f"exp_presu_chat_{_juan['id']}"] = True
         at.run()
         _sel = {s.label: s for s in at.selectbox if str(s.key).startswith(

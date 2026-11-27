@@ -299,10 +299,10 @@ if pagina == PAGINAS[11]:
 
     # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija. Lo cobrado cuenta
     # el día que se cobró; lo que espera, aparte.
-    _caja_hoy = cierre_de_caja()
     # Perezoso: lo de adentro corre solo abierto (ver el de «📐 Buscar por medidas» en el Buscador).
-    _exp_cierre = st.expander(f"📋 Ventas y cierre de caja — hoy: {_caja_hoy['ventas']} · "
-                              f"${miles(_caja_hoy['total'], 0)}", key="exp_ventas_cierre_caja_hoy",
+    # Título fijo: con «hoy: 3 · $X» se cerraba al cobrar cada venta, con la cajera mirándolo
+    # (ver el control 8f' de auditar.py). Lo de hoy está arriba, en los números de la caja.
+    _exp_cierre = st.expander("📋 Ventas y cierre de caja", key="exp_ventas_cierre_caja_hoy",
                               on_change="rerun")
     if _exp_cierre.open:
         with _exp_cierre:
@@ -755,6 +755,13 @@ if pagina == PAGINAS[11]:
                                                   "él, y al contar los billetes se resta solo.")
             _ap2.button("💾 Anotar el cambio", key="apertura_anotar", width="stretch",
                         on_click=anotar_cambio_de_apertura_y_avisar, args=(_clave_ap, _dia_txt))
+            # El cambio suele ser el mismo todos los días: con un toque, el del último día.
+            _ultimo_ap = None if _cambio_dia is not None else ultimo_cambio_de_apertura(_dia_txt)
+            if _ultimo_ap:
+                st.button(f"🪙 El mismo que el {_ultimo_ap[0][8:10]}/{_ultimo_ap[0][5:7]}: "
+                          f"${miles(_ultimo_ap[1], 0)}", key="apertura_el_mismo",
+                          on_click=anotar_el_mismo_cambio_y_avisar,
+                          args=(_ultimo_ap[1], _dia_txt))
             with st.popover("💵 Contar los billetes", key="pop_contar_billetes",
                             width="stretch"):
                 st.caption("Cuántos hay de cada uno en el cajón (con el cambio): la app suma, "

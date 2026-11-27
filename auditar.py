@@ -674,6 +674,30 @@ for nodo in ast.walk(ARBOL):
                  f"st.{nodo.func.attr} sin key=: se cierra solo cuando cambia su título o "
                  "aparece algo arriba, y la pantalla vuelve al principio")
 
+# ============ 8f'. Los desplegables perezosos con un título que cambia ============
+# Los perezosos (con on_change, ver más abajo) guardan si están abiertos del lado de Streamlit, y
+# en 1.65 los reconoce por el título aunque tengan clave (key_as_main_identity=False): si el
+# título cambia, es otro y se cierra. «📋 Ventas y cierre de caja — hoy: 3 · $X» se cerraba al
+# cobrar cada venta, con la cajera mirándolo, y «🕯️ Bujías que calzan (N pares)» cuando la
+# tarea de fondo relacionaba una (así falló una vez la prueba en GitHub). La cuenta va adentro.
+# Si el título cambia solo cuando cambia lo que se mira (otro resultado, otra versión), en la
+# llamada: «# título que cambia a propósito».
+for nodo in ast.walk(ARBOL):
+    if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+            and nodo.func.attr in ("expander", "popover") and nodo.args
+            and any(k.arg == "on_change" for k in nodo.keywords)):
+        continue
+    _titulo = nodo.args[0]
+    _cambia = any((isinstance(x, ast.Call) and isinstance(x.func, ast.Name)
+                   and x.func.id in ("len", "miles", "sum")) or isinstance(x, ast.FormattedValue)
+                  for x in ast.walk(_titulo))
+    _lineas = " ".join(LINEAS[max(0, nodo.lineno - 2):nodo.end_lineno])
+    if _cambia and "# título que cambia a propósito" not in _lineas:
+        reportar("ERROR", nodo.lineno,
+                 f"st.{nodo.func.attr} perezoso con una cuenta o un dato en el título: cuando "
+                 "cambia, Streamlit lo toma por otro y se cierra aunque tenga clave. La cuenta "
+                 "va adentro (o «# título que cambia a propósito»)")
+
 # El resumen de explicar() tiene que entrar en una línea del celular
 for nodo in ast.walk(ARBOL):
     if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name) and nodo.func.id == "explicar":

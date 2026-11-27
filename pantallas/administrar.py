@@ -1672,14 +1672,15 @@ if pagina == PAGINAS[3]:
                 # escrito. Perezoso: arma los mensajes recién al abrirlo.
                 _vencidas_cc = [r["Vencido"] for r in _resumen_cc if (r["Vencido"] or 0) >= 1]
                 if _vencidas_cc:
-                    # El título va con la clave fija (exp_cobrar_vencido): cambia con la plata y
-                    # no se cierra por eso.
+                    # Título fijo: con la plata en el título se cerraba al registrar un pago, aun
+                    # con clave (ver el control 8f' de auditar.py). La plata, adentro.
                     _exp_cobrar = st.expander(
-                        f"📲 Cobrar lo vencido: \\${miles(sum(_vencidas_cc), 0)} de "
-                        f"{miles(len(_vencidas_cc))} cuenta(s), recordándoselo por WhatsApp",
+                        "📲 Cobrar lo vencido, recordándoselo por WhatsApp",
                         key="exp_cobrar_vencido", on_change="rerun")
                     if _exp_cobrar.open:
                         with _exp_cobrar:
+                            st.caption(f"\\${miles(sum(_vencidas_cc), 0)} vencidos en "
+                                       f"{miles(len(_vencidas_cc))} cuenta(s).")
                             mostrar_cobrar_lo_vencido()
 
             # LAS QUE DEJARON DE VENIR (ver cuentas_que_dejaron_de_venir()): una consulta chica,
@@ -1687,10 +1688,11 @@ if pagina == PAGINAS[3]:
             _extranadas = cuentas_que_dejaron_de_venir()
             if _extranadas:
                 _exp_extranadas = st.expander(
-                    f"😴 Las cuentas que dejaron de venir ({miles(len(_extranadas))})",
+                    "😴 Las cuentas que dejaron de venir",
                     key="exp_cuentas_que_no_vienen", on_change="rerun")
                 if _exp_extranadas.open:
                     with _exp_extranadas:
+                        st.caption(f"{miles(len(_extranadas))} cuenta(s).")
                         mostrar_cuentas_que_dejaron_de_venir(_extranadas)
 
             # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta. Ver

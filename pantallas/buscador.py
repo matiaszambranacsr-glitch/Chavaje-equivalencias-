@@ -104,10 +104,13 @@ if pagina == PAGINAS[0]:
     if es_operador_o_admin() and not solo_mirar():
         _n_seguir = cuantos_presupuestos_para_seguir()
         if _n_seguir:
-            _exp_seguir = st.expander(f"📋 Presupuestos para seguir ({miles(_n_seguir)})",
+            # Título fijo: con la cuenta en el título se cerraba al marcar uno (ver el control
+            # 8f' de auditar.py). La cuenta, adentro.
+            _exp_seguir = st.expander("📋 Presupuestos para seguir",
                                       key="exp_presupuestos_para_seguir", on_change="rerun")
             if _exp_seguir.open:
                 with _exp_seguir:
+                    st.caption(f"{miles(_n_seguir)} esperando respuesta.")
                     mostrar_presupuestos_para_seguir()
 
     # EL PEDIDO QUE LLEGÓ AL WHATSAPP DEL TELÉFONO: se pega y se separa en pedidos, como en el
@@ -2237,6 +2240,7 @@ if pagina == PAGINAS[0]:
                 # 22382» no tiene ninguno, y lo que dice solo «kit» queda acá.
                 if not _aparte:
                     return
+                # título que cambia a propósito: solo con otra búsqueda.
                 _exp_aparte = st.expander(
                     f"🔧 Otros {miles(len(_aparte))} que "
                     + (busqueda_texto_guardada.get("por_que_aparte") or f"no dicen {_dicen}"),
@@ -2345,6 +2349,7 @@ if pagina == PAGINAS[0]:
                     # tardaba 220 ms; ahora, 75.
                     # Con uno o dos resultados, abiertos: «bomba de agua k4m» deja uno solo con
                     # todo lo pedido, y lo que sigue es ver las otras marcas que sirven.
+                    # título que cambia a propósito: es el de ese resultado.
                     _exp_txt = st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}",
                                            key=f"exp_txt_{fila_txt['ID']}", on_change="rerun",
                                            expanded=len(res_texto) <= 2 and bool(otros))

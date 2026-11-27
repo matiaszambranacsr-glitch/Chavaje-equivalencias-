@@ -851,6 +851,7 @@ if es_admin() and hay_claves_configuradas() and not _es_del_deposito:
                     for _nuevo, _donde in LO_NUEVO[:_nuevas]:
                         st.markdown(f"- {_nuevo} *({_donde})*")
                 if len(LO_NUEVO) > _nuevas:
+                    # título que cambia a propósito: solo con una versión nueva.
                     _exp_antes = st.expander(f"📜 Lo de antes ({len(LO_NUEVO) - _nuevas})",
                                              key="exp_lo_nuevo_antes", on_change="rerun")
                     if _exp_antes.open:

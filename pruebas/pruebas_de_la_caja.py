@@ -613,6 +613,9 @@ def probar(L):
              cs.execute("SELECT COUNT(*) FROM aperturas_de_caja").fetchone()[0],
              cs.execute("SELECT COUNT(*) FROM registro_de_cambios WHERE accion = "
                         "'cambio de apertura'").fetchone()[0]), (15000.0, None, 1, 2))
+    esperar("el último cambio anotado, para ofrecerlo al día siguiente",
+            (ns["ultimo_cambio_de_apertura"]("2099-01-01"), ns["ultimo_cambio_de_apertura"](_hoy),
+             ns["ultimo_cambio_de_apertura"]("2000-01-01")), ((_hoy, 15000.0), None, None))
     _conteo = {20000: 1, 1000: 2, 100: "3", 50: None, 10: -4}
     esperar("los billetes suman (los vacíos y los negativos no)",
             (ns["total_de_billetes"](_conteo, 350), ns["total_de_billetes"]({}, None)),
