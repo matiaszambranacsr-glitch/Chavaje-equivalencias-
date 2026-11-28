@@ -865,7 +865,8 @@ def probar(L):
     esperar("el Excel: una hoja por cosa, con la anulada marcada",
             (list(_hojas), [(v["Total"], v["Anulada"]) for v in _hojas["Ventas"]],
              len(_hojas["Arqueos"]), ns["excel_de_varias_hojas"](_hojas)[:2]),
-            (["Resumen", "Ventas", "Salidas", "Señas", "Arqueos", "Devoluciones", "Gastos fijos"],
+            (["Resumen", "Ventas", "Salidas", "Señas", "Arqueos", "Devoluciones", "Gastos fijos",
+              "Compras", "Pagos a proveedores"],
              [(1000000.0, ""), (500000.0, "sí"), (300000.0, "")], 4, b"PK"))
     # LOS GASTOS FIJOS Y LO QUE QUEDÓ: valen desde un mes; cambiar el importe vale desde ese mes
     # (los de antes no se mueven) y sacarlo deja de contar desde ese mes.
@@ -1164,6 +1165,22 @@ def probar(L):
              in ns["resumen_del_dia"](con_ganancia=True),
              "Proveedores para pagar" in ns["resumen_del_dia"]()), (True, False))
     ns["anotar_pago_a_proveedor"]("OTRO SA", 30000, "🏦 Transferencia")
+    # LAS COMPRAS DEL MES, en el cierre del mes: las facturas por su fecha y lo pagado, por cómo.
+    _mes_p = _hoy_p.strftime("%Y-%m")
+    _compras_esp = [(f, x) for f, x in ((_hoy_p - _tdp(days=35), 100000.0),
+                                        (_hoy_p - _tdp(days=28), 50000.0), (_hoy_p, 30000.0))
+                    if f.strftime("%Y-%m") == _mes_p]
+    _cm_p = ns["cierre_del_mes"](_mes_p)
+    esperar("las compras del mes y lo pagado a proveedores, en el cierre del mes",
+            (_cm_p["compras"], _cm_p["facturas_de_compra"], _cm_p["pagos_a_proveedores"],
+             _cm_p["total_pagado_a_proveedores"]),
+            (sum(x for _f, x in _compras_esp), len(_compras_esp),
+             [("💵 Efectivo de la caja", 120000.0), ("🏦 Transferencia", 30000.0)], 150000.0))
+    _hojas_p = ns["excel_del_cierre_del_mes"](_mes_p)
+    esperar("y en el texto y el Excel (hojas Compras y Pagos a proveedores)",
+            ("pagado a proveedores $150.000" in ns["texto_del_cierre_del_mes"](_cm_p),
+             len(_hojas_p["Compras"]), sorted(x["Importe"] for x in _hojas_p["Pagos a proveedores"])),
+            (True, len(_compras_esp), [30000.0, 120000.0]))
     esperar("el que no debe nada, sale", list(_cuentas_p()), ["DISTRIBUIDORA NORTE"])
     _movs_p = ns["movimientos_con_el_proveedor"]("distribuidora NORTE")
     esperar("la cuenta de uno, en orden, con el saldo",
@@ -1175,6 +1192,65 @@ def probar(L):
              ns["anular_movimiento_de_proveedor"]("pago", _pago_p)[0],
              round(ns["total_de_salidas"]() - _salidas_antes, 2),
              _cuentas_p()["DISTRIBUIDORA NORTE"][:2]), (True, False, 0.0, (150000.0, 100000.0)))
+    # EL CHEQUE DE UN TALLER, dado al proveedor: con su importe, sale de los que hay para
+    # depositar; anular el pago lo devuelve; «no lo deposité» no lo trae sin anular el pago; si
+    # lo rechazan, el taller vuelve a deber y el pago al proveedor se anula.
+    _hoy_ch = ns["hoy_aca"]()
+    ns["registrar_pago_de_cuenta"](taller, 7000, "Cheque", cheque_fecha=_hoy_ch.isoformat())
+    _ch_t = [x for x in ns["cheques_sin_depositar"]() if x["importe"] == 7000][0]["id"]
+    _debe_antes = _cuentas_p()["DISTRIBUIDORA NORTE"][0]
+    esperar("sin elegir el cheque, no",
+            ns["anotar_pago_a_proveedor"]("Distribuidora Norte", 1, "🔁 Cheque de un taller")[0],
+            False)
+    _ok_ch, _txt_ch = ns["anotar_pago_a_proveedor"]("Distribuidora Norte", 999,
+                                                    "🔁 Cheque de un taller", cheque_id=_ch_t)
+    esperar("con el cheque: su importe (no el escrito) y sale de los que hay para depositar",
+            (_ok_ch, round(_debe_antes - _cuentas_p()["DISTRIBUIDORA NORTE"][0], 2),
+             _ch_t in [x["id"] for x in ns["cheques_sin_depositar"]()],
+             "cheque de Taller Norte del " in _txt_ch,
+             [x["entregado_a"] for x in ns["cheques_depositados"]() if x["id"] == _ch_t]),
+            (True, 7000.0, False, True, ["DISTRIBUIDORA NORTE"]))
+    esperar("el mismo cheque dos veces, no",
+            ns["anotar_pago_a_proveedor"]("Otro SA", 1, "🔁 Cheque de un taller",
+                                          cheque_id=_ch_t)[0], False)
+    esperar("«no lo deposité» no lo trae: hay que anular el pago",
+            ns["deshacer_cheque_depositado"](_ch_t),
+            (False, "Ese cheque se le dio a DISTRIBUIDORA NORTE: anulá ese pago en 🗂️ "
+                    "Administrar → 🚚 Proveedores y vuelve solo."))
+    _pago_ch = [m for m in ns["movimientos_con_el_proveedor"]("Distribuidora Norte")
+                if m["tipo"] == "pago" and not m["anulado"]][-1]["id"]
+    esperar("anular el pago devuelve el cheque",
+            (ns["anular_movimiento_de_proveedor"]("pago", _pago_ch),
+             _ch_t in [x["id"] for x in ns["cheques_sin_depositar"]()],
+             _cuentas_p()["DISTRIBUIDORA NORTE"][0]),
+            ((True, "🚫 Anulado. El cheque volvió a los que hay para depositar."), True,
+             _debe_antes))
+    ns["anotar_pago_a_proveedor"]("Distribuidora Norte", 0, "🔁 Cheque de un taller",
+                                  cheque_id=_ch_t)
+    _saldo_ch = saldo()
+    _ok_r, _txt_r = ns["rechazar_cheque"](_ch_t)
+    esperar("rechazado: el taller vuelve a deber y el pago al proveedor se anula",
+            (_ok_r, round(saldo() - _saldo_ch, 2), _cuentas_p()["DISTRIBUIDORA NORTE"][0],
+             _txt_r.endswith("Se le había dado a DISTRIBUIDORA NORTE: ese pago quedó anulado y "
+                             "la deuda con él vuelve.")),
+            (True, 7000.0, _debe_antes, True))
+    # LO QUE ENTRA Y LO QUE SALE: por semana, con «Ya» (lo vencido) y «Más adelante»; lo de
+    # los talleres suma lo mismo que sus cuentas (lo vencido en «Ya») y los cheques, lo que hay
+    # para depositar.
+    _flujo = ns["lo_que_entra_y_sale"]()
+    _cuentas_t = ns["resumen_de_cuentas"]()
+    esperar("lo que entra y lo que sale: los proveedores por vencimiento, en sus semanas",
+            ([f["proveedores"] for f in _flujo["filas"]], _flujo["filas"][0]["cuando"],
+             _flujo["filas"][-1]["cuando"], len(_flujo["filas"])),
+            ([100000.0, 50000.0, 0.0, 0.0, 0.0, 0.0], "Ya (vencido o para depositar)",
+             "Más adelante", 6))
+    esperar("los talleres suman lo de sus cuentas (lo vencido, en «Ya»); los cheques, lo que hay",
+            (_flujo["totales"]["talleres"], _flujo["filas"][0]["talleres"],
+             _flujo["totales"]["cheques"], _flujo["filas"][-1]["acumulado"]),
+            (round(sum(max(r["Saldo"], 0) for r in _cuentas_t), 2),
+             round(sum(r["Vencido"] for r in _cuentas_t), 2),
+             round(sum(x["importe"] for x in ns["cheques_sin_depositar"]()), 2),
+             _flujo["totales"]["neto"]))
     ns["invalidar_salud"]()
     esperar("la campanita, fuerte por lo vencido",
             [(p_["nivel"], p_["titulo"]) for p_ in ns["diagnostico_de_salud"]()
@@ -1210,6 +1286,8 @@ def probar(L):
                                   lambda: ns["anotar_factura_de_proveedor"]("x", 1)),
                                  ("anotar un pago a un proveedor en",
                                   lambda: ns["anotar_pago_a_proveedor"]("x", 1, "Otro")),
+                                 ("ver lo que entra y lo que sale en",
+                                  lambda: ns["lo_que_entra_y_sale"]()),
                                  ("anotar", lambda: ns["anotar_salida_de_caja"](
                                     "🧾 Gasto", "x", 1)),
                                  ("anotar el cambio de apertura en",

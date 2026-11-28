@@ -369,6 +369,11 @@ if pagina == PAGINAS[11]:
                         if _cm["salidas"]:
                             st.caption("💸 Salidas: " + " · ".join(
                                 f"{t}: \\${miles(x, 0)}" for t, _n, x in _cm["salidas"]))
+                        if _cm["compras"] or _cm["total_pagado_a_proveedores"]:
+                            st.caption(f"🚚 Compras: \\${miles(_cm['compras'], 0)} en "
+                                       f"{miles(_cm['facturas_de_compra'])} factura(s) · pagado "
+                                       "a proveedores \\$"
+                                       f"{miles(_cm['total_pagado_a_proveedores'], 0)}")
                         if _cm["arqueos"]:
                             st.markdown("**🧮 Arqueos por cajero** (lo de sus turnos)")
                             st.dataframe([{**a, "Faltó": f"${miles(a['Faltó'], 0)}",
@@ -437,6 +442,27 @@ if pagina == PAGINAS[11]:
                                           key="gasto_fijo_importe", placeholder="Ej: 350000")
                         st.button("➕ Anotar", key="gasto_fijo_anotar", width="stretch",
                                   on_click=anotar_gasto_fijo_y_avisar)
+                # LO QUE ENTRA Y LO QUE SALE (ver esa sección en logica/ventas.py). Perezoso.
+                _pop_flujo = st.popover("📆 Lo que entra y lo que sale", key="pop_lo_que_entra",
+                                        width="stretch", on_change="rerun")
+                if _pop_flujo.open:
+                    with _pop_flujo:
+                        _flujo = lo_que_entra_y_sale()
+                        st.dataframe([{"Cuándo": f["cuando"],
+                                       "Te deben los talleres": f"${miles(f['talleres'], 0)}",
+                                       "Cheques": f"${miles(f['cheques'], 0)}",
+                                       "Les debés a proveedores": f"${miles(f['proveedores'], 0)}",
+                                       "Queda": f"${miles(f['neto'], 0)}",
+                                       "Acumulado": f"${miles(f['acumulado'], 0)}"}
+                                      for f in _flujo["filas"]], hide_index=True, width="stretch")
+                        ayuda("Es lo que **vence**, no lo que van a pagar: un taller atrasado "
+                              "sigue en «Ya» hasta que pague. Los cheques van por su fecha (los "
+                              "que ya se pueden depositar, en «Ya»); los talleres y los "
+                              "proveedores, por lo que queda de cada cargo o factura después de "
+                              "imputar los pagos a lo más viejo."
+                              + (f" Los gastos fijos (\\${miles(_flujo['gastos_fijos'], 0)} por "
+                                 "mes) no tienen día: no están en la tabla."
+                                 if _flujo["gastos_fijos"] else ""))
                 _pop_mes = st.popover("🏆 Ventas y comisiones por vendedor",
                                       key="pop_mes_por_vendedor",
                                       width="stretch", on_change="rerun")

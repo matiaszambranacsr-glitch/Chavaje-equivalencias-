@@ -1479,6 +1479,16 @@ def probar():
     _adm_mes.button(key=f"gasto_fijo_sacar_{_gf_s[0]['id']}").click().run()
     esperar("y sacado", ns["gastos_fijos_del_mes"](), [])
     _adm_mes.session_state["pop_gastos_fijos"] = False
+    # LO QUE ENTRA Y LO QUE SALE, al lado: la tabla por semana.
+    _adm_mes.session_state["exp_ventas_cierre_caja_hoy"] = True
+    _adm_mes.session_state["pop_lo_que_entra"] = True
+    _adm_mes.run()
+    esperar("lo que entra y lo que sale: la tabla, desde «Ya» hasta «Más adelante»",
+            ([list(d.value["Cuándo"])[::5] for d in _adm_mes.dataframe
+              if "Cuándo" in getattr(d.value, "columns", [])],
+             [e.value for e in _adm_mes.exception]),
+            ([["Ya (vencido o para depositar)", "Más adelante"]], []))
+    _adm_mes.session_state["pop_lo_que_entra"] = False
     # EL RECARGO POR CUOTAS se pone en Administrar → 💬 Mensajería y cobros.
     _adm_mes.session_state["pagina_actual"] = "🗂️ Administrar"
     _adm_mes.session_state["sub_admin"] = ns["SUB_ADMIN"][2]
@@ -1585,6 +1595,13 @@ def probar():
     esperar("su cuenta, con «🚫» para anular",
             (len([b for b in _adm_mes.button if (b.key or "").startswith("prov_anular_")]),
              [e.value for e in _adm_mes.exception]), (2, []))
+    # Con un cheque de un taller, en vez del importe se elige el cheque.
+    _adm_mes.radio(key="prov_pago_medio").set_value("🔁 Cheque de un taller").run()
+    esperar("con un cheque de un taller: se elige el cheque, sin escribir el importe",
+            ([n.key for n in _adm_mes.number_input if n.key == "prov_pago_importe"],
+             bool([s_ for s_ in _adm_mes.selectbox if s_.key == "prov_pago_cheque"])
+             or any("No hay cheques de talleres" in x.value for x in _adm_mes.caption),
+             [e.value for e in _adm_mes.exception]), ([], True, []))
     vta.session_state["exp_ventas_cierre_caja_hoy"] = False
     vta.session_state["pagina_actual"] = ventas
     vta.run()

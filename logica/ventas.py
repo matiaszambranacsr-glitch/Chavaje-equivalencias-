@@ -3816,7 +3816,20 @@ def cierre_del_mes(mes, hoy=None):
     gastos_fijos = gastos_fijos_del_mes(mes)
     total_fijos = round(sum(g["importe"] for g in gastos_fijos), 2)
     gastos_de_caja = round(sum(x for t, _n, x in salidas if t == TIPOS_DE_SALIDA_DE_CAJA[0]), 2)
+    # LAS COMPRAS DEL MES (ver «LO QUE SE LE DEBE A CADA PROVEEDOR»): lo que se compró —las
+    # facturas de proveedores por su fecha— y lo que se les pagó, por cómo. El contador las pide
+    # con las ventas; estaban en la carpeta de facturas.
+    compras = c.execute("""SELECT COUNT(*) AS n, COALESCE(SUM(importe), 0) AS total
+                           FROM facturas_de_proveedores
+                           WHERE anulada = 0 AND fecha BETWEEN ? AND ?""", (desde, hasta)).fetchone()
+    pagos_prov = [(f["medio"] or "Otro", round(float(f["total"]), 2)) for f in c.execute(
+        """SELECT medio, SUM(importe) AS total FROM pagos_a_proveedores
+           WHERE anulado = 0 AND dia BETWEEN ? AND ? GROUP BY medio ORDER BY total DESC""",
+        (desde, hasta))]
     return {"mes": mes, "desde": desde, "hasta": hasta,
+            "compras": round(float(compras["total"]), 2), "facturas_de_compra": compras["n"],
+            "pagos_a_proveedores": pagos_prov,
+            "total_pagado_a_proveedores": round(sum(x for _m, x in pagos_prov), 2),
             "gastos_fijos": [(g["concepto"], g["importe"]) for g in gastos_fijos],
             "total_gastos_fijos": total_fijos, "gastos_de_caja": gastos_de_caja,
             "resultado": round(suma["ganancia"] - gastos_de_caja - total_fijos, 2),
@@ -3857,6 +3870,9 @@ def texto_del_cierre_del_mes(cierre, con_ganancia=False):
     if cierre["salidas"]:
         r.append(f"💸 Salidas de caja: {plata(cierre['total_salidas'])} ("
                  + ", ".join(f"{t}: {plata(x)}" for t, _n, x in cierre["salidas"]) + ")")
+    if cierre["compras"] or cierre["total_pagado_a_proveedores"]:
+        r.append(f"🚚 Compras: {plata(cierre['compras'])} en {miles(cierre['facturas_de_compra'])} "
+                 f"factura(s); pagado a proveedores {plata(cierre['total_pagado_a_proveedores'])}")
     if cierre["anuladas"]:
         r.append(f"🚫 Anuladas: {miles(cierre['anuladas'])} ({plata(cierre['total_anulado'])})")
     faltas = [a for a in cierre["arqueos"] if a["Faltó"] or a["Sobró"]]
@@ -3870,7 +3886,8 @@ def texto_del_cierre_del_mes(cierre, con_ganancia=False):
 
 def excel_del_cierre_del_mes(mes, hoy=None, con_ganancia=False):
     """Los datos del Excel del mes, leídos ahora: {hoja: [dict]} para excel_de_varias_hojas()
-    (Resumen, Ventas, Salidas, Señas, Arqueos y Devoluciones)."""
+    (Resumen, Ventas, Salidas, Señas, Arqueos, Devoluciones, Gastos fijos, Compras y Pagos a
+    proveedores)."""
     cierre = cierre_del_mes(mes, hoy)
     desde, hasta = cierre["desde"], cierre["hasta"]
     resumen = [{"Qué": a, "Cuánto": b} for a, b in (
@@ -3880,7 +3897,9 @@ def excel_del_cierre_del_mes(mes, hoy=None, con_ganancia=False):
            ("Señas descontadas al retirar", cierre["senas_descontadas"]),
            ("Señas devueltas", cierre["total_senas_devueltas"]),
            ("Salidas de caja", cierre["total_salidas"]), ("Anuladas", cierre["anuladas"]),
-           ("Mes anterior (vendido)", cierre["anterior"])]
+           ("Mes anterior (vendido)", cierre["anterior"]),
+           ("Compras (facturas de proveedores)", cierre["compras"]),
+           ("Pagado a proveedores", cierre["total_pagado_a_proveedores"])]
         + ([("Ganancia estimada (de lo que tiene costo)", cierre["ganancia"]),
             ("Gastos de la caja", cierre["gastos_de_caja"]),
             ("Gastos fijos", cierre["total_gastos_fijos"]),
@@ -3920,9 +3939,20 @@ def excel_del_cierre_del_mes(mes, hoy=None, con_ganancia=False):
                      "Importe": d["importe"], "Pago": d["forma_de_pago"] or "",
                      "Quién": d["usuario"] or ""}
                     for dia in _dias_del_rango(desde, hasta) for d in devoluciones_del_dia(dia)]
+    compras = [{"Fecha": f["fecha"], "Proveedor": f["proveedor"], "N.º": f["numero"] or "",
+                "Vence": f["vence"], "Importe": f["importe"], "Nota": f["nota"] or "",
+                "Anulada": "sí" if f["anulada"] else ""} for f in c.execute(
+        "SELECT * FROM facturas_de_proveedores WHERE fecha BETWEEN ? AND ? ORDER BY fecha, id",
+        (desde, hasta))]
+    pagos = [{"Día": f["dia"], "Proveedor": f["proveedor"], "Importe": f["importe"],
+              "Cómo": f["medio"] or "", "Nota": f["nota"] or "", "Quién": f["usuario"] or "",
+              "Anulado": "sí" if f["anulado"] else ""} for f in c.execute(
+        "SELECT * FROM pagos_a_proveedores WHERE dia BETWEEN ? AND ? ORDER BY dia, id",
+        (desde, hasta))]
     return {"Resumen": resumen, "Ventas": ventas, "Salidas": salidas, "Señas": senas,
             "Arqueos": arqueos, "Devoluciones": devoluciones,
-            "Gastos fijos": [{"Qué": g, "Por mes": x} for g, x in cierre["gastos_fijos"]]}
+            "Gastos fijos": [{"Qué": g, "Por mes": x} for g, x in cierre["gastos_fijos"]],
+            "Compras": compras, "Pagos a proveedores": pagos}
 
 
 def cierre_del_mes_para_descargar(mes, con_ganancia=False):
@@ -3939,10 +3969,17 @@ def cierre_del_mes_para_descargar(mes, con_ganancia=False):
 # cajón: queda también como salida de caja «🚚 Pago a un proveedor», así el arqueo lo descuenta
 # sin anotarlo dos veces. La campanita avisa lo vencido y lo que vence en
 # DIAS_PARA_AVISAR_UNA_FACTURA días. Lo anota el administrador.
+# Y con un cheque de un taller: es lo más común (el cheque que dejó un taller va derecho al
+# proveedor, endosado) y se anotaba dos veces o ninguna: el cheque seguía en «para depositar» y
+# alguien lo buscaba en el cajón. Se elige de los que hay para depositar, el importe es el suyo,
+# el cheque queda «entregado a» el proveedor (sale de los que hay que depositar) y anular el pago
+# lo devuelve. Si el banco lo rechaza, el taller vuelve a deber y el pago al proveedor se anula:
+# hay que pagarle de nuevo.
 DIAS_DE_PLAZO_DE_UN_PROVEEDOR = 30
 DIAS_PARA_AVISAR_UNA_FACTURA = 3
 MEDIOS_DE_PAGO_A_PROVEEDOR = ("💵 Efectivo de la caja", "🏦 Transferencia", "🧾 Cheque propio",
-                              "Otro")
+                              "🔁 Cheque de un taller", "Otro")
+CHEQUE_DE_UN_TALLER = MEDIOS_DE_PAGO_A_PROVEEDOR[3]
 
 
 def nombre_de_proveedor(texto):
@@ -4001,24 +4038,48 @@ def anotar_factura_de_proveedor(proveedor, importe, vence=None, numero="", fecha
                   f"{vence[8:10]}/{vence[5:7]}/{vence[:4]}.")
 
 
-def anotar_pago_a_proveedor(proveedor, importe, medio, nota=""):
-    """(ok, texto). El de «💵 Efectivo de la caja» es también una salida de caja de hoy."""
+_CHEQUE_PARA_DAR = """SELECT m.id, -m.importe AS importe, m.cheque_fecha, k.nombre AS cuenta
+                      FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
+                      WHERE m.id = ? AND m.medio = 'Cheque' AND m.anulado = 0 AND m.importe < 0
+                        AND m.cheque_depositado IS NULL AND m.cheque_rechazado IS NULL"""
+
+
+def anotar_pago_a_proveedor(proveedor, importe, medio, nota="", cheque_id=None):
+    """(ok, texto). El de «💵 Efectivo de la caja» es también una salida de caja de hoy; el de
+    CHEQUE_DE_UN_TALLER va con `cheque_id` (uno de cheques_sin_depositar()) y su importe."""
     exigir_nivel("admin", "anotar un pago a un proveedor")
     proveedor = nombre_de_proveedor(proveedor)
     if not proveedor:
         return False, "Elegí el proveedor."
+    if medio not in MEDIOS_DE_PAGO_A_PROVEEDOR:
+        return False, "Elegí cómo le pagaste."
+    cheque = None
+    if medio == CHEQUE_DE_UN_TALLER:
+        cheque = c.execute(_CHEQUE_PARA_DAR, (int(cheque_id or 0),)).fetchone()
+        if not cheque:
+            return False, "Elegí el cheque de los que hay para depositar."
+        importe = cheque["importe"]
     try:
         importe = round(float(importe), 2)
     except (TypeError, ValueError):
         return False, "Escribí cuánto le pagaste."
     if not 0 < importe <= SALIDA_DE_CAJA_MAXIMA:
         return False, "El importe tiene que ser más que cero (y no disparatado)."
-    if medio not in MEDIOS_DE_PAGO_A_PROVEEDOR:
-        return False, "Elegí cómo le pagaste."
     nota = str(nota or "").strip()[:200]
+    if cheque:
+        _f = str(cheque["cheque_fecha"] or "")
+        nota = (f"cheque de {cheque['cuenta']}" + (f" del {_f[8:10]}/{_f[5:7]}" if _f else "")
+                + (f" — {nota}" if nota else ""))[:200]
     dia, usuario = hoy_aca().isoformat(), obtener_usuario_actual()
     with db_lock, transaccion():
         salida_id = None
+        if cheque:
+            c.execute("""UPDATE movimientos_de_cuenta SET cheque_depositado = datetime('now'),
+                                                          cheque_entregado_a = ?
+                         WHERE id = ? AND cheque_depositado IS NULL AND cheque_rechazado IS NULL""",
+                      (proveedor, cheque["id"]))
+            if c.rowcount != 1:
+                return False, "Ese cheque ya se depositó o se le dio a otro."
         if medio == MEDIOS_DE_PAGO_A_PROVEEDOR[0]:
             c.execute("INSERT INTO salidas_de_caja (dia, tipo, concepto, importe, usuario) "
                       "VALUES (?, ?, ?, ?, ?)",
@@ -4028,38 +4089,51 @@ def anotar_pago_a_proveedor(proveedor, importe, medio, nota=""):
             anotar_cambio("salida de caja", "caja", salida_id, despues=importe,
                           detalle=f"{TIPOS_DE_SALIDA_DE_CAJA[1]}: {proveedor}")
         c.execute("""INSERT INTO pagos_a_proveedores (proveedor, importe, medio, dia, nota,
-                                                      salida_id, usuario)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                  (proveedor, importe, medio, dia, nota or None, salida_id, usuario))
+                                                      salida_id, usuario, cheque_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (proveedor, importe, medio, dia, nota or None, salida_id, usuario,
+                   cheque["id"] if cheque else None))
         anotar_cambio("anotó un pago a un proveedor", "proveedor", c.lastrowid,
                       despues={"proveedor": proveedor, "importe": importe, "medio": medio})
     return True, (f"💸 Pago a {proveedor}: ${miles(importe, 0)} ({medio})"
-                  + (" — salió del cajón." if salida_id else "."))
+                  + (" — salió del cajón." if salida_id else
+                     f" — el {nota.split(' — ')[0]} ya no está para depositar." if cheque
+                     else "."))
 
 
 def anular_movimiento_de_proveedor(tipo, movimiento_id):
     """`tipo`: «factura» o «pago». No se borra: queda anulado. Un pago en efectivo anula también
     su salida de caja. (ok, texto)."""
     exigir_nivel("admin", "anular algo de un proveedor")
+    fila, volvio = None, False
     with db_lock, transaccion():
         if tipo == "factura":
             c.execute("UPDATE facturas_de_proveedores SET anulada = 1 WHERE id = ? AND anulada = 0",
                       (int(movimiento_id),))
+            if c.rowcount != 1:
+                return False, "Eso ya estaba anulado."
         elif tipo == "pago":
-            fila = c.execute("SELECT salida_id FROM pagos_a_proveedores WHERE id = ? AND anulado = 0",
-                             (int(movimiento_id),)).fetchone()
+            fila = c.execute("SELECT salida_id, cheque_id FROM pagos_a_proveedores "
+                             "WHERE id = ? AND anulado = 0", (int(movimiento_id),)).fetchone()
             c.execute("UPDATE pagos_a_proveedores SET anulado = 1 WHERE id = ? AND anulado = 0",
                       (int(movimiento_id),))
-            if c.rowcount == 1 and fila and fila["salida_id"]:
+            if c.rowcount != 1 or not fila:
+                return False, "Eso ya estaba anulado."
+            if fila["salida_id"]:
                 c.execute("UPDATE salidas_de_caja SET anulada = 1, anulada_por = ? WHERE id = ?",
                           (obtener_usuario_actual(), fila["salida_id"]))
+            # El cheque de un taller vuelve a los que hay para depositar (si no lo rechazaron).
+            if fila["cheque_id"]:
+                c.execute("""UPDATE movimientos_de_cuenta SET cheque_depositado = NULL,
+                                                              cheque_entregado_a = NULL
+                             WHERE id = ? AND cheque_rechazado IS NULL""", (fila["cheque_id"],))
+                volvio = c.rowcount == 1
         else:
             return False, "No sé qué anular."
-        if c.rowcount != 1:
-            return False, "Eso ya estaba anulado."
         anotar_cambio(f"anuló {'una factura' if tipo == 'factura' else 'un pago'} de un proveedor",
                       "proveedor", movimiento_id)
-    return True, "🚫 Anulado."
+    return True, "🚫 Anulado." + (" El cheque volvió a los que hay para depositar."
+                                 if volvio else "")
 
 
 def cuentas_con_proveedores(hoy=None):
@@ -4108,6 +4182,102 @@ def facturas_para_avisar(hoy=None, dias=None):
                                        else DIAS_PARA_AVISAR_UNA_FACTURA))).isoformat()
     return [k for k in cuentas_con_proveedores(hoy)
             if k["vencido"] or (k["proximo"] and k["proximo"] <= limite)]
+
+
+# LO QUE ENTRA Y LO QUE SALE: el dueño sabía lo que le deben los talleres, los cheques que tiene
+# y lo que les debe a los proveedores, cada cosa en su pantalla; para saber si el viernes le
+# alcanza para pagar la factura grande tenía que sumarlo en un papel. Ahora, por semana: lo que
+# vence de las cuentas de los talleres (lo que queda de cada cargo después de imputar los pagos
+# a lo más viejo, como en el estado de cuenta), los cheques por su fecha y lo que vence de cada
+# proveedor (igual), con lo que queda semana a semana. «Ya» es lo vencido y los cheques que ya
+# se pueden depositar. Es lo que VENCE, no lo que van a pagar: un taller atrasado sigue en «Ya».
+# Los gastos fijos no tienen día: van aparte. Solo el administrador.
+SEMANAS_DE_LO_QUE_ENTRA_Y_SALE = 4
+
+
+def _lo_que_queda_por_vencimiento(cargos, pagado):
+    """[(vence, queda)] de [(vence, importe)] ya ordenados por vencimiento, con `pagado`
+    imputado a lo que vence primero."""
+    salida = []
+    for vence, importe in cargos:
+        cubierto = min(importe, pagado)
+        pagado -= cubierto
+        if importe - cubierto > 0.005:
+            salida.append((vence, round(importe - cubierto, 2)))
+    return salida
+
+
+def lo_que_entra_y_sale(hoy=None, semanas=None):
+    """{"filas": [{cuando, desde, hasta, talleres, cheques, proveedores, neto, acumulado}] —la
+    primera, «Ya»; después una por semana y la última, «Más adelante»—, "gastos_fijos" (los del
+    mes, sin día) y "totales"}."""
+    exigir_nivel("admin", "ver lo que entra y lo que sale")
+    hoy = hoy or hoy_aca()
+    semanas = int(semanas or SEMANAS_DE_LO_QUE_ENTRA_Y_SALE)
+    filas = [{"cuando": "Ya (vencido o para depositar)", "desde": None, "hasta": hoy}]
+    for n in range(semanas):
+        desde = hoy + timedelta(days=7 * n) if n else hoy
+        hasta = hoy + timedelta(days=7 * n + 6)
+        filas.append({"cuando": ("Esta semana" if n == 0 else f"Semana {n + 1}")
+                                + f" ({desde.strftime('%d/%m')}–{hasta.strftime('%d/%m')})",
+                      "desde": desde, "hasta": hasta})
+    filas.append({"cuando": "Más adelante", "desde": hoy + timedelta(days=7 * semanas),
+                  "hasta": date(9999, 12, 31)})
+    for f in filas:
+        f.update({"talleres": 0.0, "cheques": 0.0, "proveedores": 0.0})
+
+    def a_la_fila(dia, que, importe, vencido_es_ya=True):
+        """Suma `importe` a la fila de `dia` (date o «AAAA-MM-DD»; sin día, «Ya»)."""
+        try:
+            dia = date.fromisoformat(str(dia)[:10]) if dia else None
+        except ValueError:
+            dia = None
+        if dia is None or (vencido_es_ya and dia < hoy):
+            filas[0][que] += importe
+            return
+        for f in filas[1:]:
+            if f["desde"] <= dia <= f["hasta"]:
+                f[que] += importe
+                return
+
+    # Las cuentas de los talleres: lo que queda de cada cargo, por su vencimiento (sin
+    # vencimiento cuenta como vencido, como en estado_de_cuenta()).
+    cargos, pagos = {}, {}
+    for m in c.execute("""SELECT mecanico_id, importe, vence FROM movimientos_de_cuenta
+                          WHERE anulado = 0 ORDER BY mecanico_id, COALESCE(vence, ''), id"""):
+        if m["importe"] > 0:
+            cargos.setdefault(m["mecanico_id"], []).append((m["vence"], float(m["importe"])))
+        else:
+            pagos[m["mecanico_id"]] = pagos.get(m["mecanico_id"], 0.0) - float(m["importe"])
+    for cuenta, lista in cargos.items():
+        for vence, queda in _lo_que_queda_por_vencimiento(lista, pagos.get(cuenta, 0.0)):
+            a_la_fila(vence, "talleres", queda)
+    # Los cheques: por su fecha (el que ya se puede depositar, en «Ya»).
+    for x in cheques_sin_depositar(hoy):
+        a_la_fila(None if x["se_puede"] else x["fecha"], "cheques", x["importe"])
+    # Los proveedores: lo que queda de cada factura, por su vencimiento.
+    pagado = {f["proveedor"]: float(f["total"]) for f in c.execute(
+        "SELECT proveedor, SUM(importe) AS total FROM pagos_a_proveedores WHERE anulado = 0 "
+        "GROUP BY proveedor")}
+    facturas = {}
+    for f in c.execute("SELECT proveedor, vence, importe FROM facturas_de_proveedores "
+                       "WHERE anulada = 0 ORDER BY proveedor, vence, id"):
+        facturas.setdefault(f["proveedor"], []).append((f["vence"], float(f["importe"])))
+    for proveedor, lista in facturas.items():
+        for vence, queda in _lo_que_queda_por_vencimiento(lista, pagado.get(proveedor, 0.0)):
+            a_la_fila(vence, "proveedores", queda)
+    acumulado = 0.0
+    for f in filas:
+        for k in ("talleres", "cheques", "proveedores"):
+            f[k] = round(f[k], 2)
+        f["neto"] = round(f["talleres"] + f["cheques"] - f["proveedores"], 2)
+        acumulado = round(acumulado + f["neto"], 2)
+        f["acumulado"] = acumulado
+    return {"filas": filas,
+            "gastos_fijos": round(sum(g["importe"] for g in gastos_fijos_del_mes(
+                hoy.strftime("%Y-%m"))), 2),
+            "totales": {k: round(sum(f[k] for f in filas), 2)
+                        for k in ("talleres", "cheques", "proveedores", "neto")}}
 
 
 def movimientos_con_el_proveedor(proveedor):
@@ -4159,11 +4329,12 @@ def anotar_pago_a_proveedor_y_avisar():
     try:
         ok, texto = anotar_pago_a_proveedor(st_.get("prov_pago_proveedor"),
                                             st_.get("prov_pago_importe"),
-                                            st_.get("prov_pago_medio"), st_.get("prov_pago_nota"))
+                                            st_.get("prov_pago_medio"), st_.get("prov_pago_nota"),
+                                            st_.get("prov_pago_cheque"))
     except PermissionError as _err:
         ok, texto = False, el_error_en_castellano(_err)
     if ok:
-        for clave in ("prov_pago_importe", "prov_pago_nota"):
+        for clave in ("prov_pago_importe", "prov_pago_nota", "prov_pago_cheque"):
             st_.pop(clave, None)
     avisar("success" if ok else "warning", texto)
 

@@ -1974,10 +1974,12 @@ def marcar_cheque_depositado(movimiento_id):
 
 def cheques_depositados(dias=DIAS_PARA_DEPOSITAR_UN_CHEQUE):
     """[dict] los depositados en los últimos `dias` días (el banco avisa un rechazo en días), el
-    último primero: id, cuenta, mecanico_id, importe, fecha (la del cheque), depositado."""
+    último primero: id, cuenta, mecanico_id, importe, fecha (la del cheque), depositado y
+    entregado_a (el proveedor, si se le dio a uno en vez de depositarlo)."""
     return [dict(f) for f in c.execute(
         """SELECT m.id, m.mecanico_id, k.nombre AS cuenta, -m.importe AS importe,
-                  m.cheque_fecha AS fecha, m.cheque_depositado AS depositado
+                  m.cheque_fecha AS fecha, m.cheque_depositado AS depositado,
+                  m.cheque_entregado_a AS entregado_a
            FROM movimientos_de_cuenta m JOIN mecanicos k ON k.id = m.mecanico_id
            WHERE m.medio = 'Cheque' AND m.anulado = 0 AND m.importe < 0
              AND m.cheque_depositado >= datetime('now', ?) AND m.cheque_rechazado IS NULL
@@ -1988,6 +1990,13 @@ def deshacer_cheque_depositado(movimiento_id):
     """Se marcó «depositado» por error: vuelve a los que esperan. (ok, texto)."""
     exigir_nivel("empleado", "deshacer un cheque depositado")
     with db_lock:
+        # El que se le dio a un proveedor vuelve anulando ese pago: si no, el proveedor quedaba
+        # pagado con un cheque que sigue en el cajón.
+        dado = c.execute("SELECT cheque_entregado_a FROM movimientos_de_cuenta WHERE id = ?",
+                         (int(movimiento_id),)).fetchone()
+        if dado and dado[0]:
+            return False, (f"Ese cheque se le dio a {dado[0]}: anulá ese pago en 🗂️ Administrar "
+                           "→ 🚚 Proveedores y vuelve solo.")
         c.execute("""UPDATE movimientos_de_cuenta SET cheque_depositado = NULL
                      WHERE id = ? AND cheque_depositado IS NOT NULL
                        AND cheque_rechazado IS NULL""", (int(movimiento_id),))
@@ -2014,7 +2023,7 @@ def rechazar_cheque(movimiento_id, gasto=0):
         return False, "El gasto del banco no puede ser negativo."
     usuario = obtener_usuario_actual()
     with db_lock, transaccion():
-        f = c.execute("""SELECT mecanico_id, -importe AS importe, cheque_fecha
+        f = c.execute("""SELECT mecanico_id, -importe AS importe, cheque_fecha, cheque_entregado_a
                          FROM movimientos_de_cuenta
                          WHERE id = ? AND medio = 'Cheque' AND anulado = 0 AND importe < 0
                            AND cheque_rechazado IS NULL""", (int(movimiento_id),)).fetchone()
@@ -2032,10 +2041,16 @@ def rechazar_cheque(movimiento_id, gasto=0):
                                 (mecanico_id, concepto, importe, vence, usuario)
                              VALUES (?, ?, ?, date('now', '-3 hours', '-1 day'), ?)""",
                           (f["mecanico_id"], concepto, importe, usuario))
+        # Si se le había dado a un proveedor, ese pago no valió: se anula y la deuda vuelve.
+        c.execute("UPDATE pagos_a_proveedores SET anulado = 1 WHERE cheque_id = ? AND anulado = 0",
+                  (int(movimiento_id),))
+        sin_pago = c.rowcount and f["cheque_entregado_a"]
         anotar_cambio("anotó un cheque rechazado", "movimiento", movimiento_id,
                       despues={"importe": f["importe"], "gasto": gasto})
     return True, (f"❌ Cheque rechazado: ${miles(f['importe'] + gasto, 0)} de nuevo en la cuenta"
-                  + (f" (con ${miles(gasto, 0)} del banco)" if gasto else "") + ".")
+                  + (f" (con ${miles(gasto, 0)} del banco)" if gasto else "") + "."
+                  + (f" Se le había dado a {sin_pago}: ese pago quedó anulado y la deuda con "
+                     "él vuelve." if sin_pago else ""))
 
 
 def mensaje_de_cheque_rechazado(nombre, importe, gasto=0):

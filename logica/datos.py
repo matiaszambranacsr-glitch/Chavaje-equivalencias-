@@ -3183,6 +3183,13 @@ def _esquema_ventas(c):
         creado TEXT DEFAULT (datetime('now')),
         anulado INTEGER DEFAULT 0
     )""")
+    # EL CHEQUE DE UN TALLER QUE SE LE DA AL PROVEEDOR (ver «LO QUE SE LE DEBE A CADA PROVEEDOR»
+    # en logica/ventas.py): el pago dice qué cheque fue, y el cheque, a quién se le dio.
+    if "cheque_id" not in [f[1] for f in c.execute("PRAGMA table_info(pagos_a_proveedores)")]:
+        c.execute("ALTER TABLE pagos_a_proveedores ADD COLUMN cheque_id INTEGER")
+    if "cheque_entregado_a" not in [f[1] for f in c.execute(
+            "PRAGMA table_info(movimientos_de_cuenta)")]:
+        c.execute("ALTER TABLE movimientos_de_cuenta ADD COLUMN cheque_entregado_a TEXT")
     # LOS GASTOS FIJOS (ver esa sección en logica/ventas.py): alquiler, luz, sueldos. Valen
     # desde un mes (AAAA-MM) hasta otro (o siempre); cambiar uno cierra el viejo y abre otro, así
     # los meses de antes no se mueven.

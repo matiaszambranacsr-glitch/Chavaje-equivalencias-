@@ -1688,8 +1688,10 @@ if pagina == PAGINAS[3]:
                             _dp1, _dp2, _dp3 = cols([3, 1, 1], abajo=True,
                                                     apilar_en_celular=False)
                             _dp1.caption(f"**{texto_para_markdown(_dp['cuenta'])}** · "
-                                         f"\\${miles(_dp['importe'], 0)} · depositado el "
-                                         f"{dia_y_mes_de_aca(_dp['depositado'])}")
+                                         f"\\${miles(_dp['importe'], 0)} · "
+                                         + (f"🔁 se le dio a {texto_para_markdown(_dp['entregado_a'])}"
+                                            if _dp.get("entregado_a") else "depositado")
+                                         + f" el {dia_y_mes_de_aca(_dp['depositado'])}")
                             with _dp2.popover("❌", key=f"pop_cheque_rechazado_{_dp['id']}",
                                               help="El banco lo rechazó.", width="stretch"):
                                 _clave_gasto = f"cheque_gasto_{_dp['id']}"
@@ -2216,11 +2218,25 @@ if pagina == PAGINAS[3]:
                                                      if n not in _con_deuda],
                          index=None, accept_new_options=True, placeholder="Elegí el proveedor",
                          key="prov_pago_proveedor")
-            st.number_input("Cuánto ($):", min_value=0.0, step=1000.0, value=None,
-                            key="prov_pago_importe", placeholder="Ej: 100000")
-            st.radio("Cómo:", MEDIOS_DE_PAGO_A_PROVEEDOR, key="prov_pago_medio",
-                     help="En efectivo de la caja queda también como salida de caja: el arqueo "
-                          "lo descuenta solo.")
+            _medio_p = st.radio("Cómo:", MEDIOS_DE_PAGO_A_PROVEEDOR, key="prov_pago_medio",
+                                help="En efectivo de la caja queda también como salida de caja: "
+                                     "el arqueo lo descuenta solo. Con un cheque de un taller, "
+                                     "sale de los que hay para depositar.")
+            if _medio_p == CHEQUE_DE_UN_TALLER:
+                # EL CHEQUE DE UN TALLER, endosado: de los que hay para depositar, con su importe.
+                _cheques_p = {x["id"]: x for x in cheques_sin_depositar()}
+                if _cheques_p:
+                    st.selectbox(
+                        "El cheque:", list(_cheques_p), index=None, key="prov_pago_cheque",
+                        placeholder="Elegí el cheque",
+                        format_func=lambda i: (  # rótulo fijo: el de cada cheque
+                            f"${miles(_cheques_p[i]['importe'], 0)} · {_cheques_p[i]['cuenta']} · "
+                            f"del {_cheques_p[i]['fecha'][8:10]}/{_cheques_p[i]['fecha'][5:7]}"))
+                else:
+                    st.caption("No hay cheques de talleres para depositar.")
+            else:
+                st.number_input("Cuánto ($):", min_value=0.0, step=1000.0, value=None,
+                                key="prov_pago_importe", placeholder="Ej: 100000")
             st.text_input("Nota (opcional):", key="prov_pago_nota")
             st.button("💸 Anotar el pago", key="prov_pago_anotar", type="primary",
                       width="stretch", on_click=anotar_pago_a_proveedor_y_avisar)
