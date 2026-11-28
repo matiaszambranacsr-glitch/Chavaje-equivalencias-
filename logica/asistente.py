@@ -435,6 +435,13 @@ COMO_HAGO_DEL_ASISTENTE = (
      "de cada billete, resta el cambio y lo pasa al arqueo. Lo que salió del cajón (un flete, un retiro) se anota antes, en «💸 Salidas de caja», y se "
      "descuenta. Las ventas del día se bajan en Excel desde ahí.",
      "💵 Caja", ""),
+    ("valor_stock", "Saber cuánto vale el stock",
+     "vale valen valor valorizado valorizar plata invertida inventario capital dormida "
+     "costo total",
+     "En 📊 Estadísticas → 📈 Resumen, abrí «📦 Cuánto vale el stock»: a costo y a precio de "
+     "lista, por marca, con cuántos productos no tienen costo cargado. Se baja en Excel. Solo "
+     "el administrador.",
+     "📊 Estadísticas", "admin"),
     ("proveedores", "Anotar lo que le debés a un proveedor (facturas y pagos)",
      "proveedor proveedores le debo debemos compra compras vence pagarle pago a proveedor "
      "cuenta con el proveedor deuda",

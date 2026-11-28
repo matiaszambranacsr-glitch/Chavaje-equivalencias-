@@ -463,6 +463,44 @@ def probar():
     at.toggle(key="carteles_con_stock").set_value(False).run()
     esperar("y sin el filtro, todos", (_boton_carteles(), [e.value for e in at.exception]),
             (["💲 Carteles de precio (2)"], []))
+
+    # CUÁNTO VALE EL STOCK (ver esa sección en logica/deposito.py): a costo y a precio de lista,
+    # por marca, con lo que tiene stock y no tiene costo aparte; solo el administrador.
+    c.execute("UPDATE productos SET precio_costo = 100 WHERE id = ?", (_k["K1"],))
+    c.execute("UPDATE productos SET precio_costo = 200 WHERE id = ?", (_k["K3"],))
+    ns["conn"].commit()
+    _gv = ns["valor_del_stock"].__globals__
+    _antes_v = (_gv["_nivel_de_quien_esta_adentro"], _gv["hay_claves_configuradas"],
+                _gv["marcas_con_precios_fuera_de_escala"])
+    try:
+        _gv["hay_claves_configuradas"] = lambda: True
+        _gv["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+        _fila_v = [x for x in ns["valor_del_stock"]()["por_marca"] if x["Marca"] == "MARCA CARTEL"]
+        esperar("la marca: a costo lo que tiene costo, a precio de lista todo, y los sin costo",
+                _fila_v, [{"Marca": "MARCA CARTEL", "Productos": 5, "Unidades": 15,
+                           "A costo": 1200.0, "A precio de lista": 4740.0, "Sin costo": 3}])
+        _gv["marcas_con_precios_fuera_de_escala"] = lambda: {"MARCA CARTEL"}
+        esperar("una lista en otra escala no suma a precio de lista",
+                [x["A precio de lista"] for x in ns["valor_del_stock"]()["por_marca"]
+                 if x["Marca"] == "MARCA CARTEL"], [None])
+        _gv["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+        try:
+            ns["valor_del_stock"]()
+            fallas.append("un empleado vio cuánto vale el stock (los costos)")
+        except PermissionError:
+            pass
+    finally:
+        (_gv["_nivel_de_quien_esta_adentro"], _gv["hay_claves_configuradas"],
+         _gv["marcas_con_precios_fuera_de_escala"]) = _antes_v
+    at.session_state["pagina_actual"] = ns["PAGINAS"][4]
+    at.session_state["sub_stats"] = ns["SUB_STATS"][0]
+    at.session_state["exp_valor_del_stock"] = True
+    at.run()
+    esperar("en Estadísticas, abierto: a costo, a precio de lista y el Excel",
+            ([m.label for m in at.metric if m.label in ("A costo", "A precio de lista")],
+             [x.proto.label for x in at.get("download_button") if x.proto.label == "⬇️ En Excel"],
+             [e.value for e in at.exception]),
+            (["A costo", "A precio de lista"], ["⬇️ En Excel"], []))
     return fallas
 
 

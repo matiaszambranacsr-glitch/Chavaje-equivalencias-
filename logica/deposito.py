@@ -1254,6 +1254,40 @@ def lista_de_precios_para_descargar(nombre, filas, descuento):
     return lambda: pdf_de_la_lista_de_precios(nombre, filas, descuento, dia)
 
 
+# CUÁNTO VALE EL STOCK: el dueño preguntaba «¿cuánta plata tengo en el depósito?» y nadie sabía:
+# el stock estaba cargado, los costos también (en buena parte), pero no se multiplicaba en ningún
+# lado. A costo (lo que pagaste) y a precio de lista (lo que valdría vendido), por marca, con lo
+# que hay en stock sin costo cargado aparte (así se sabe cuánto falta para que el número sea
+# entero). Las listas en otra escala no suman al precio de lista (su precio no es el de venta).
+def valor_del_stock():
+    """{a_costo, a_precio, unidades, productos, sin_costo (productos con stock y sin costo),
+    por_marca: [{Marca, Productos, Unidades, «A costo», «A precio de lista», «Sin costo»}]}, la
+    marca que más plata tiene primero."""
+    exigir_nivel("admin", "ver cuánto vale el stock")
+    fuera = marcas_con_precios_fuera_de_escala()
+    por_marca = []
+    for f in c.execute(
+            """SELECT m.nombre AS marca, COUNT(*) AS productos, SUM(p.stock) AS unidades,
+                      SUM(CASE WHEN p.precio_costo > 0 THEN p.stock * p.precio_costo END) AS costo,
+                      SUM(CASE WHEN p.precio > 0 THEN p.stock * p.precio END) AS precio,
+                      SUM(CASE WHEN COALESCE(p.precio_costo, 0) <= 0 THEN 1 ELSE 0 END)
+                          AS sin_costo
+               FROM productos p JOIN marcas m ON m.id = p.marca_id
+               WHERE p.stock > 0 GROUP BY m.id"""):
+        por_marca.append({"Marca": f["marca"], "Productos": f["productos"],
+                          "Unidades": int(f["unidades"] or 0),
+                          "A costo": round(float(f["costo"] or 0), 2),
+                          "A precio de lista": (None if f["marca"] in fuera
+                                                else round(float(f["precio"] or 0), 2)),
+                          "Sin costo": f["sin_costo"]})
+    por_marca.sort(key=lambda x: (-x["A costo"], -(x["A precio de lista"] or 0), x["Marca"]))
+    return {"a_costo": round(sum(x["A costo"] for x in por_marca), 2),
+            "a_precio": round(sum(x["A precio de lista"] or 0 for x in por_marca), 2),
+            "unidades": sum(x["Unidades"] for x in por_marca),
+            "productos": sum(x["Productos"] for x in por_marca),
+            "sin_costo": sum(x["Sin costo"] for x in por_marca), "por_marca": por_marca}
+
+
 def factura_sugerida_de_lo_que_entro(ultima):
     """{proveedor (la marca que más unidades trajo), importe (lo que trajo, a costo), sin_costo
     (cuántos productos no tienen costo)} de lo recién sumado al stock (`ultima`: {id: cuántas})."""

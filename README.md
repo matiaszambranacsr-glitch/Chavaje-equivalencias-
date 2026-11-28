@@ -7946,6 +7946,18 @@ veces primero, y **«➕»** lo suma a la venta. Sin precios, como «Atendiendo 
 estar mirando (`lo_que_suele_llevar()`, en `logica/deposito.py`; lo controlan
 `pruebas_de_las_ventas.py` y `pruebas_de_la_mercaderia.py`).
 
+## 📦 Cuánto vale el stock
+
+El dueño preguntaba «¿cuánta plata tengo en el depósito?» y nadie sabía: el stock estaba
+cargado, los costos también (en buena parte), pero no se multiplicaban en ningún lado. En 📊
+Estadísticas → 📈 Resumen, **«📦 Cuánto vale el stock»** (solo el administrador, que es el que ve
+los costos) dice cuánto vale lo que hay en stock **a costo** —lo que pagaste, de lo que tiene
+costo cargado— y **a precio de lista** —lo que valdría vendido—, cuántas unidades y, por marca,
+la que más plata tiene primero. Los productos con stock sin costo se cuentan aparte (así se sabe
+cuánto le falta al número para ser entero), y las listas en otra escala no suman al precio de
+lista: dicen «otra escala». En Excel también (`valor_del_stock()`, en `logica/deposito.py`; lo
+controla `pruebas_de_la_mercaderia.py`).
+
 ## 🚚 Lo que le debés a cada proveedor
 
 La app sabía lo que te deben los talleres, pero no lo que vos le debés a cada proveedor: las

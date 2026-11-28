@@ -26,6 +26,44 @@ if pagina == PAGINAS[4]:
         # por dos, de cuando se guardaban la ida y la vuelta, y con 20.037 vínculos decía 10.018.
         m3.metric("Vínculos de equivalencia", miles(total_equiv))
 
+        # 📦 CUÁNTO VALE EL STOCK (ver esa sección en logica/deposito.py): solo el administrador,
+        # que es el que ve los costos. Perezoso: suma todo el stock solo abierto.
+        if es_admin():
+            _exp_valor = st.expander("📦 Cuánto vale el stock", key="exp_valor_del_stock",
+                                     on_change="rerun")
+            if _exp_valor.open:
+                with _exp_valor:
+                    _vs = valor_del_stock()
+                    _q_vs = fila_de_numeros(3)
+                    _q_vs[0].metric("A costo", f"${miles(_vs['a_costo'], 0)}",
+                                    help="Lo que pagaste por lo que hay en stock (de lo que tiene "
+                                         "costo cargado).")
+                    _q_vs[1].metric("A precio de lista", f"${miles(_vs['a_precio'], 0)}",
+                                    help="Lo que valdría vendido a precio de lista (sin las "
+                                         "listas en otra escala).")
+                    _q_vs[2].metric("Unidades", miles(_vs["unidades"]),
+                                    help=f"En {miles(_vs['productos'])} producto(s).")
+                    if _vs["sin_costo"]:
+                        st.caption(f"⚠️ {miles(_vs['sin_costo'])} producto(s) con stock no tienen "
+                                   "costo cargado: no entran en «A costo».")
+                    if _vs["por_marca"]:
+                        st.dataframe([{**x, "A costo": f"${miles(x['A costo'], 0)}",
+                                       "A precio de lista": (f"${miles(x['A precio de lista'], 0)}"
+                                                             if x["A precio de lista"] is not None
+                                                             else "otra escala"),
+                                       "Unidades": miles(x["Unidades"])}
+                                      for x in _vs["por_marca"]],
+                                     hide_index=True, width="stretch")
+                        st.download_button("⬇️ En Excel",
+                                           data=lambda: to_excel_bytes(_vs["por_marca"]),
+                                           file_name=f"valor_del_stock_{hoy_aca():%Y%m%d}.xlsx",
+                                           key="valor_stock_excel",
+                                           mime="application/vnd.openxmlformats-officedocument."
+                                                "spreadsheetml.sheet")
+                    else:
+                        st.caption("Todavía no hay stock cargado (se carga en «📦 Entró "
+                                   "mercadería»).")
+
         # 🧾 QUÉ SABE LA APP DE CADA PRODUCTO, por lista. Ver que_tan_completo_esta_el_catalogo().
         _exp_completo = st.expander("🧾 Qué tan completo está tu catálogo",
                                     key="exp_que_tan_completo", on_change="rerun")

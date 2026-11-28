@@ -611,6 +611,7 @@ VERSION_DE_LO_NUEVO = "2026-11-27"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("📦 Cuánto vale el stock: a costo (lo que pagaste) y a precio de lista, por marca, con cuántos productos con stock no tienen costo cargado. En Excel también.", "📊 Estadísticas → 📈 Resumen"),
     ("🧾 Después de «✅ Sumar al stock», «Anotar la factura de lo que entró»: el proveedor y el importe a costo ya vienen propuestos, para que la deuda con el proveedor quede anotada sin escribirla de nuevo.", "📦 Depósito → 📦 Entró mercadería"),
     ("🚚 Lo que le debés a cada proveedor: anotás sus facturas de compra con el vencimiento y lo que les pagás (en efectivo de la caja, queda también como salida de caja). Ves cuánto le debés a cada uno, lo vencido y lo próximo a vencer; la campanita te avisa a tiempo.", "🗂️ Administrar → 🚚 Proveedores"),
     ("📄 Lista de precios para un taller: de lo que compró o de una marca (lo que hay en stock), con su precio de lista y el suyo con su descuento, para mandársela por WhatsApp o en PDF.", "🗂️ Administrar → 💳 Cuentas corrientes"),
