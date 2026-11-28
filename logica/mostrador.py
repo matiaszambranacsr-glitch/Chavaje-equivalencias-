@@ -328,6 +328,14 @@ def mensaje_de_que_llego(consulta):
     puede estar en otra escala, y el que se le dijo puede haber cambiado."""
     nombre = str(consulta.get("Cliente") or "").strip()
     que = str(consulta.get("Pidió") or consulta.get("Descripción") or "lo que nos consultaste")
+    # Si dejó seña (ver «LAS SEÑAS» en logica/ventas.py), que lo sepa: así no pregunta si la
+    # tiene que volver a pagar, y viene a buscarlo.
+    sena = c.execute("SELECT SUM(importe) FROM senas WHERE consulta_id = ? AND estado = 'activa'",
+                     (consulta.get("_id"),)).fetchone()[0] if consulta.get("_id") else None
+    if sena:
+        return (f"Hola{' ' + nombre if nombre else ''}! Te escribimos de El Chavo: ya llegó {que}, "
+                f"lo que nos encargaste (dejaste ${miles(sena, 0)} de seña). ¿Cuándo pasás a "
+                "buscarlo?")
     return (f"Hola{' ' + nombre if nombre else ''}! Te escribimos de El Chavo: ya llegó {que}, "
             "que nos habías consultado. ¿Te lo guardamos?")
 

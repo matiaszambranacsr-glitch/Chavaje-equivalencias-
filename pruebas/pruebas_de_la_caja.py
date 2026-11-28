@@ -837,10 +837,20 @@ def probar(L):
             "🔄 Turnos (arqueos): ana: faltaron $100 · beto: sobraron $100" in
             ns["resumen_del_dia"]("2025-02-05"), True)
     esperar("los arqueos por cajero del mes: lo de sus turnos, día por día",
-            _cm["arqueos"], [{"Cajero": "ana", "Arqueos": 2, "Con diferencia": 2, "Faltó": 600.0,
-                              "Sobró": 0.0},
-                             {"Cajero": "beto", "Arqueos": 2, "Con diferencia": 2, "Faltó": 0.0,
-                              "Sobró": 200.0}])
+            _cm["arqueos"], [{"Cajero": "ana", "Arqueos": 2, "Con diferencia": 2,
+                              "Con faltante": 2, "Faltó": 600.0, "Sobró": 0.0},
+                             {"Cajero": "beto", "Arqueos": 2, "Con diferencia": 2,
+                              "Con faltante": 0, "Faltó": 0.0, "Sobró": 200.0}])
+    esperar("a quien le falta seguido (con 2 días no; con 3, sí)",
+            ([k["Cajero"] for k in ns["cajeros_con_faltantes_seguidos"](_fecha(2025, 2, 28))],
+             ns["VECES_CON_FALTANTE_PARA_AVISAR"]), ([], 3))
+    c.execute("INSERT INTO arqueos_de_caja (dia, efectivo_esperado, efectivo_contado, usuario) "
+              "VALUES ('2025-02-20', 1000, 700, 'ana')")
+    esperar("con un tercer día, a la campanita",
+            [(k["Cajero"], k["Con faltante"], k["Faltó"])
+             for k in ns["cajeros_con_faltantes_seguidos"](_fecha(2025, 2, 28))],
+            [("ana", 3, 900.0)])
+    c.execute("DELETE FROM arqueos_de_caja WHERE dia = '2025-02-20'")
     esperar("cuándo se vende: por la hora y el día de acá, sin lo anulado",
             _cm["cuando"], {"por_hora": [("12", 1, 1000000.0), ("23", 1, 300000.0)],
                             "por_dia": [("miércoles", 1, 1000000.0), ("viernes", 1, 300000.0)]})
@@ -1149,6 +1159,10 @@ def probar(L):
             (120000.0, (30000.0, 0.0, (_hoy_p + _tdp(days=2)).isoformat(), 1)))
     esperar("lo que vence en los próximos días, para avisar",
             [k["proveedor"] for k in ns["facturas_para_avisar"]()], ["DISTRIBUIDORA NORTE"])
+    esperar("en el resumen del día, solo para el dueño (con la ganancia)",
+            ("🧾 Proveedores para pagar: DISTRIBUIDORA NORTE (vence en "
+             in ns["resumen_del_dia"](con_ganancia=True),
+             "Proveedores para pagar" in ns["resumen_del_dia"]()), (True, False))
     ns["anotar_pago_a_proveedor"]("OTRO SA", 30000, "🏦 Transferencia")
     esperar("el que no debe nada, sale", list(_cuentas_p()), ["DISTRIBUIDORA NORTE"])
     _movs_p = ns["movimientos_con_el_proveedor"]("distribuidora NORTE")

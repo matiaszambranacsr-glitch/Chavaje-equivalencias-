@@ -786,6 +786,17 @@ def probar(L):
             "https://wa.me/5491155551234?text=" + urllib.parse.quote(
                 "Hola Ruiz! Te escribimos de El Chavo: ya llegó LL100, que nos habías "
                 "consultado. ¿Te lo guardamos?"))
+    # Si dejó seña, el mensaje se lo dice (no pregunta si la tiene que volver a pagar).
+    c.execute("INSERT INTO senas (cliente, que, consulta_id, importe, forma_de_pago) "
+              "VALUES ('Ruiz', 'LL100', ?, 5000, '💵 Efectivo')", (_llego[0]["_id"],))
+    esperar("con seña, el mensaje dice cuánto dejó",
+            ns["mensaje_de_que_llego"](_llego[0]),
+            "Hola Ruiz! Te escribimos de El Chavo: ya llegó LL100, lo que nos encargaste "
+            "(dejaste $5.000 de seña). ¿Cuándo pasás a buscarlo?")
+    c.execute("UPDATE senas SET estado = 'reintegrada' WHERE consulta_id = ?", (_llego[0]["_id"],))
+    esperar("la seña devuelta ya no cuenta",
+            "seña" in ns["mensaje_de_que_llego"](_llego[0]), False)
+    c.execute("DELETE FROM senas WHERE consulta_id = ?", (_llego[0]["_id"],))
     ns["marcar_consulta_avisada"](_llego[0]["_id"])
     esperar("avisado: sigue en la lista (dice cuándo) y sale del aviso del día",
             ([x["_avisado_hace"] for x in ns["consultas_que_ahora_hay_en_stock"]()],

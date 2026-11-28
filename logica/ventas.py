@@ -307,6 +307,21 @@ def resumen_del_dia(dia=None, con_ganancia=False):
         por_reclamar = [g for g in garantias() if not g["reclamo"]]
         if por_reclamar:
             renglones.append(f"🔧 Garantías por reclamar al proveedor: {miles(len(por_reclamar))}")
+        # LO QUE VENCE: los cheques que ya se pueden depositar y, al administrador, lo que hay
+        # que pagarles a los proveedores (ver «LOS CHEQUES PARA DEPOSITAR» y «LO QUE SE LE DEBE
+        # A CADA PROVEEDOR»).
+        cheques = [x for x in cheques_sin_depositar() if x["se_puede"]]
+        if cheques:
+            renglones.append(f"🏦 Cheques para depositar: {miles(len(cheques))} "
+                             f"({plata(sum(x['importe'] for x in cheques))})")
+        if con_ganancia:
+            a_pagar = facturas_para_avisar()
+            if a_pagar:
+                vencido = sum(k["vencido"] for k in a_pagar)
+                renglones.append("🧾 Proveedores para pagar: " + ", ".join(
+                    k["proveedor"] for k in a_pagar[:3]) + (" …" if len(a_pagar) > 3 else "")
+                    + (f" ({plata(vencido)} vencidos)" if vencido else
+                       f" (vence en {DIAS_PARA_AVISAR_UNA_FACTURA} días o menos)"))
     except Exception as _err:          # el resumen sale igual, sin eso
         anotar_error("resumen_del_dia", _err)
     return "\n".join(renglones)
@@ -1793,6 +1808,19 @@ def resumen_de_la_caja(dia=None):
 # faltan $100, la de la tarde no perdió nada). Si la misma persona vuelve a contar, los suyos se
 # compensan. La plata que se saca entre turnos va como salida de caja (un retiro): así no cuenta
 # como faltante.
+# A quien le falta plata en VECES_CON_FALTANTE_PARA_AVISAR días del mes o más, la campanita se
+# lo dice al administrador: una vez es un vuelto mal dado; seguido, hay que mirarlo.
+VECES_CON_FALTANTE_PARA_AVISAR = 3
+
+
+def cajeros_con_faltantes_seguidos(hoy=None):
+    """Los de arqueos_por_cajero() del mes con faltante en VECES_CON_FALTANTE_PARA_AVISAR días
+    o más."""
+    hoy = hoy or hoy_aca()
+    return [k for k in arqueos_por_cajero(hoy.replace(day=1).isoformat(), hoy.isoformat())
+            if k["Con faltante"] >= VECES_CON_FALTANTE_PARA_AVISAR]
+
+
 def turnos_del_dia(dia=None):
     """Los arqueos del día en orden, cada uno con «del_turno»: su diferencia menos la del arqueo
     anterior (lo que pasó en ese turno). [dict]."""
@@ -3617,9 +3645,10 @@ def arqueos_por_cajero(desde, hasta):
     cajeros = {}
     for (_dia, quien), dif in por_dia.items():
         k = cajeros.setdefault(quien, {"Cajero": quien, "Arqueos": 0, "Con diferencia": 0,
-                                       "Faltó": 0.0, "Sobró": 0.0})
+                                       "Con faltante": 0, "Faltó": 0.0, "Sobró": 0.0})
         k["Arqueos"] += 1
         k["Con diferencia"] += bool(dif)
+        k["Con faltante"] += dif < 0
         k["Faltó" if dif < 0 else "Sobró"] = round(k["Faltó" if dif < 0 else "Sobró"]
                                                    + abs(dif), 2)
     return sorted(cajeros.values(), key=lambda k: (-k["Faltó"], k["Cajero"]))

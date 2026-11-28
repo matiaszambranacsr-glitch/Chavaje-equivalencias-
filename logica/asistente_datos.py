@@ -30,6 +30,8 @@ FUNCIONES_QUE_PUEDE_USAR = (
     "autos_del_taller", "chats_sin_leer", "cuentas_para_recordar", "garantias", "hoy_aca",
     "miles", "texto_para_markdown", "presupuestos_para_seguir", "pedidos_sin_llegar",
     "cuentas_que_dejaron_de_venir", "avance_del_objetivo", "renglon_del_objetivo",
+    "senas_activas", "senas_sin_retirar", "cheques_sin_depositar", "cuentas_con_proveedores",
+    "facturas_para_avisar",
 )
 _DATO_VENTAS = re.compile(
     r"\bcuanto (se )?(vendi\w*|vend[ie]mos|vendio|recaud\w*|facturamos|hicimos|entro|hay en (la )?caja)\b"
@@ -42,6 +44,22 @@ _POR_VENDEDOR = re.compile(r"\b(vendedor\w*|empleado\w*|cada uno|comision\w*)\b"
 _DATO_OBJETIVO = re.compile(
     r"\b(como (vamos|va|venimos|viene|estamos|andamos)|cuanto (falta|nos falta|llevamos|va|"
     r"vamos))\b.{0,25}\b(objetivo|meta)\b|^(y )?(el )?(objetivo|meta)( del mes)?$")
+# «¿Qué señas hay?», «¿cuántas señas sin retirar?». No «¿cómo anoto una seña?» (la ficha) ni
+# «¿qué es una seña?»: van en plural o con lo que se pregunta pegado.
+_DATO_SENAS = re.compile(
+    r"\b(que|cuantas|cuales) senas\b|\bhay senas\b|\bplata (hay )?en senas\b"
+    r"|\bsenas (activas|sin retirar|pendientes|que hay|que esperan)\b|^(y )?(las )?senas$")
+# «¿Qué cheques hay para depositar?». No «¿cómo cargo un pago con cheque?» ni «ver los cheques
+# para depositar» (las fichas: lo segundo es el título de una).
+_DATO_CHEQUES = re.compile(
+    r"^(que|cuantos|cuales|hay|tengo|tenemos)\b.{0,25}\bcheques\b"
+    r"|^(y )?(los )?cheques( para depositar| sin depositar)?$")
+# «¿Cuánto les debo a los proveedores?», «¿qué hay que pagarle a los proveedores?». No «¿cómo
+# anoto un pago a un proveedor?» ni «lo que le debés a un proveedor» (el título de la ficha).
+_DATO_PROVEEDORES = re.compile(
+    r"\b(cuanto|que)\b.{0,25}\b(debo|debemos|pagar|pagarle|pagarles|vence|vencen)\b"
+    r".{0,25}\bproveedor\w*|\bproveedor\w*\b.{0,20}\b(para pagar|a pagar|por pagar|vencid\w*)\b"
+    r"|\bdeuda con (los |el )?proveedor\w*")
 _DATO_Y_AYER = re.compile(r"^(y )?(ayer|el de ayer|y el de ayer)$")
 _DATO_A_COBRAR = re.compile(
     r"\b(que|cuanto|cuantas|hay)\b.{0,20}\b(falta|faltan|espera|esperan|queda|quedan)\b.{0,15}"
@@ -143,6 +161,61 @@ def _dato_del_objetivo(contexto):
     return _asis_dato(texto, _asis_ir_a(_CAJA, contexto), "objetivo")
 
 
+def _dato_de_las_senas(contexto):
+    """Las señas que esperan que el cliente retire (las de «🔖 Señas» en la caja): cuántas, la
+    plata y la más vieja. El nombre del cliente sí (es personal); el teléfono, nunca."""
+    activas = senas_activas()
+    if not activas:
+        return _asis_dato("✅ No hay señas esperando que el cliente retire.",
+                          _asis_ir_a(_CAJA, contexto), "senas")
+    vieja, viejas = activas[0], senas_sin_retirar()
+    texto = (f"🔖 Hay **{miles(len(activas))}** seña(s) esperando que el cliente retire, por "
+             f"**{_asis_plata(sum(s['importe'] or 0 for s in activas))}**. La más vieja: "
+             f"{_asis_nombre(vieja['que'])}"
+             + (f", de {_asis_nombre(vieja['cliente'])}" if vieja.get("cliente") else "") + "."
+             + (f" **{miles(len(viejas))}** hace más de {DIAS_PARA_AVISAR_UNA_SENA} días: "
+                "avisales que pasen a buscarlo." if viejas else ""))
+    return _asis_dato(texto, _asis_ir_a(_CAJA, contexto), "senas")
+
+
+def _dato_de_los_cheques(contexto):
+    """Los cheques para depositar (los de «🏦 Cheques para depositar» en 💳 Cuentas corrientes):
+    los que ya se pueden, la plata y el que vence primero."""
+    todos = cheques_sin_depositar()
+    ya = [x for x in todos if x["se_puede"]]
+    despues = len(todos) - len(ya)
+    if not ya:
+        texto = "✅ No hay cheques para depositar hoy." + (
+            f" Hay **{miles(despues)}** con fecha más adelante." if despues else "")
+        return _asis_dato(texto, _asis_ir_a(_ADMINISTRAR, contexto), "cheques")
+    primero = ya[0]
+    vence = ("ya venció" if primero["vencido"]
+             else "vence hoy" if primero["dias_para_vencer"] == 0
+             else f"vence en {primero['dias_para_vencer']} día(s)")
+    texto = (f"🏦 **{miles(len(ya))}** cheque(s) para depositar, por "
+             f"**{_asis_plata(sum(x['importe'] for x in ya))}**. El primero, de "
+             f"{_asis_nombre(primero['cuenta'])} ({_asis_plata(primero['importe'])}), {vence}."
+             + (f" Hay **{miles(despues)}** más con fecha más adelante." if despues else ""))
+    return _asis_dato(texto, _asis_ir_a(_ADMINISTRAR, contexto), "cheques")
+
+
+def _dato_de_los_proveedores(contexto):
+    """Lo que se les debe a los proveedores (lo de «🚚 Proveedores»): solo al administrador."""
+    cuentas = cuentas_con_proveedores()
+    if not cuentas:
+        return _asis_dato("✅ No les debés nada a los proveedores (de lo anotado en «🚚 "
+                          "Proveedores»).", _asis_ir_a(_ADMINISTRAR, contexto), "proveedores")
+    vencido = sum(k["vencido"] for k in cuentas)
+    proximos = sorted((k for k in cuentas if k["proximo"]), key=lambda k: k["proximo"])
+    texto = (f"🧾 Les debés **{_asis_plata(sum(k['debe'] for k in cuentas))}** a "
+             f"**{miles(len(cuentas))}** proveedor(es)"
+             + (f"; vencido, **{_asis_plata(vencido)}**" if vencido else "") + "."
+             + (f" Lo próximo que vence: {_asis_nombre(proximos[0]['proveedor'])}, el "
+                f"{proximos[0]['proximo'][8:10]}/{proximos[0]['proximo'][5:7]}."
+                if proximos else ""))
+    return _asis_dato(texto, _asis_ir_a(_ADMINISTRAR, contexto), "proveedores")
+
+
 def _dato_a_cobrar(contexto):
     espera = ventas_a_cobrar()
     if not espera:
@@ -237,6 +310,22 @@ def _dato_de_lo_pendiente(contexto):
             lineas.append(f"⏳ **{miles(r['esperando'])}** venta(s) esperan en la caja "
                           f"({_asis_plata(r['total_esperando'])}).")
             botones += _asis_ir_a(_CAJA, contexto)
+        if contexto.get("nivel") in ("operador", "admin"):
+            _viejas = senas_sin_retirar()
+            if _viejas:
+                lineas.append(f"🔖 **{miles(len(_viejas))}** seña(s) sin retirar hace más de "
+                              f"{DIAS_PARA_AVISAR_UNA_SENA} días: «🔖 Señas», en la caja.")
+    if _ADMINISTRAR in visibles and contexto.get("nivel") in ("operador", "admin"):
+        _cheques = [x for x in cheques_sin_depositar() if x["se_puede"]]
+        if _cheques:
+            lineas.append(f"🏦 **{miles(len(_cheques))}** cheque(s) para depositar: «🏦 Cheques "
+                          "para depositar», en 💳 Cuentas corrientes.")
+        if contexto.get("nivel") == "admin":
+            _a_pagar = facturas_para_avisar()
+            if _a_pagar:
+                lineas.append(f"🧾 **{miles(len(_a_pagar))}** proveedor(es) para pagar (vencido "
+                              f"o vence en {DIAS_PARA_AVISAR_UNA_FACTURA} días o menos): en «🚚 "
+                              "Proveedores».")
     if _DEPOSITO in visibles:
         pendientes = pedidos_pendientes()
         if pendientes:
@@ -328,6 +417,15 @@ def dato_del_momento(llano, contexto):
             return _dato_de_las_ventas(contexto, ayer=" ayer" in f" {llano}")
         if _DATO_A_COBRAR.search(llano):
             return _dato_a_cobrar(contexto)
+        # Llevan nombres de clientes: solo para el personal.
+        if nivel in ("operador", "admin") and _DATO_SENAS.search(llano):
+            return _dato_de_las_senas(contexto)
+    if _ADMINISTRAR in visibles and nivel in ("operador", "admin"):
+        if _DATO_CHEQUES.search(llano):
+            return _dato_de_los_cheques(contexto)
+        # Lo que se les debe a los proveedores: como la campanita, solo al administrador.
+        if nivel == "admin" and _DATO_PROVEEDORES.search(llano):
+            return _dato_de_los_proveedores(contexto)
     if _DEPOSITO in visibles and _DATO_DEPOSITO.search(llano):
         return _dato_del_deposito(contexto)
     if _MENSAJES in visibles and _DATO_MENSAJES.search(llano):

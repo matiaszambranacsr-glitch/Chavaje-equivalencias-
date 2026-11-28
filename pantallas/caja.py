@@ -372,7 +372,8 @@ if pagina == PAGINAS[11]:
                         if _cm["arqueos"]:
                             st.markdown("**🧮 Arqueos por cajero** (lo de sus turnos)")
                             st.dataframe([{**a, "Faltó": f"${miles(a['Faltó'], 0)}",
-                                           "Sobró": f"${miles(a['Sobró'], 0)}"}
+                                           "Sobró": f"${miles(a['Sobró'], 0)}",
+                                           "Con faltante": f"{a['Con faltante']} día(s)"}
                                           for a in _cm["arqueos"]],
                                          hide_index=True, width="stretch")
                         if _cm["cuando"]["por_hora"]:

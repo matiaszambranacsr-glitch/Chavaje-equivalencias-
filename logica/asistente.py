@@ -448,7 +448,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "En 🗂️ Administrar → 🚚 Proveedores: «🧾 Anotar una factura de compra» (proveedor, importe "
      "y cuándo vence) y «💸 Anotar un pago» (en efectivo de la caja sale también como salida "
      "de caja). Arriba ves cuánto le debés a cada uno y lo vencido; la campanita avisa lo que "
-     "vence. Solo el administrador.",
+     "vence. Solo el administrador. Preguntame «¿Cuánto les debo a los proveedores?» y te digo "
+     "el total y lo vencido.",
      "🗂️ Administrar", "admin"),
     ("lista_taller", "Mandarle a un taller la lista de precios con su descuento",
      "lista de precios lista precios taller mandarle pasarle descuento pdf whatsapp lo que "
@@ -488,7 +489,8 @@ COMO_HAGO_DEL_ASISTENTE = (
      "cuentas, el que vence primero arriba (se depositan dentro de los 30 días de su fecha). Al "
      "depositarlo, tocá «✅». Si el banco lo rechaza, en los depositados tocá «❌»: vuelve a la "
      "cuenta con el gasto del banco y sale el WhatsApp para avisarle. La campanita avisa los "
-     "que ya se pueden depositar.",
+     "que ya se pueden depositar, y si me preguntás «¿Qué cheques hay para depositar?» te los "
+     "cuento.",
      "🗂️ Administrar", "empleado"),
     ("cierre_mes", "Ver el cierre del mes (y a qué hora se vende más)",
      "cierre mes mensual resumen del mes contador excel arqueos faltante sobrante cajero "
@@ -521,7 +523,7 @@ COMO_HAGO_DEL_ASISTENTE = (
      "cómo pagó, y «🔖 Anotar la seña». Entra a la caja hoy. Si es del catálogo, la app avisa "
      "cuando entra y se puede anotar como pedido al proveedor. Cuando lo retira, en 🧾 Ventas "
      "tildá «🔖 Descontar la seña» y se cobra lo que falta. Si no lo va a retirar, «↩️» la "
-     "devuelve.",
+     "devuelve. «¿Qué señas hay?» te dice cuántas esperan y la más vieja.",
      "💵 Caja", "empleado"),
     ("agenda", "Ver la ficha de un cliente de mostrador (la agenda)",
      "agenda cliente clientes mostrador ficha telefono celular historial que compro compras "

@@ -99,7 +99,7 @@ ENTIENDE = (
     ("como pongo el recargo de las cuotas con tarjeta", "como:recargo_cuotas"),
     ("le quiero dar un recibo al taller que me pago", "como:recibo"),
     ("quiero ver el cierre del mes para el contador", "como:cierre_mes"),
-    ("que cheques tengo que depositar", "como:cheques"),
+    ("como marco que deposite un cheque", "como:cheques"),
     ("me rechazaron un cheque", "como:cheques"),
     ("a un taller le quiero hacer un trato especial", "como:trato_especial"),
     ("donde anoto el alquiler y los sueldos", "como:gastos_fijos"),
@@ -1077,13 +1077,16 @@ def probar(L):
         "cuanto debe taller negrita": "dato:cuenta", "que tengo pendiente": "dato:pendiente",
         "cuanto debo": "dato:mi_cuenta", "hay mensajes sin leer": "dato:mensajes",
         "como vamos con el objetivo": "dato:objetivo",
+        "que senas hay": "dato:senas", "que cheques hay para depositar": "dato:cheques",
+        "cuanto les debo a los proveedores": "dato:proveedores",
     }
     # Quién recibe cada dato: lo de las pantallas de cada uno, y nada más.
     _quien_d = {
         "invitado": set(),
         "depósito": {"dato:deposito", "dato:pendiente"},
         "operador": {"dato:ventas", "dato:a_cobrar", "dato:deposito", "dato:cuenta",
-                     "dato:pendiente", "dato:mensajes", "dato:objetivo"},
+                     "dato:pendiente", "dato:mensajes", "dato:objetivo", "dato:senas",
+                     "dato:cheques"},
         "taller": {"dato:mi_cuenta"},
     }
     if not _prod_d:
@@ -1107,7 +1110,9 @@ def probar(L):
             ("💵 Caja", "cuanto falta para el objetivo", "dato:objetivo"),
             ("📦 Depósito", "que pedidos hay en el deposito", "dato:deposito"),
             ("🗂️ Administrar", "cuanto debe taller negrita", "dato:cuenta"),
-            ("💬 Mensajes", "hay mensajes sin leer", "dato:mensajes")):
+            ("💬 Mensajes", "hay mensajes sin leer", "dato:mensajes"),
+            ("💵 Caja", "que senas hay", "dato:senas"),
+            ("🗂️ Administrar", "que cheques hay para depositar", "dato:cheques")):
         _con_esa = responder(_pregunta_d, {"visibles": [_pantalla_d], "pagina": _pantalla_d,
                                            "nivel": "operador"})["ficha"]
         _sin_esa = [p for p in _todas_d if p != _pantalla_d
@@ -1163,6 +1168,52 @@ def probar(L):
                    "cambiar el texto del mensaje de whatsapp"):
         esperar(f"«{_no_es}» no es el dato de los mensajes",
                 responder(_no_es, _roles_d["operador"])["ficha"] == "dato:mensajes", False)
+    # LAS SEÑAS, LOS CHEQUES Y LOS PROVEEDORES: lo que espera, con la plata; lo de los
+    # proveedores, solo al administrador (como la campanita).
+    _admin_d = {**_roles_d["operador"], "nivel": "admin"}
+    esperar("sin señas, sin cheques ni deudas con proveedores, lo dice",
+            [responder(_p, _admin_d)["texto"][:1] for _p in (
+                "que senas hay", "que cheques hay para depositar",
+                "cuanto les debo a los proveedores")], ["✅", "✅", "✅"])
+    c.execute("INSERT INTO senas (cliente, que, importe, forma_de_pago, fecha) VALUES "
+              "('Rosa *R*', 'Bomba de agua', 8000, '💵 Efectivo', datetime('now', '-40 days')),"
+              "('Juan', 'Filtro', 2000, '💵 Efectivo', datetime('now'))")
+    _sen_d = responder("cuantas senas sin retirar hay", _roles_d["operador"])
+    cierto("las señas: cuántas, la plata, la más vieja (escapada) y las de hace mucho",
+           "**2** seña(s)" in _sen_d["texto"] and "\\$10.000" in _sen_d["texto"]
+           and "Bomba de agua, de Rosa \\*R\\*" in _sen_d["texto"]
+           and "**1** hace más de" in _sen_d["texto"], _sen_d["texto"])
+    ns["registrar_pago_de_cuenta"](_otra_d, 3000, "Cheque", cheque_fecha=(
+        ns["hoy_aca"]() - ns["timedelta"](days=2)).isoformat())
+    _che_d = responder("que cheques tengo que depositar", _roles_d["operador"])
+    cierto("los cheques: cuántos se pueden depositar, la plata y de quién",
+           _che_d["ficha"] == "dato:cheques" and "**1** cheque(s)" in _che_d["texto"]
+           and "Lubricentro Ajeno" in _che_d["texto"] and "vence en 28 día(s)" in _che_d["texto"],
+           _che_d["texto"])
+    ns["anotar_factura_de_proveedor"]("Distri Sur", 50000,
+                                      ns["hoy_aca"]() - ns["timedelta"](days=1), "B-1",
+                                      ns["hoy_aca"]() - ns["timedelta"](days=31))
+    _prov_d = responder("cuanto les debo a los proveedores", _admin_d)
+    cierto("lo de los proveedores, al administrador: cuánto y lo vencido",
+           "\\$50.000" in _prov_d["texto"] and "vencido" in _prov_d["texto"]
+           and "DISTRI SUR" in _prov_d["texto"], _prov_d["texto"])
+    esperar("al empleado, lo de los proveedores no (va la ficha de cómo se anota)",
+            responder("cuanto les debo a los proveedores", _roles_d["operador"])["ficha"]
+            == "dato:proveedores", False)
+    _pend_a = responder("que tengo pendiente", _admin_d)["texto"]
+    _pend_o = responder("que tengo pendiente", _roles_d["operador"])["texto"]
+    esperar("lo pendiente suma las señas viejas y los cheques; los proveedores, al administrador",
+            ("🔖 **1** seña(s) sin retirar" in _pend_o, "🏦 **1** cheque(s)" in _pend_o,
+             "proveedor(es) para pagar" in _pend_o, "🧾 **1** proveedor(es)" in _pend_a),
+            (True, True, False, True))
+    for _no_es in ("como anoto una sena", "como anoto el pago a un proveedor",
+                   "como cargo un pago con cheque"):
+        esperar(f"«{_no_es}» no es un dato (es la ficha)",
+                str(responder(_no_es, _admin_d)["ficha"]).startswith("dato:"), False)
+    c.execute("DELETE FROM senas")
+    c.execute("DELETE FROM facturas_de_proveedores")
+    c.execute("DELETE FROM movimientos_de_cuenta WHERE medio = 'Cheque'")
+    ns["conn"].commit()
     _ayer_d = responder("y ayer", {**_roles_d["operador"], "ultima": "dato:ventas"})
     esperar("«¿y ayer?» después de las ventas de hoy, las de ayer",
             (_ayer_d["ficha"], _ayer_d["texto"].startswith("**Ayer**")), ("dato:ventas_ayer", True))

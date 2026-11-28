@@ -607,10 +607,13 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-27"
+VERSION_DE_LO_NUEVO = "2026-11-28"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("📋 El resumen del día ahora dice lo que vence: los cheques que ya se pueden depositar y, a vos, los proveedores para pagar (lo vencido o lo que vence en pocos días).", "💵 Caja → 📋 Ventas y cierre de caja"),
+    ("📲 El WhatsApp de «ya llegó» le dice al cliente cuánto dejó de seña, si dejó: así no pregunta si la tiene que volver a pagar.", "📊 Estadísticas → 📌 Para pedir"),
+    ("🧮 La campanita te avisa si a un cajero le faltó plata en varios días del mes (una vez es un vuelto mal dado; seguido, hay que mirarlo). En los arqueos por cajero del cierre del mes, cuántos días le faltó.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("📦 Cuánto vale el stock: a costo (lo que pagaste) y a precio de lista, por marca, con cuántos productos con stock no tienen costo cargado. En Excel también.", "📊 Estadísticas → 📈 Resumen"),
     ("🧾 Después de «✅ Sumar al stock», «Anotar la factura de lo que entró»: el proveedor y el importe a costo ya vienen propuestos, para que la deuda con el proveedor quede anotada sin escribirla de nuevo.", "📦 Depósito → 📦 Entró mercadería"),
     ("🚚 Lo que le debés a cada proveedor: anotás sus facturas de compra con el vencimiento y lo que les pagás (en efectivo de la caja, queda también como salida de caja). Ves cuánto le debés a cada uno, lo vencido y lo próximo a vencer; la campanita te avisa a tiempo.", "🗂️ Administrar → 🚚 Proveedores"),

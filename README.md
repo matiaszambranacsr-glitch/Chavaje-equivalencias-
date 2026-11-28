@@ -7865,8 +7865,10 @@ del día elegido, listo para mandar:
 💳 Cuentas con vencido: … · 🔧 Garantías por reclamar al proveedor: …
 ```
 
-La ganancia estimada va solo si lo arma un administrador (es el único que la ve). Se puede
-corregir antes de mandarlo. El **WhatsApp del dueño** lo anota un administrador ahí mismo, una
+La ganancia estimada va solo si lo arma un administrador (es el único que la ve). Dice también
+**lo que vence**: «🏦 Cheques para depositar» (los que ya se pueden, con la plata) y, si lo arma
+un administrador, «🧾 Proveedores para pagar» (lo vencido o lo que vence en
+`DIAS_PARA_AVISAR_UNA_FACTURA` días). Se puede corregir antes de mandarlo. El **WhatsApp del dueño** lo anota un administrador ahí mismo, una
 vez (`whatsapp_del_duenio()`, en `logica/ventas.py`); con él, el botón es «📲 Mandárselo por
 WhatsApp». La cajera lo puede mandar al cerrar, sin tener que leerle los números a nadie.
 
@@ -7985,6 +7987,18 @@ etiquetas sale **«🧾 Anotar la factura de lo que entró»** (al administrador
 tienen costo, que no entran en la cuenta), para revisarlo contra la factura y anotarlo sin
 escribir todo de nuevo (`factura_sugerida_de_lo_que_entro()`, en `logica/deposito.py`).
 
+**El asistente** contesta, con datos: «¿qué señas hay?» (cuántas, la plata, la más vieja y las
+que esperan hace más de `DIAS_PARA_AVISAR_UNA_SENA` días; a quien tiene 💵 Caja), «¿qué cheques
+hay para depositar?» (cuántos, la plata, el que vence primero; a quien tiene 🗂️ Administrar) y,
+solo al administrador, «¿cuánto les debo a los proveedores?» (el total, lo vencido y lo próximo
+que vence). «¿Qué tengo pendiente?» los suma. El teléfono del cliente, nunca; «¿cómo anoto una
+seña?» sigue siendo la ficha de cómo se hace.
+
+Y **el WhatsApp de «ya llegó»** (el «📲 Avisarle» de lo que espera un cliente, en 📌 Para pedir)
+dice cuánto dejó de seña, si dejó: «… ya llegó la bomba de agua, lo que nos encargaste (dejaste
+$8.000 de seña). ¿Cuándo pasás a buscarlo?», así no pregunta si la tiene que volver a pagar
+(`mensaje_de_que_llego()`, en `logica/mostrador.py`).
+
 (`anotar_factura_de_proveedor()`, `anotar_pago_a_proveedor()`, `cuentas_con_proveedores()`,
 `movimientos_con_el_proveedor()` y `anular_movimiento_de_proveedor()`, en `logica/ventas.py`;
 lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`.)
@@ -8088,7 +8102,10 @@ el de ahora llega a hoy) junta los cierres de cada día —los mismos números: 
 de cobro, sin lo anulado, menos lo devuelto y con las señas—, por forma de pago, cuántas ventas
 y en cuántos días, el mejor día, lo vendido el mes anterior, las salidas por tipo y **los
 arqueos por cajero**: por turnos (ver «🔄 Los turnos de caja»), cuántos días tuvieron
-diferencia y cuánto faltó o sobró a cada uno, el que más faltó primero. Y **🕐 cuándo se vende**:
+diferencia, en cuántos faltó plata y cuánto faltó o sobró a cada uno, el que más faltó primero.
+Si a alguien le faltó en `VECES_CON_FALTANTE_PARA_AVISAR` días del mes (3) o más, **la campanita
+se lo dice al administrador** («🧮 A ana le faltó plata en 3 día(s) este mes»): una vez es un
+vuelto mal dado; seguido, hay que mirarlo (`cajeros_con_faltantes_seguidos()`). Y **🕐 cuándo se vende**:
 las ventas por hora y por día de la semana (en hora de acá), para decidir horarios y quién
 atiende. «📲 Mandarlo por WhatsApp» va al WhatsApp del dueño, y **«⬇️ El mes en Excel»** trae
 una hoja por cosa (Resumen, Ventas con cuotas, descuento, recargo y seña, Salidas, Señas,

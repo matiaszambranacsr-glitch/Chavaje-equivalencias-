@@ -301,6 +301,8 @@ def probar(L):
     esperar("la campanita: los que ya se pueden, fuerte porque uno venció",
             [(p_["nivel"], p_["titulo"], p_["detalle"].startswith("Uno ya venció"))
              for p_ in _aviso_ch], [("alto", "🏦 3 cheque(s) para depositar ($6.000)", True)])
+    esperar("y en el resumen del día",
+            "🏦 Cheques para depositar: 3 ($6.000)" in ns["resumen_del_dia"](), True)
     _id_b = _ch[1]["id"]
     esperar("depositado, sale; dos veces, no",
             (ns["marcar_cheque_depositado"](_id_b)[0], ns["marcar_cheque_depositado"](_id_b)[0],

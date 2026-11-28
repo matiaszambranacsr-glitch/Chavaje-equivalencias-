@@ -541,6 +541,18 @@ def diagnostico_de_salud():
     except Exception as _err:
         anotar_error("diagnostico_de_salud/pedidos_al_proveedor", _err)
 
+    # LOS FALTANTES SEGUIDOS EN LA CAJA (ver «LOS TURNOS DE CAJA» en logica/ventas.py): una vez
+    # es un vuelto mal dado; seguido, hay que mirarlo.
+    try:
+        for _k in cajeros_con_faltantes_seguidos():
+            sumar("medio", f"🧮 A {_k['Cajero']} le faltó plata en {_k['Con faltante']} día(s) "
+                           f"este mes (${miles(_k['Faltó'], 0)})",
+                  "Puede ser un vuelto mal dado, una venta cobrada con otra forma de pago o una "
+                  "salida sin anotar. En «📅 Cierre del mes» están los arqueos por cajero.",
+                  miga_hasta("Ventas y cierre de caja"), solo_admin=True)
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/faltantes", _err)
+
     # LO QUE SE LE DEBE A LOS PROVEEDORES (ver esa sección en logica/ventas.py): lo vencido y
     # lo que vence en los próximos días, para pagarlo a tiempo.
     try:
