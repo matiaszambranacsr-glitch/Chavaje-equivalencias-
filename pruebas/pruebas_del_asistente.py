@@ -100,6 +100,8 @@ ENTIENDE = (
     ("le quiero dar un recibo al taller que me pago", "como:recibo"),
     ("quiero ver el cierre del mes para el contador", "como:cierre_mes"),
     ("como marco que deposite un cheque", "como:cheques"),
+    ("el cliente trae un vale a favor", "como:vale"),
+    ("me alcanza la plata las proximas semanas", "como:flujo"),
     ("me rechazaron un cheque", "como:cheques"),
     ("a un taller le quiero hacer un trato especial", "como:trato_especial"),
     ("donde anoto el alquiler y los sueldos", "como:gastos_fijos"),

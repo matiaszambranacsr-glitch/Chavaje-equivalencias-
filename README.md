@@ -7981,6 +7981,21 @@ administrador):
   `DIAS_PARA_AVISAR_UNA_FACTURA` días (3). Los dos plazos se cambian en «⏱️ Los tiempos de la
   página».
 
+**Con un cheque de un taller** («🔁 Cheque de un taller» en «💸 Anotar un pago»): es lo más
+común —el cheque que dejó un taller va derecho al proveedor— y se anotaba dos veces o ninguna.
+Se elige de los que hay para depositar, el importe es el del cheque, y el cheque queda **«🔁 se
+le dio a»** el proveedor (sale de los que hay que depositar; en los depositados se ve a quién).
+Anular el pago lo devuelve; «↩️ No lo deposité» no lo trae sin anular el pago; y si el banco lo
+rechaza, el taller vuelve a deber y **el pago al proveedor se anula solo** (hay que pagarle de
+nuevo).
+
+**📆 Lo que entra y lo que sale** (en 💵 Caja, al administrador): por semana, lo que vence de las
+cuentas de los talleres, los cheques por su fecha y lo que vence de cada proveedor —lo que queda
+de cada cargo o factura después de imputar los pagos a lo más viejo—, con lo que queda y el
+acumulado. «Ya» es lo vencido y los cheques que ya se pueden depositar; «Más adelante», lo que
+vence después de `SEMANAS_DE_LO_QUE_ENTRA_Y_SALE` semanas (4). Es lo que vence, no lo que van a
+pagar; los gastos fijos no tienen día y van aparte (`lo_que_entra_y_sale()`).
+
 Y desde el depósito: después de «✅ Sumar al stock» en «📦 Entró mercadería», al lado de las
 etiquetas sale **«🧾 Anotar la factura de lo que entró»** (al administrador), con el proveedor
 —la marca que más unidades trajo— y el importe a costo ya propuestos (dice cuántos productos no
@@ -8103,6 +8118,9 @@ de cobro, sin lo anulado, menos lo devuelto y con las señas—, por forma de pa
 y en cuántos días, el mejor día, lo vendido el mes anterior, las salidas por tipo y **los
 arqueos por cajero**: por turnos (ver «🔄 Los turnos de caja»), cuántos días tuvieron
 diferencia, en cuántos faltó plata y cuánto faltó o sobró a cada uno, el que más faltó primero.
+También **las compras del mes**: lo facturado por los proveedores (por la fecha de la factura)
+y lo que se les pagó, por cómo, en el texto y en dos hojas más del Excel, «Compras» y «Pagos a
+proveedores», para el contador.
 Si a alguien le faltó en `VECES_CON_FALTANTE_PARA_AVISAR` días del mes (3) o más, **la campanita
 se lo dice al administrador** («🧮 A ana le faltó plata en 3 día(s) este mes»): una vez es un
 vuelto mal dado; seguido, hay que mirarlo (`cajeros_con_faltantes_seguidos()`). Y **🕐 cuándo se vende**:
@@ -8173,6 +8191,21 @@ con quién la dejó y cuánto suman. Todo queda en el registro de cambios
 (`anotar_sena()`, `senas_para_la_venta()`, `devolver_sena()` y `senas_del_dia()`, en
 `logica/ventas.py`, y `cierre_de_caja()`; lo controlan `pruebas_de_la_caja.py` y
 `pruebas_de_la_sesion.py`).
+
+### 🎟️ El vale a favor
+
+El cliente devuelve algo y no quiere la plata: quiere llevarse otra cosa después (o al negocio
+le conviene no devolver efectivo). Se le daba un papel firmado que nadie controlaba. Ahora, al
+devolver en ↩️ Devoluciones → «🧾 De un cliente», **«🎟️ En un vale a favor»**: la plata no sale
+de la caja y queda un vale con número por lo devuelto. Por dentro es una seña sin producto (con
+tipo «vale»), por la misma forma de pago de la venta: en el cierre del día lo devuelto y el vale
+se compensan, y el cajón no cambia. En 🧾 Ventas, **«🎟️ Usar un vale a favor»** con su número
+(o el teléfono del cliente, si quedó anotado) lo ofrece como una seña; si lleva menos, **lo que
+sobra queda en otro vale** del mismo día —así ningún cierre se mueve— y el aviso dice el número
+nuevo. Una venta puesta a cuenta no da vale (se le acredita a la cuenta), y los vales no van a la
+campanita de las señas sin retirar (`devolver_de_una_venta(..., en_vale=True)` y
+`cerrar_venta()`, en `logica/ventas.py`; lo controlan `pruebas_de_la_caja.py`,
+`pruebas_de_la_sesion.py` y `pruebas_de_las_facturas.py`).
 
 ## 📇 La agenda de clientes de mostrador
 

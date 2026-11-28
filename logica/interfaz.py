@@ -607,10 +607,14 @@ def _clave_de_ayuda(texto):
 # trae herramientas nuevas en pantallas que nadie vuelve a abrir —«🧽 Códigos adivinados» está
 # al fondo de «Limpiar y corregir»—, y una herramienta que no se encuentra no existe. Se cambia
 # VERSION_DE_LO_NUEVO cuando se publica algo que valga contar; «Entendido» lo guarda.
-VERSION_DE_LO_NUEVO = "2026-11-28"
+VERSION_DE_LO_NUEVO = "2026-11-28b"
 # Cuántas mostrar si no se sabe cuántas vio (ver app.py): las de las últimas versiones.
 NOVEDADES_SI_NO_SE_SABE = 6
 LO_NUEVO = (
+    ("🎟️ Vale a favor: al devolver algo, en vez de devolver la plata, un vale con número que se descuenta en otra compra (en Ventas, «🎟️ Usar un vale a favor»). Si lleva menos, lo que sobra queda en otro vale. La caja del día no cambia.", "↩️ Devoluciones → 🧾 De un cliente"),
+    ("🔁 Pagarle a un proveedor con un cheque de un taller: en «💸 Anotar un pago», elegís el cheque de los que hay para depositar y va con su importe. Si el banco lo rechaza, el pago se anula solo.", "🗂️ Administrar → 🚚 Proveedores"),
+    ("📆 Lo que entra y lo que sale, por semana: lo que vence de los talleres, los cheques y lo que vence de los proveedores, con lo que queda y el acumulado.", "💵 Caja → 📋 Ventas y cierre de caja"),
+    ("🚚 El cierre del mes suma las compras (facturas de proveedores) y lo pagado a proveedores, también en el Excel para el contador.", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("📋 El resumen del día ahora dice lo que vence: los cheques que ya se pueden depositar y, a vos, los proveedores para pagar (lo vencido o lo que vence en pocos días).", "💵 Caja → 📋 Ventas y cierre de caja"),
     ("📲 El WhatsApp de «ya llegó» le dice al cliente cuánto dejó de seña, si dejó: así no pregunta si la tiene que volver a pagar.", "📊 Estadísticas → 📌 Para pedir"),
     ("🧮 La campanita te avisa si a un cajero le faltó plata en varios días del mes (una vez es un vuelto mal dado; seguido, hay que mirarlo). En los arqueos por cajero del cierre del mes, cuántos días le faltó.", "💵 Caja → 📋 Ventas y cierre de caja"),

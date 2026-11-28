@@ -448,9 +448,25 @@ COMO_HAGO_DEL_ASISTENTE = (
      "En 🗂️ Administrar → 🚚 Proveedores: «🧾 Anotar una factura de compra» (proveedor, importe "
      "y cuándo vence) y «💸 Anotar un pago» (en efectivo de la caja sale también como salida "
      "de caja). Arriba ves cuánto le debés a cada uno y lo vencido; la campanita avisa lo que "
-     "vence. Solo el administrador. Preguntame «¿Cuánto les debo a los proveedores?» y te digo "
-     "el total y lo vencido.",
+     "vence. Solo el administrador. Con un cheque que te dio un taller, elegí «🔁 Cheque de un "
+     "taller» y el cheque de la lista: sale de los que hay para depositar. Preguntame «¿Cuánto "
+     "les debo a los proveedores?» y te digo el total y lo vencido.",
      "🗂️ Administrar", "admin"),
+    ("flujo", "Ver lo que entra y lo que sale en las próximas semanas",
+     "entra sale flujo fondos alcanza alcanzar semanas proximas viene plata que entra plata que "
+     "sale",
+     "En 💵 Caja, abajo de «📋 Ventas y cierre de caja», tocá «📆 Lo que entra y lo que sale»: "
+     "por semana, lo que vence de los talleres, los cheques por su fecha y lo que vence de los "
+     "proveedores, con lo que queda y el acumulado. Es lo que vence, no lo que van a pagar. Solo "
+     "el administrador.",
+     "💵 Caja", "admin"),
+    ("vale", "Usar un vale a favor en una venta",
+     "vale vales a favor usar descontar credito trae un vale tiene un vale",
+     "El vale sale de una devolución (↩️ Devoluciones → 🧾 De un cliente, «🎟️ En un vale a favor "
+     "(no le devolvés la plata)»). Para usarlo, en 🧾 Ventas tocá «🎟️ Usar un vale a favor», "
+     "escribí su número y tildalo: se descuenta como una seña. Si lleva menos, lo que sobra queda "
+     "en otro vale con número nuevo.",
+     "🧾 Ventas", "empleado"),
     ("lista_taller", "Mandarle a un taller la lista de precios con su descuento",
      "lista de precios lista precios taller mandarle pasarle descuento pdf whatsapp lo que "
      "compra marca",
@@ -661,10 +677,11 @@ COMO_HAGO_DEL_ASISTENTE = (
      "🔧 Garantías", ""),
     ("devolucion_cliente", "Devolver algo que trajo un cliente",
      "devolucion devolver devuelve cliente trajo cambio cambiar garantia reintegro plata "
-     "vuelta fallado",
+     "vuelta fallado vale a favor credito",
      "Buscá la venta, elegí qué devuelve y tocá «↩️ Devolver»: vuelve al stock si se puede "
      "vender, y la plata sale de la caja de hoy. Si la venta tenía factura, hace la nota de "
-     "crédito por lo devuelto.",
+     "crédito por lo devuelto. Si no le devolvés la plata, tildá «🎟️ En un vale a favor (no le "
+     "devolvés la plata)»: queda un vale con número para otra compra.",
      "🧾 De un cliente", ""),
     ("devolucion_deposito", "Devolver al depósito lo que se pidió y no se vendió",
      "devolver deposito no vendio sobro quedo afuera volver stock etiqueta escanear recibir",
