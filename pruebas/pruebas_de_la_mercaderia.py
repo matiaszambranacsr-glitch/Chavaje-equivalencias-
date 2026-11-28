@@ -111,6 +111,22 @@ def probar():
             {str(e1): 3, str(dup_otra): 4})
     _pdf = ns["pdf_de_etiquetas"]([(e1, 3), (dup_otra, 4)])
     cierto("el PDF de las etiquetas", _pdf.startswith(b"%PDF"), _pdf[:20])
+    # Y LA FACTURA DE LO QUE ENTRÓ: el proveedor que más unidades trajo y el importe a costo
+    # (acá ninguno tiene costo: lo dice), y se anota desde ahí.
+    c.execute("UPDATE productos SET precio_costo = 50 WHERE id = ?", (dup_otra,))
+    ns["conn"].commit()
+    esperar("la factura propuesta", ns["factura_sugerida_de_lo_que_entro"]({str(e1): 3,
+                                                                           str(dup_otra): 4}),
+            {"proveedor": "OTRA ENTRA", "importe": 200.0, "sin_costo": 1})
+    _clave_imp = [x.key for x in at.number_input
+                  if (x.key or "").startswith("entro_factura_importe_")]
+    esperar("el botón de la factura, al lado de las etiquetas", len(_clave_imp), 1)
+    if _clave_imp:
+        at.number_input(key=_clave_imp[0]).set_value(1200.0)
+        at.button(key="entro_factura_anotar").click().run()
+        esperar("la factura de lo que entró, anotada",
+                [(k["proveedor"], k["debe"]) for k in ns["cuentas_con_proveedores"]()],
+                [("OTRA ENTRA", 1200.0)])
     at.button(key="entro_etiquetas_listo").click().run()
     cierto("«Listo» lo saca", not at.session_state["entro_ultima"]
            if "entro_ultima" in at.session_state else True)

@@ -1254,6 +1254,39 @@ def lista_de_precios_para_descargar(nombre, filas, descuento):
     return lambda: pdf_de_la_lista_de_precios(nombre, filas, descuento, dia)
 
 
+def factura_sugerida_de_lo_que_entro(ultima):
+    """{proveedor (la marca que más unidades trajo), importe (lo que trajo, a costo), sin_costo
+    (cuántos productos no tienen costo)} de lo recién sumado al stock (`ultima`: {id: cuántas})."""
+    por_marca, importe, sin_costo = {}, 0.0, 0
+    for producto_id, cuantas in (ultima or {}).items():
+        f = c.execute("""SELECT p.precio_costo, m.nombre AS marca FROM productos p
+                         JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                      (int(producto_id),)).fetchone()
+        if not f:
+            continue
+        por_marca[f["marca"]] = por_marca.get(f["marca"], 0) + int(cuantas)
+        if f["precio_costo"] and float(f["precio_costo"]) > 0:
+            importe += float(f["precio_costo"]) * int(cuantas)
+        else:
+            sin_costo += 1
+    marca = max(por_marca, key=por_marca.get) if por_marca else ""
+    return {"proveedor": nombre_de_proveedor(marca), "importe": round(importe, 2),
+            "sin_costo": sin_costo}
+
+
+def anotar_factura_de_lo_que_entro_y_avisar(huella):
+    """«🧾 Anotar la factura» de lo que entró (va como on_click)."""
+    st_ = st.session_state
+    try:
+        ok, texto = anotar_factura_de_proveedor(
+            st_.get(f"entro_factura_proveedor_{huella}"), st_.get(f"entro_factura_importe_{huella}"),
+            st_.get(f"entro_factura_vence_{huella}"), st_.get(f"entro_factura_numero_{huella}"),
+            nota=f"Mercadería que entró el {hoy_aca():%d/%m}")
+    except PermissionError as _err:
+        ok, texto = False, el_error_en_castellano(_err)
+    avisar("success" if ok else "warning", texto)
+
+
 def sumar_lo_que_suele_llevar(producto_id):
     """«➕» de «🔁 Lo que suele llevar» (va como on_click): a la venta, uno más."""
     sumado = sumar_a_la_venta({"ID": int(producto_id)})
@@ -1725,6 +1758,35 @@ def mostrar_entro_mercaderia():
         _u2.button("Listo", key="entro_etiquetas_listo", width="stretch",
                    on_click=lambda: st.session_state.pop("entro_ultima", None),
                    help="Ya las imprimí: sacar el botón.")
+        # Y LA FACTURA DE LO QUE ENTRÓ (ver «LO QUE SE LE DEBE A CADA PROVEEDOR» en
+        # logica/ventas.py): con el proveedor y el importe a costo ya propuestos.
+        if es_admin():
+            _sug = factura_sugerida_de_lo_que_entro(_ultima)
+            _huella_f = abs(hash(tuple(sorted(_ultima.items())))) % 10 ** 8
+            with st.popover("🧾 Anotar la factura de lo que entró", key="pop_entro_factura",
+                            width="stretch"):
+                _conocidos_f = proveedores_conocidos()
+                st.selectbox("Proveedor:", _conocidos_f,
+                             index=(_conocidos_f.index(_sug["proveedor"])
+                                    if _sug["proveedor"] in _conocidos_f else None),
+                             accept_new_options=True, placeholder="Elegí o escribí uno nuevo",
+                             key=f"entro_factura_proveedor_{_huella_f}")
+                _ef1, _ef2 = cols([1, 1])
+                _ef1.number_input("Importe ($):", min_value=0.0, step=1000.0,
+                                  value=_sug["importe"] or None,
+                                  key=f"entro_factura_importe_{_huella_f}",
+                                  help="Propuesto con el costo de cada cosa; revisalo contra la "
+                                       "factura.")
+                _ef2.date_input("Vence:", value=hoy_aca() + timedelta(
+                    days=DIAS_DE_PLAZO_DE_UN_PROVEEDOR), format="DD/MM/YYYY",
+                    key=f"entro_factura_vence_{_huella_f}")
+                st.text_input("N.º de factura:", key=f"entro_factura_numero_{_huella_f}")
+                if _sug["sin_costo"]:
+                    st.caption(f"{miles(_sug['sin_costo'])} producto(s) sin costo cargado: el "
+                               "importe propuesto no los tiene en cuenta.")
+                st.button("🧾 Anotar la factura", key="entro_factura_anotar", type="primary",
+                          width="stretch", on_click=anotar_factura_de_lo_que_entro_y_avisar,
+                          args=(_huella_f,))
 
     # LA LISTA, PARA REVISAR ANTES DE SUMAR.
     if not lista:

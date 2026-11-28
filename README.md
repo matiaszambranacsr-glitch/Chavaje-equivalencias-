@@ -7967,6 +7967,12 @@ administrador):
   `DIAS_PARA_AVISAR_UNA_FACTURA` días (3). Los dos plazos se cambian en «⏱️ Los tiempos de la
   página».
 
+Y desde el depósito: después de «✅ Sumar al stock» en «📦 Entró mercadería», al lado de las
+etiquetas sale **«🧾 Anotar la factura de lo que entró»** (al administrador), con el proveedor
+—la marca que más unidades trajo— y el importe a costo ya propuestos (dice cuántos productos no
+tienen costo, que no entran en la cuenta), para revisarlo contra la factura y anotarlo sin
+escribir todo de nuevo (`factura_sugerida_de_lo_que_entro()`, en `logica/deposito.py`).
+
 (`anotar_factura_de_proveedor()`, `anotar_pago_a_proveedor()`, `cuentas_con_proveedores()`,
 `movimientos_con_el_proveedor()` y `anular_movimiento_de_proveedor()`, en `logica/ventas.py`;
 lo controlan `pruebas_de_la_caja.py` y `pruebas_de_la_sesion.py`.)
