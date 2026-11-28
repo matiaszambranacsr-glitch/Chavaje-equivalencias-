@@ -177,14 +177,22 @@ if pagina == PAGINAS[10]:
                                 help="La venta tiene la " + nombre_del_comprobante(
                                     _fact_dev["tipo"], _fact_dev["punto_de_venta"],
                                     _fact_dev["numero"]) + ": la nota anula esa parte en ARCA.")
+                        # EL VALE A FAVOR (ver esa sección en logica/ventas.py): la plata queda en
+                        # el cajón y el cliente se lleva otra cosa después.
+                        _en_vale = (st.checkbox(
+                            "🎟️ En un vale a favor (no le devolvés la plata)", key="dev_en_vale",
+                            help="Queda un vale con número por lo devuelto: en otra compra se "
+                                 "descuenta escribiendo ese número (o su teléfono). Si lleva "
+                                 "menos, lo que sobra queda en otro vale.")
+                                    if _v.get("forma_de_pago") != A_CUENTA else False)
                         st.caption("Vuelve al stock salvo que no se pueda volver a vender "
                                    "(fallada, dañada o modificada), y la plata sale de la caja "
-                                   "de hoy. Si se vendió en lugar de otro código y no le iba, la "
-                                   "app lo aprende.")
+                                   "de hoy (o queda en el vale). Si se vendió en lugar de otro "
+                                   "código y no le iba, la app lo aprende.")
                         _devolver = st.form_submit_button("↩️ Devolver", type="primary")
                     if _devolver:
                         _ok_dev, _texto_dev = devolver_de_una_venta(_it_dev, _cant_dev, _mot_dev,
-                                                                   _det_dev)
+                                                                   _det_dev, en_vale=_en_vale)
                         if _ok_dev:
                             avisar("success", f"↩️ {_texto_dev}")
                             if _con_nc:

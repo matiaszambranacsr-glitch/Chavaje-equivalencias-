@@ -164,9 +164,13 @@ def _dato_del_objetivo(contexto):
 def _dato_de_las_senas(contexto):
     """Las señas que esperan que el cliente retire (las de «🔖 Señas» en la caja): cuántas, la
     plata y la más vieja. El nombre del cliente sí (es personal); el teléfono, nunca."""
-    activas = senas_activas()
+    todas = senas_activas()
+    activas = [s for s in todas if s["tipo"] != "vale"]
+    vales = [s for s in todas if s["tipo"] == "vale"]
+    de_los_vales = (f" Además, **{miles(len(vales))}** vale(s) a favor sin usar, por "
+                    f"**{_asis_plata(sum(s['importe'] or 0 for s in vales))}**." if vales else "")
     if not activas:
-        return _asis_dato("✅ No hay señas esperando que el cliente retire.",
+        return _asis_dato("✅ No hay señas esperando que el cliente retire." + de_los_vales,
                           _asis_ir_a(_CAJA, contexto), "senas")
     vieja, viejas = activas[0], senas_sin_retirar()
     texto = (f"🔖 Hay **{miles(len(activas))}** seña(s) esperando que el cliente retire, por "
@@ -174,7 +178,7 @@ def _dato_de_las_senas(contexto):
              f"{_asis_nombre(vieja['que'])}"
              + (f", de {_asis_nombre(vieja['cliente'])}" if vieja.get("cliente") else "") + "."
              + (f" **{miles(len(viejas))}** hace más de {DIAS_PARA_AVISAR_UNA_SENA} días: "
-                "avisales que pasen a buscarlo." if viejas else ""))
+                "avisales que pasen a buscarlo." if viejas else "") + de_los_vales)
     return _asis_dato(texto, _asis_ir_a(_CAJA, contexto), "senas")
 
 

@@ -3221,6 +3221,10 @@ def _esquema_ventas(c):
         resuelta_por TEXT
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_senas_estado ON senas(estado)")
+    # EL VALE A FAVOR (ver «EL VALE A FAVOR» en logica/ventas.py): una seña sin producto que sale
+    # de una devolución. Sin tipo, es una seña.
+    if "tipo" not in [f[1] for f in c.execute("PRAGMA table_info(senas)")]:
+        c.execute("ALTER TABLE senas ADD COLUMN tipo TEXT")
     c.execute("""CREATE TABLE IF NOT EXISTS aperturas_de_caja (
         dia TEXT PRIMARY KEY,
         importe REAL NOT NULL,

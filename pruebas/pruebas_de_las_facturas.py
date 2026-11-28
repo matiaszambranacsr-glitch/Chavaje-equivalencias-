@@ -826,6 +826,8 @@ def probar(L):
         at.selectbox(key="venta_dev_sel").set_value(v7).run()
         esperar("la casilla de la nota de crédito, tildada",
                 [x.value for x in at.checkbox if "nota de crédito" in x.label], [True])
+        esperar("y la del vale a favor, sin tildar (ver «EL VALE A FAVOR»)",
+                [x.value for x in at.checkbox if x.key == "dev_en_vale"], [False])
         [b for b in at.button if "Devolver" in b.label and b.type == "primary"
          or getattr(b, "label", "") == "↩️ Devolver"][0].click().run()
         esperar("devuelto uno: la nota de crédito por ese, y la factura con la otra mitad",

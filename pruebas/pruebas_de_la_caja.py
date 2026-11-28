@@ -805,6 +805,43 @@ def probar(L):
     esperar("en el resumen del día",
             "🔖 Señas: entraron $" in ns["resumen_del_dia"](), True)
     esperar("las que esperan: la de la óptica", [x["id"] for x in ns["senas_activas"]()], [s2])
+    # EL VALE A FAVOR: lo devuelto queda en un vale (la caja del día no cambia), se usa con su
+    # número o el teléfono, y si lleva menos lo que sobra queda en otro vale del mismo día.
+    v_vale, _ = ns["cerrar_venta"]([item("C1", 3)], "Rosa", "Efectivo", telefono="11 2222-3333")
+    _it_vale = uno("SELECT id FROM ventas_items WHERE venta_id = ?", v_vale)
+    _c6, _ef6 = ns["cierre_de_caja"](), ns["efectivo_esperado"]()
+    _ok_vale, _txt_vale = ns["devolver_de_una_venta"](_it_vale, 3, "medida", en_vale=True)
+    vale = uno("SELECT MAX(id) FROM senas WHERE tipo = 'vale'")
+    _c7 = ns["cierre_de_caja"]()
+    esperar("devuelto en un vale: la caja del día no cambia (lo devuelto y el vale se compensan)",
+            (_ok_vale, f"vale a favor N.º {vale}" in _txt_vale,
+             round(_c7["total"] - _c6["total"], 2),
+             round(ns["efectivo_esperado"]() - _ef6, 2),
+             round(_c7["total_devuelto"] - _c6["total_devuelto"], 2),
+             tuple(c.execute("SELECT cliente, telefono, importe, forma_de_pago, estado FROM senas "
+                             "WHERE id = ?", (vale,)).fetchone())),
+            (True, True, 0.0, 0.0, 999.0, ("Rosa", "11 2222-3333", 999.0, "Efectivo", "activa")))
+    esperar("se ofrece por su número o su teléfono; no va a la campanita de las señas",
+            ([x["id"] for x in ns["senas_para_la_venta"]([], vale=f"#{vale}")],
+             vale in [x["id"] for x in ns["senas_para_la_venta"]([], "1122223333")],
+             vale in [x["id"] for x in ns["senas_sin_retirar"](-1)],
+             s2 in [x["id"] for x in ns["senas_sin_retirar"](-1)]),
+            ([vale], True, False, True))
+    v_usa, _avisos_vale = ns["cerrar_venta"]([item("C1")], "Rosa", "Efectivo", senas=[vale])
+    vale_resto = uno("SELECT MAX(id) FROM senas WHERE tipo = 'vale'")
+    _c8 = ns["cierre_de_caja"]()
+    esperar("lleva menos: lo que sobra queda en otro vale, del mismo día, y la caja no cambia",
+            (uno("SELECT sena FROM ventas WHERE id = ?", v_usa),
+             tuple(c.execute("SELECT importe, estado FROM senas WHERE id = ?", (vale,)).fetchone()),
+             tuple(c.execute("SELECT importe, estado, tipo FROM senas WHERE id = ?",
+                             (vale_resto,)).fetchone()),
+             uno("SELECT fecha FROM senas WHERE id = ?", vale_resto)
+             == uno("SELECT fecha FROM senas WHERE id = ?", vale),
+             [x for x in _avisos_vale if "Del vale sobraron $666" in x] != [],
+             round(_c8["total"] - _c7["total"], 2)),
+            (333.0, (333.0, "usada"), (666.0, "activa", "vale"), True, True, 0.0))
+    esperar("una seña (no un vale) más grande que la venta sigue sin poderse",
+            ns["senas_para_la_venta"]([], vale=f"{s2}"), [])
     # EL CIERRE DEL MES: los cierres de cada día juntos, las salidas, los arqueos por cajero (el
     # último de cada día) y cuándo se vende. Febrero de 2025 tiene las ventas de la prueba del
     # objetivo: la del 5 (las 12 de acá), una anulada, y la del 28 a las 23 de acá.

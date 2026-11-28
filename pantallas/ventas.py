@@ -380,17 +380,29 @@ if pagina == PAGINAS[9]:
             # o el teléfono es el de la seña, se ofrece descontarla. Sin tildar por defecto: dos
             # clientes pueden haber encargado lo mismo.
             _descontar_vta = []
+            # EL VALE A FAVOR (ver esa sección en logica/ventas.py): con su número se ofrece como
+            # una seña.
+            with st.popover("🎟️ Usar un vale a favor", key="pop_venta_vale"):
+                st.text_input("N.º del vale:", key="venta_vale_numero", placeholder="Ej: 125")
             for _s in senas_para_la_venta([x["producto_id"] for x in venta_items],
-                                          st.session_state.get("venta_telefono")):
-                if st.checkbox(f"🔖 Descontar la seña de ${miles(_s['importe'], 0)} de "
-                               f"{_s['cliente'] or _s['telefono']}: {_s['que']} (del "
-                               f"{dia_y_mes_de_aca(_s['fecha'])})", key=f"venta_sena_{_s['id']}"):
+                                          st.session_state.get("venta_telefono"),
+                                          st.session_state.get("venta_vale_numero")):
+                if st.checkbox((f"🎟️ Usar el vale N.º {_s['id']} de ${miles(_s['importe'], 0)}"
+                                + (f" de {_s['cliente'] or _s['telefono']}"
+                                   if _s["cliente"] or _s["telefono"] else "")
+                                if _s["tipo"] == "vale" else
+                                f"🔖 Descontar la seña de ${miles(_s['importe'], 0)} de "
+                                f"{_s['cliente'] or _s['telefono']}: {_s['que']}")
+                               + f" (del {dia_y_mes_de_aca(_s['fecha'])})",
+                               key=f"venta_sena_{_s['id']}"):
                     _descontar_vta.append(_s["id"])
             _sena_vta = sum(s["importe"] for s in senas_activas() if s["id"] in _descontar_vta)
             if _sena_vta:
                 st.markdown(f"**A cobrar: \\${miles(max(0.0, _total_vta - _sena_vta), 0)}** "
                             f"(\\${miles(_total_vta, 0)} menos \\${miles(_sena_vta, 0)} de "
-                            "seña)")
+                            "seña o vale)"
+                            + (f" — del vale sobran \\${miles(_sena_vta - _total_vta, 0)}, que "
+                               "quedan en otro vale" if _sena_vta > _total_vta else ""))
             _p1, _p3, _p2 = cols([1, 1, 1])
             _cliente_vta = _p1.text_input("Cliente (opcional):", key="venta_cliente")
             # EL TELÉFONO DEL CLIENTE (ver «LA AGENDA DE CLIENTES DE MOSTRADOR»): con él queda en
@@ -505,6 +517,7 @@ if pagina == PAGINAS[9]:
                     # es otro (con el teléfono de antes, la compra iba a la agenda del anterior).
                     st.session_state.pop("venta_cliente", None)
                     st.session_state.pop("venta_telefono", None)
+                    st.session_state.pop("venta_vale_numero", None)
                     st.rerun()
 
     # DEVOLVER ALGO DE UNA VENTA: en su propia pantalla, «↩️ Devoluciones». Acá solo el botón.

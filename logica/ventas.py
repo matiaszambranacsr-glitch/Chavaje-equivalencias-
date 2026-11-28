@@ -467,16 +467,33 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=
         sena = 0.0
         if sena_ids:
             filas_sena = c.execute(
-                f"SELECT id, importe FROM senas WHERE estado = 'activa' AND id IN "
+                f"SELECT id, importe, tipo FROM senas WHERE estado = 'activa' AND id IN "
                 f"({','.join('?' * len(sena_ids))})", sena_ids).fetchall()
             if len(filas_sena) != len(sena_ids):
                 raise ValueError("Una de las señas ya no está esperando (¿la descontó otro o se "
                                  "devolvió?).")
             sena = round(sum(float(f["importe"]) for f in filas_sena), 2)
-            if sena > total:
+            sobra = round(sena - total, 2)
+            # Un vale se puede usar en parte (ver «EL VALE A FAVOR»): lo que sobra queda en otro
+            # vale, con el mismo día del primero —así ningún cierre cambia: ese día entró lo
+            # mismo, y hoy no entra nada nuevo—. Una seña, no: es por lo que encargó.
+            vale = next((f for f in filas_sena
+                         if f["tipo"] == "vale" and float(f["importe"]) >= sobra), None)
+            if sobra > 0 and not vale:
                 raise ValueError(f"La seña (${miles(sena, 0)}) es más que la venta "
                                  f"(${miles(total, 0)}): sumá lo que se lleva, o devolvé la "
                                  "diferencia desde la caja.")
+            if sobra > 0:
+                c.execute("UPDATE senas SET importe = ? WHERE id = ?",
+                          (round(float(vale["importe"]) - sobra, 2), vale["id"]))
+                c.execute("""INSERT INTO senas (cliente, telefono, que, importe, forma_de_pago,
+                                                usuario, fecha, tipo)
+                             SELECT cliente, telefono, substr(que, 1, 100) || ' (lo que sobró)',
+                                    ?, forma_de_pago, usuario, fecha, 'vale'
+                             FROM senas WHERE id = ?""", (sobra, vale["id"]))
+                avisos.append(f"🎟️ Del vale sobraron ${miles(sobra, 0)}: quedan en el vale N.º "
+                              f"{c.lastrowid}. Anotáselo en el comprobante.")
+                sena = total
         c.execute("""INSERT INTO ventas (usuario, cliente, forma_de_pago, total, cobrada,
                                          mecanico_id, total_de_lista, cliente_telefono, sena)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -1460,9 +1477,10 @@ def buscar_ventas(texto, dias=180, tope=20):
     return [una_venta(venta_id) for (venta_id,) in [tuple(f) for f in c.fetchall()]]
 
 
-def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
+def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle="", en_vale=False):
     """Devuelve `cantidad` de un ítem de una venta, por `motivo` (uno de
-    MOTIVOS_DE_DEVOLUCION). (ok, texto). Ver «DEVOLVER ALGO DE UNA VENTA»."""
+    MOTIVOS_DE_DEVOLUCION). (ok, texto). Ver «DEVOLVER ALGO DE UNA VENTA». `en_vale`: la plata
+    no sale de la caja, queda en un vale a favor (ver «EL VALE A FAVOR»)."""
     exigir_nivel("empleado", "devolver algo de una venta")
     if motivo not in MOTIVOS_DE_DEVOLUCION:
         return False, "Elegí por qué volvió."
@@ -1473,7 +1491,7 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
     c.execute("""SELECT vi.id, vi.venta_id, vi.producto_id, vi.codigo, vi.marca, vi.cantidad,
                         vi.precio, vi.pedido, COALESCE(vi.devuelto, 0) AS devuelto, v.anulada,
                         COALESCE(v.cobrada, 1) AS cobrada, v.movimiento_id, v.mecanico_id,
-                        p.codigo_clean, p.stock
+                        v.cliente, v.cliente_telefono, v.forma_de_pago, p.codigo_clean, p.stock
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
                  LEFT JOIN productos p ON p.id = vi.producto_id WHERE vi.id = ?""",
               (venta_item_id,))
@@ -1485,6 +1503,9 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
     if not it["cobrada"]:
         return False, ("Esa venta todavía no se cobró: está esperando en la caja. Si no la va a "
                        "pagar, que la anule un administrador.")
+    if en_vale and it["movimiento_id"]:
+        return False, ("Esa venta se puso a cuenta: lo devuelto se le acredita a la cuenta, no "
+                       "hace falta un vale.")
     queda = it["cantidad"] - it["devuelto"]
     if not 1 <= cantidad <= queda:
         return False, (f"De {it['marca']} {it['codigo']} se puede devolver de 1 a {queda}."
@@ -1515,6 +1536,18 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
                       (it["mecanico_id"], f"Devolución de la venta #{it['venta_id']}: "
                                           f"{cantidad}× {it['marca']} {it['codigo']}",
                        -importe, obtener_usuario_actual()))
+        # EL VALE A FAVOR: la plata se queda en el cajón. Entra como una seña, por la misma
+        # forma de pago de la venta: en el cierre del día compensa justo lo devuelto.
+        vale_id = None
+        if en_vale:
+            c.execute("""INSERT INTO senas (cliente, telefono, que, importe, forma_de_pago,
+                                            usuario, tipo)
+                         VALUES (?, ?, ?, ?, ?, ?, 'vale')""",
+                      (it["cliente"] or None, it["cliente_telefono"] or None,
+                       (f"🎟️ Vale por lo devuelto de la venta #{it['venta_id']}: {cantidad}× "
+                        f"{it['marca']} {it['codigo']}")[:120], importe,
+                       it["forma_de_pago"] or "Sin decir", obtener_usuario_actual()))
+            vale_id = c.lastrowid
         if entero and it["producto_id"] is not None:
             # No se le puso al auto, y no se vendió: sale de la ficha y de lo aprendido.
             c.execute("DELETE FROM historial_piezas WHERE venta_id = ? AND producto_id = ?",
@@ -1533,6 +1566,8 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
             anotar_error("devolver_de_una_venta", _err)
     return True, (f"Devuelto: {cantidad} × {it['marca']} {it['codigo']} (${miles(importe, 0)}"
                   + (" se le acredita a la cuenta)" if it["movimiento_id"] else
+                     f" quedan en el 🎟️ vale a favor N.º {vale_id}: no sale plata de la caja; "
+                     "anotáselo en el comprobante)" if vale_id else
                      " sale de la caja de hoy)")
                   + ("" if al_stock or it["stock"] is None else
                      ", y no vuelve al stock: no se puede volver a vender")
@@ -3439,6 +3474,14 @@ SENA_MAXIMA = SALIDA_DE_CAJA_MAXIMA
 DIAS_PARA_AVISAR_UNA_SENA = 30
 ESTADOS_DE_LA_SENA = {"activa": "🔖 Esperando que retire", "usada": "✅ Descontada al retirar",
                       "reintegrada": "↩️ Devuelta"}
+# EL VALE A FAVOR: el cliente devuelve algo y no quiere la plata, quiere llevarse otra cosa
+# después (o el negocio prefiere no devolver efectivo). Se le daba un papel firmado que nadie
+# controlaba: ni cuánto era, ni si ya se había usado. Ahora, al devolver (↩️ Devoluciones → «🧾
+# De un cliente»), «🎟️ En un vale a favor»: la plata no sale de la caja, queda un vale con número
+# —es una seña sin producto, con tipo «vale»— por la misma forma de pago de la venta, así el
+# cierre del día no cambia (lo devuelto y el vale se compensan). En la venta, con el número del
+# vale (o el teléfono del cliente) se descuenta como una seña; si lleva menos, lo que sobra queda
+# en otro vale. No va a la campanita de las señas sin retirar.
 
 
 def anotar_sena(cliente, telefono, que, importe, forma_de_pago, producto_id=None,
@@ -3502,25 +3545,31 @@ def anotar_sena(cliente, telefono, que, importe, forma_de_pago, producto_id=None
 def senas_activas():
     """[dict] las que esperan que el cliente retire, la más vieja primero."""
     c.execute("""SELECT id, cliente, telefono, que, producto_id, importe, forma_de_pago,
-                        usuario, fecha
+                        usuario, fecha, COALESCE(tipo, 'sena') AS tipo
                  FROM senas WHERE estado = 'activa' ORDER BY id""")
     return [dict(f) for f in c.fetchall()]
 
 
 def senas_sin_retirar(dias=None):
-    """Las que esperan hace más de `dias` (DIAS_PARA_AVISAR_UNA_SENA si no se dice) días."""
+    """Las que esperan hace más de `dias` (DIAS_PARA_AVISAR_UNA_SENA si no se dice) días. Los
+    vales no: no esperan que retire nada, el cliente los usa cuando vuelve."""
     hasta = (datetime.now() - timedelta(days=int(dias or DIAS_PARA_AVISAR_UNA_SENA))
              ).strftime("%Y-%m-%d %H:%M:%S")
-    return [s for s in senas_activas() if (s["fecha"] or "") < hasta]
+    return [s for s in senas_activas() if (s["fecha"] or "") < hasta and s["tipo"] != "vale"]
 
 
-def senas_para_la_venta(producto_ids, telefono=""):
-    """Las señas que se pueden descontar en esta venta: las de un producto que lleva, o las del
-    mismo teléfono (ver clave_del_telefono())."""
+def senas_para_la_venta(producto_ids, telefono="", vale=None):
+    """Las señas que se pueden descontar en esta venta: las de un producto que lleva, las del
+    mismo teléfono (ver clave_del_telefono()) y el vale a favor de ese número."""
     ids, clave = {int(p) for p in producto_ids or () if p}, clave_del_telefono(telefono)
+    try:
+        vale = int(str(vale or "").strip().lstrip("#Nº.º ") or 0)
+    except ValueError:
+        vale = 0
     return [s for s in senas_activas()
             if (s["producto_id"] and s["producto_id"] in ids)
-            or (clave and clave_del_telefono(s["telefono"]) == clave)]
+            or (clave and clave_del_telefono(s["telefono"]) == clave)
+            or (vale and s["tipo"] == "vale" and s["id"] == vale)]
 
 
 def senas_del_dia(dia=None):

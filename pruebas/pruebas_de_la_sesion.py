@@ -1295,6 +1295,18 @@ def probar():
             any("A cobrar: \\$1.300" in m.value for m in vta.markdown), True)
     vta.checkbox(key=f"venta_sena_{_sena_v}").uncheck().run()
     ns["devolver_sena"](_sena_v)
+    # EL VALE A FAVOR: con su número, se ofrece como una seña.
+    c.execute("INSERT INTO senas (cliente, que, importe, forma_de_pago, tipo) "
+              "VALUES ('Rosa', 'vale', 400, 'Efectivo', 'vale')")
+    _vale_v = c.lastrowid
+    conn.commit()
+    vta.text_input(key="venta_vale_numero").set_value(str(_vale_v)).run()
+    esperar("el vale, por su número",
+            [x.label.split(" (del")[0] for x in vta.checkbox if x.key == f"venta_sena_{_vale_v}"],
+            [f"🎟️ Usar el vale N.º {_vale_v} de $400 de Rosa"])
+    vta.text_input(key="venta_vale_numero").set_value("").run()
+    c.execute("DELETE FROM senas WHERE id = ?", (_vale_v,))
+    conn.commit()
     vta.session_state["venta_items"] = []
     vta.run()
     # CORREGIR UN COBRO desde la caja (ver esa sección en logica/ventas.py): la cajera marcó
