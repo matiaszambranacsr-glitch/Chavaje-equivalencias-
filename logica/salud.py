@@ -549,7 +549,7 @@ def diagnostico_de_salud():
                            f"este mes (${miles(_k['Faltó'], 0)})",
                   "Puede ser un vuelto mal dado, una venta cobrada con otra forma de pago o una "
                   "salida sin anotar. En «📅 Cierre del mes» están los arqueos por cajero.",
-                  miga_hasta("Ventas y cierre de caja"), solo_admin=True)
+                  miga_hasta("Caja"), solo_admin=True)
     except Exception as _err:
         anotar_error("diagnostico_de_salud/faltantes", _err)
 
